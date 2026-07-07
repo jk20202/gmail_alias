@@ -371,7 +371,10 @@ async function api(url, options = {}) {
     if (resp.status === 401) {
       sessionToken = '';
       localStorage.removeItem('sessionToken');
-      showLoginView();
+      // 仅当当前在应用界面时才切回登录页，避免登录页上的公开请求触发递归
+      if (document.getElementById('appView').classList.contains('active')) {
+        showLoginView();
+      }
       return null;
     }
     return data;
@@ -429,10 +432,14 @@ function showRegister() {
 }
 
 async function checkRegistrationAllowed() {
-  const data = await api('/api/admin/settings');
-  if (data && data.code === 0) {
-    document.getElementById('registerLink').style.display = data.data.allow_registration ? 'block' : 'none';
-  }
+  // 用裸 fetch，避免走 api() 的 401 处理器导致 showLoginView 递归
+  try {
+    const resp = await fetch('/api/admin/settings');
+    const data = await resp.json();
+    if (data && data.code === 0) {
+      document.getElementById('registerLink').style.display = data.data.allow_registration ? 'block' : 'none';
+    }
+  } catch (e) {}
 }
 
 function showLoginAlert(msg) {

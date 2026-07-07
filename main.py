@@ -213,7 +213,8 @@ async def admin_update_settings(req: SettingsUpdate, admin=Depends(require_admin
 
 
 @app.get("/api/admin/settings")
-async def admin_get_settings(admin=Depends(require_admin)):
+async def get_settings():
+    # 公开接口：仅返回注册开关布尔值，供登录页判断是否展示注册入口
     return {"code": 0, "msg": "success", "data": {"allow_registration": user_store.get_registration_allowed()}}
 
 
