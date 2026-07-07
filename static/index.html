@@ -10,9 +10,12 @@
   --primary-hover: #4338ca;
   --primary-light: #eef2ff;
   --success: #16a34a;
+  --success-light: #dcfce7;
   --danger: #dc2626;
   --danger-hover: #b91c1c;
+  --danger-light: #fee2e2;
   --warning: #d97706;
+  --warning-light: #fef3c7;
   --bg: #f5f7fb;
   --card-bg: #ffffff;
   --border: #e5e7eb;
@@ -35,52 +38,51 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Login */
 .login-wrap {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 20px;
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px;
 }
 .login-card {
-  background: var(--card-bg);
-  border-radius: 12px;
-  box-shadow: var(--shadow-lg);
-  padding: 40px;
-  width: 100%;
-  max-width: 380px;
+  background: var(--card-bg); border-radius: 12px; box-shadow: var(--shadow-lg);
+  padding: 40px; width: 100%; max-width: 380px;
 }
-.login-card h1 { font-size: 22px; text-align: center; margin-bottom: 8px; color: var(--text); }
-.login-card .subtitle { text-align: center; color: var(--text-light); margin-bottom: 28px; font-size: 13px; }
 .login-card .logo {
   width: 56px; height: 56px; margin: 0 auto 16px;
   background: var(--primary); border-radius: 14px;
   display: flex; align-items: center; justify-content: center;
   color: #fff; font-size: 28px; font-weight: 700;
 }
+.login-card h1 { font-size: 22px; text-align: center; margin-bottom: 8px; }
+.login-card .subtitle { text-align: center; color: var(--text-light); margin-bottom: 28px; font-size: 13px; }
 .login-card .field { margin-bottom: 18px; }
-.login-card label { display: block; margin-bottom: 6px; font-weight: 500; font-size: 13px; color: var(--text); }
+.login-card label { display: block; margin-bottom: 6px; font-weight: 500; font-size: 13px; }
 .login-card input {
   width: 100%; padding: 10px 12px; border: 1px solid var(--border);
-  border-radius: var(--radius-sm); font-size: 14px;
-  transition: border-color 0.15s, box-shadow 0.15s; background: #fff;
+  border-radius: var(--radius-sm); font-size: 14px; background: #fff;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-.login-card input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1); }
-.login-card .hint { margin-top: 6px; font-size: 12px; color: var(--text-lighter); }
+.login-card input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,70,229,0.1); }
+.login-card .switch-link { text-align: center; margin-top: 16px; font-size: 13px; color: var(--text-light); }
+.login-card .switch-link a { color: var(--primary); cursor: pointer; text-decoration: none; }
+.login-card .switch-link a:hover { text-decoration: underline; }
+.login-card .alert { padding: 10px 12px; border-radius: var(--radius-sm); margin-bottom: 16px; font-size: 13px; display: none; }
+.login-card .alert.show { display: block; }
+.login-card .alert-error { background: var(--danger-light); color: var(--danger); }
 
+/* Buttons */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   padding: 9px 16px; border: none; border-radius: var(--radius-sm);
   font-size: 14px; font-weight: 500; cursor: pointer;
   transition: background 0.15s, border-color 0.15s, opacity 0.15s;
-  background: var(--primary); color: #fff; text-decoration: none; white-space: nowrap;
+  background: var(--primary); color: #fff; white-space: nowrap;
 }
 .btn:hover { background: var(--primary-hover); }
 .btn:disabled { opacity: 0.55; cursor: not-allowed; }
 .btn-block { width: 100%; }
 .btn-secondary { background: #fff; color: var(--text); border: 1px solid var(--border); }
-.btn-secondary:hover { background: #f9fafb; border-color: #d1d5db; }
+.btn-secondary:hover { background: #f9fafb; }
 .btn-danger { background: var(--danger); }
 .btn-danger:hover { background: var(--danger-hover); }
 .btn-success { background: var(--success); }
@@ -89,883 +91,1025 @@ body {
 .btn-link { background: none; border: none; color: var(--primary); padding: 4px 8px; font-size: 13px; cursor: pointer; }
 .btn-link:hover { text-decoration: underline; }
 
+/* App layout */
 .app { display: none; }
 .app.active { display: block; }
-.app-header { background: var(--card-bg); border-bottom: 1px solid var(--border); padding: 0 24px; position: sticky; top: 0; z-index: 10; }
-.app-header-inner { max-width: 1400px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; height: 56px; }
+.app-header {
+  background: var(--card-bg); border-bottom: 1px solid var(--border);
+  padding: 0 24px; position: sticky; top: 0; z-index: 10;
+}
+.app-header-inner {
+  max-width: 1400px; margin: 0 auto; display: flex; align-items: center;
+  justify-content: space-between; height: 56px;
+}
 .app-title { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; }
-.app-title .dot { width: 28px; height: 28px; background: var(--primary); border-radius: 7px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 14px; }
+.app-title .dot {
+  width: 28px; height: 28px; background: var(--primary); border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-weight: 700; font-size: 14px;
+}
+.app-header .user-info { display: flex; align-items: center; gap: 12px; font-size: 13px; }
+.app-header .badge {
+  padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600;
+}
+.app-header .badge-admin { background: var(--primary-light); color: var(--primary); }
+.app-header .badge-user { background: var(--success-light); color: var(--success); }
 
-.tabs { display: flex; gap: 4px; background: var(--card-bg); border-bottom: 1px solid var(--border); padding: 0 24px; position: sticky; top: 56px; z-index: 9; }
+/* Tabs */
+.tabs {
+  display: flex; gap: 4px; background: var(--card-bg);
+  border-bottom: 1px solid var(--border); padding: 0 24px;
+  position: sticky; top: 56px; z-index: 9;
+}
 .tabs-inner { max-width: 1400px; margin: 0 auto; display: flex; gap: 4px; }
 .tab {
-  padding: 12px 18px; background: none; border: none; cursor: pointer;
+  padding: 10px 16px; border: none; background: none; cursor: pointer;
   font-size: 14px; color: var(--text-light); border-bottom: 2px solid transparent;
-  transition: color 0.15s, border-color 0.15s; font-weight: 500;
+  transition: color 0.15s, border-color 0.15s;
 }
 .tab:hover { color: var(--text); }
-.tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+.tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 500; }
 
-.container { max-width: 1400px; margin: 0 auto; padding: 24px; }
-.panel { display: none; }
-.panel.active { display: block; }
+/* Content */
+.content { max-width: 1400px; margin: 0 auto; padding: 24px; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
 
-.card { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 20px; }
-.card-header { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
-.card-header h2 { font-size: 15px; font-weight: 600; }
-.card-body { padding: 20px; }
-
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-table th, table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
-table th { background: #f9fafb; font-weight: 600; color: var(--text-light); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; position: sticky; top: 0; }
-table tbody tr:hover { background: #f9fafb; }
-table tbody tr:last-child td { border-bottom: none; }
-.empty-row { text-align: center; color: var(--text-lighter); padding: 40px 12px !important; }
-.token-mono { font-family: "SF Mono", Monaco, Consolas, monospace; font-size: 12px; color: var(--text-light); }
-.label-tag { display: inline-block; padding: 2px 8px; background: var(--primary-light); color: var(--primary); border-radius: 10px; font-size: 12px; font-weight: 500; }
-.row-actions { display: flex; gap: 4px; flex-wrap: wrap; }
-
-.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
-.form-field { margin-bottom: 0; }
-.form-field label { display: block; margin-bottom: 5px; font-size: 13px; font-weight: 500; color: var(--text); }
-.form-field input, .form-field select, .form-field textarea {
-  width: 100%; padding: 8px 10px; border: 1px solid var(--border);
-  border-radius: var(--radius-sm); font-size: 13px; background: #fff;
-  transition: border-color 0.15s, box-shadow 0.15s; font-family: inherit;
+/* Cards */
+.card {
+  background: var(--card-bg); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 20px; margin-bottom: 16px;
 }
-.form-field input:focus, .form-field select:focus, .form-field textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1); }
-.form-field .hint { margin-top: 4px; font-size: 11px; color: var(--text-lighter); }
-.form-field textarea { resize: vertical; min-height: 60px; font-family: "SF Mono", Monaco, Consolas, monospace; }
-.checkbox-field { display: flex; align-items: center; gap: 6px; height: 36px; }
+.card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.card-title { font-size: 16px; font-weight: 600; }
 
-.filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 16px; }
-.filter-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; align-items: center; }
-
-.results-table { font-size: 13px; }
-.results-table .subject-cell { max-width: 280px; }
-.results-table .from-cell { max-width: 200px; word-break: break-word; }
-.results-table .to-cell { max-width: 200px; word-break: break-word; }
-.results-table .body-preview {
-  max-width: 320px; color: var(--text-light); font-size: 12px;
-  white-space: pre-wrap; word-break: break-word; display: -webkit-box;
-  -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+/* Stats grid */
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px; }
+.stat-card {
+  background: var(--card-bg); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 20px;
 }
-.unread-badge { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--primary); margin-right: 4px; vertical-align: middle; }
-.read-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--border); margin-right: 4px; vertical-align: middle; }
-.expand-row td { background: #fafbfc; padding: 16px 20px; }
-.expand-body { white-space: pre-wrap; word-break: break-word; font-family: "SF Mono", Monaco, Consolas, monospace; font-size: 12px; line-height: 1.6; max-height: 400px; overflow-y: auto; background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; }
-.expand-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin-bottom: 12px; font-size: 12px; }
-.expand-meta div { background: #fff; padding: 6px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); }
-.expand-meta div b { color: var(--text-light); font-weight: 500; margin-right: 4px; }
+.stat-card .stat-label { font-size: 12px; color: var(--text-light); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-card .stat-value { font-size: 28px; font-weight: 700; color: var(--text); }
+.stat-card .stat-value.primary { color: var(--primary); }
 
-.debug-block { background: #1e1e2e; color: #cdd6f4; border-radius: var(--radius-sm); padding: 14px; font-family: "SF Mono", Monaco, Consolas, monospace; font-size: 12px; line-height: 1.6; overflow-x: auto; max-height: 500px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
-.debug-block .k { color: #f9e2af; }
-.debug-block .s { color: #a6e3a1; }
-.debug-block .n { color: #fab387; }
-.debug-block .b { color: #89b4fa; }
+/* Table */
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+th { font-weight: 600; color: var(--text-light); background: #f9fafb; }
+tr:hover { background: #f9fafb; }
+.table-wrap { overflow-x: auto; }
 
-.endpoint { border-left: 3px solid var(--primary); padding: 14px 18px; background: #fafbfc; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin-bottom: 16px; }
-.endpoint .method { display: inline-block; padding: 3px 10px; border-radius: var(--radius-sm); font-size: 11px; font-weight: 700; color: #fff; margin-right: 8px; font-family: "SF Mono", Monaco, Consolas, monospace; }
-.method.GET { background: #16a34a; }
-.method.POST { background: #2563eb; }
-.method.PUT { background: #d97706; }
-.method.DELETE { background: #dc2626; }
-.endpoint .path { font-family: "SF Mono", Monaco, Consolas, monospace; font-weight: 600; font-size: 13px; }
-.endpoint .desc { color: var(--text-light); margin: 6px 0 10px; font-size: 13px; }
-.endpoint .curl { background: #1e1e2e; color: #cdd6f4; padding: 10px 12px; border-radius: var(--radius-sm); font-family: "SF Mono", Monaco, Consolas, monospace; font-size: 12px; overflow-x: auto; white-space: pre; line-height: 1.6; }
-.endpoint .curl .c { color: #9399b2; }
-.endpoint table.params { width: 100%; margin-top: 8px; font-size: 12px; }
-.endpoint table.params th { font-size: 11px; }
+/* Form */
+.form-group { margin-bottom: 16px; }
+.form-group label { display: block; margin-bottom: 6px; font-weight: 500; font-size: 13px; }
+.form-group input, .form-group select, .form-group textarea {
+  width: 100%; padding: 9px 12px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); font-size: 14px; background: #fff;
+}
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+  outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,70,229,0.1);
+}
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.form-hint { font-size: 12px; color: var(--text-lighter); margin-top: 4px; }
 
-.toast { position: fixed; bottom: 24px; right: 24px; background: var(--text); color: #fff; padding: 12px 18px; border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); z-index: 1000; font-size: 13px; opacity: 0; transform: translateY(10px); transition: opacity 0.2s, transform 0.2s; max-width: 380px; }
-.toast.show { opacity: 1; transform: translateY(0); }
-.toast.success { background: var(--success); }
-.toast.error { background: var(--danger); }
+/* Modal */
+.modal-overlay {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+  z-index: 100; align-items: center; justify-content: center;
+}
+.modal-overlay.show { display: flex; }
+.modal {
+  background: var(--card-bg); border-radius: 12px; box-shadow: var(--shadow-lg);
+  width: 90%; max-width: 500px; max-height: 90vh; overflow-y: auto;
+}
+.modal-header {
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: center;
+}
+.modal-header h3 { font-size: 16px; font-weight: 600; }
+.modal-close { background: none; border: none; font-size: 22px; cursor: pointer; color: var(--text-light); line-height: 1; }
+.modal-body { padding: 20px; }
+.modal-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
 
-.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
-.toolbar .spacer { flex: 1; }
-.stat-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: var(--primary-light); color: var(--primary); border-radius: 12px; font-size: 12px; font-weight: 500; }
-.loading { display: inline-block; width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.6s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
+/* Badge */
+.tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.tag-green { background: var(--success-light); color: var(--success); }
+.tag-red { background: var(--danger-light); color: var(--danger); }
+.tag-blue { background: var(--primary-light); color: var(--primary); }
+.tag-gray { background: #f3f4f6; color: var(--text-light); }
 
+/* Toast */
+.toast {
+  position: fixed; top: 20px; right: 20px; z-index: 200;
+  padding: 12px 20px; border-radius: var(--radius-sm); box-shadow: var(--shadow-lg);
+  font-size: 14px; max-width: 400px; opacity: 0; transform: translateX(100%);
+  transition: opacity 0.3s, transform 0.3s;
+}
+.toast.show { opacity: 1; transform: translateX(0); }
+.toast-success { background: var(--success); color: #fff; }
+.toast-error { background: var(--danger); color: #fff; }
+
+/* Email list */
+.email-item {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 12px 16px; margin-bottom: 8px; cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.email-item:hover { border-color: var(--primary); box-shadow: var(--shadow); }
+.email-item.unread { border-left: 3px solid var(--primary); }
+.email-item .email-header { display: flex; justify-content: space-between; align-items: start; margin-bottom: 4px; }
+.email-item .email-from { font-weight: 500; font-size: 13px; }
+.email-item .email-date { font-size: 12px; color: var(--text-lighter); }
+.email-item .email-subject { font-size: 13px; color: var(--text); margin-bottom: 4px; }
+.email-item .email-preview { font-size: 12px; color: var(--text-light); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.email-detail { background: #f9fafb; border-radius: var(--radius-sm); padding: 16px; margin-top: 8px; display: none; }
+.email-detail.show { display: block; }
+.email-detail pre { white-space: pre-wrap; word-wrap: break-word; font-size: 13px; font-family: inherit; }
+
+/* Code block */
+.code-block {
+  background: #1e293b; color: #e2e8f0; border-radius: var(--radius-sm);
+  padding: 16px; overflow-x: auto; font-family: "Fira Code", "Consolas", monospace;
+  font-size: 13px; line-height: 1.6; margin: 8px 0;
+}
+.code-block .comment { color: #64748b; }
+.code-block .string { color: #86efac; }
+.code-block .keyword { color: #c084fc; }
+
+/* API Key display */
+.api-key-box {
+  display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+  background: #f9fafb; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-family: monospace; font-size: 13px;
+}
+.api-key-box .copy-btn { margin-left: auto; }
+
+/* Filter bar */
+.filter-bar {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px; margin-bottom: 16px; align-items: end;
+}
+.filter-bar .form-group { margin-bottom: 0; }
+.filter-bar .form-group label { font-size: 12px; }
+.filter-bar .form-group input, .filter-bar .form-group select { padding: 7px 10px; font-size: 13px; }
+
+/* Toggle switch */
+.toggle { position: relative; display: inline-block; width: 44px; height: 24px; }
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute; cursor: pointer; inset: 0; background: #cbd5e1;
+  border-radius: 12px; transition: 0.3s;
+}
+.toggle-slider:before {
+  content: ""; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px;
+  background: #fff; border-radius: 50%; transition: 0.3s;
+}
+.toggle input:checked + .toggle-slider { background: var(--success); }
+.toggle input:checked + .toggle-slider:before { transform: translateX(20px); }
+
+/* Empty state */
+.empty-state { text-align: center; padding: 40px 20px; color: var(--text-lighter); }
+.empty-state .icon { font-size: 36px; margin-bottom: 12px; }
+
+/* Responsive */
 @media (max-width: 768px) {
-  .container { padding: 14px; }
-  .app-header, .tabs { padding: 0 14px; }
-  .card-body { padding: 14px; }
-  table { font-size: 12px; }
-  table th, table td { padding: 8px 8px; }
-  .results-table .subject-cell, .results-table .from-cell, .results-table .to-cell, .results-table .body-preview { max-width: 140px; }
-  .hide-mobile { display: none; }
-  .filter-grid { grid-template-columns: 1fr 1fr; }
+  .form-row { grid-template-columns: 1fr; }
+  .filter-bar { grid-template-columns: 1fr; }
+  .content { padding: 16px; }
+  .tabs-inner { flex-wrap: wrap; }
 }
-@media (max-width: 480px) {
-  .filter-grid { grid-template-columns: 1fr; }
-  .login-card { padding: 28px 22px; }
-}
-.hidden { display: none !important; }
-.muted { color: var(--text-light); }
-.small { font-size: 12px; }
-.mt-2 { margin-top: 8px; }
-.mt-3 { margin-top: 12px; }
-.mb-2 { margin-bottom: 8px; }
-.mb-3 { margin-bottom: 12px; }
 </style>
 </head>
 <body>
 
-<div id="loginPage" class="login-wrap">
+<!-- Login View -->
+<div id="loginView" class="login-wrap">
   <div class="login-card">
     <div class="logo">G</div>
-    <h1>Gmail 邮件管理系统</h1>
-    <p class="subtitle">请输入管理令牌以登录</p>
-    <div class="field">
-      <label>管理令牌</label>
-      <input type="password" id="loginToken" placeholder="请输入令牌" autocomplete="current-password">
-      <div class="hint">令牌由管理员发放,请勿泄露</div>
+    <h1 id="loginTitle">Gmail 邮件管理系统</h1>
+    <p class="subtitle" id="loginSubtitle">请登录以继续</p>
+    <div id="loginAlert" class="alert alert-error"></div>
+    <div id="loginForm">
+      <div class="field">
+        <label>用户名</label>
+        <input type="text" id="loginUsername" placeholder="输入用户名" autocomplete="username">
+      </div>
+      <div class="field">
+        <label>密码</label>
+        <input type="password" id="loginPassword" placeholder="输入密码" autocomplete="current-password">
+      </div>
+      <button class="btn btn-block" onclick="doLogin()">登录</button>
+      <div class="switch-link" id="registerLink" style="display:none">
+        没有账户？<a onclick="showRegister()">注册新账户</a>
+      </div>
     </div>
-    <button class="btn btn-block" id="loginBtn" onclick="doLogin()">登录</button>
-    <div id="loginError" class="hidden" style="color:var(--danger);text-align:center;margin-top:12px;font-size:13px;"></div>
+    <div id="registerForm" style="display:none">
+      <div class="field">
+        <label>用户名</label>
+        <input type="text" id="regUsername" placeholder="至少3个字符" autocomplete="username">
+      </div>
+      <div class="field">
+        <label>密码</label>
+        <input type="password" id="regPassword" placeholder="至少6个字符" autocomplete="new-password">
+      </div>
+      <button class="btn btn-block" onclick="doRegister()">注册</button>
+      <div class="switch-link">
+        已有账户？<a onclick="showLogin()">返回登录</a>
+      </div>
+    </div>
   </div>
 </div>
 
-<div id="appPage" class="app">
-  <header class="app-header">
+<!-- App View -->
+<div id="appView" class="app">
+  <div class="app-header">
     <div class="app-header-inner">
       <div class="app-title">
-        <span class="dot">G</span>
+        <div class="dot">G</div>
         <span>Gmail 邮件管理系统</span>
       </div>
-      <div>
-        <span class="stat-pill" id="accountCountPill">账户: 0</span>
-        <button class="btn btn-secondary btn-sm" onclick="doLogout()" style="margin-left:8px;">退出登录</button>
+      <div class="user-info">
+        <span id="currentUsername"></span>
+        <span id="currentRole" class="badge"></span>
+        <button class="btn btn-secondary btn-sm" onclick="doLogout()">退出</button>
       </div>
     </div>
-  </header>
+  </div>
+  <div class="tabs">
+    <div class="tabs-inner" id="tabsInner"></div>
+  </div>
+  <div class="content" id="tabContent"></div>
+</div>
 
-  <nav class="tabs">
-    <div class="tabs-inner">
-      <button class="tab active" data-tab="accounts" onclick="switchTab('accounts')">账户管理</button>
-      <button class="tab" data-tab="query" onclick="switchTab('query')">邮件查询</button>
-      <button class="tab" data-tab="docs" onclick="switchTab('docs')">API 文档</button>
+<!-- Modal -->
+<div id="modalOverlay" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modalTitle">标题</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
     </div>
-  </nav>
-
-  <div class="container">
-    <section id="panel-accounts" class="panel active">
-      <div class="card">
-        <div class="card-header">
-          <h2>账户列表</h2>
-          <button class="btn btn-sm" onclick="openAccountForm()">+ 添加账户</button>
-        </div>
-        <div style="overflow-x:auto;">
-          <table>
-            <thead>
-              <tr>
-                <th>标签</th>
-                <th>邮箱地址</th>
-                <th>应用密码</th>
-                <th>创建时间</th>
-                <th>ID</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody id="accountsTbody">
-              <tr><td colspan="6" class="empty-row">加载中...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div id="accountFormModal" class="hidden">
-        <div class="card">
-          <div class="card-header">
-            <h2 id="accountFormTitle">添加账户</h2>
-            <button class="btn-link" onclick="closeAccountForm()">取消</button>
-          </div>
-          <div class="card-body">
-            <input type="hidden" id="formAccountId">
-            <div class="form-grid">
-              <div class="form-field">
-                <label>标签</label>
-                <input type="text" id="formLabel" placeholder="例如:主账号">
-              </div>
-              <div class="form-field">
-                <label>邮箱地址</label>
-                <input type="email" id="formEmail" placeholder="example@gmail.com">
-              </div>
-              <div class="form-field">
-                <label>应用密码 (App Password)</label>
-                <input type="text" id="formToken" placeholder="16位应用密码">
-                <div class="hint">Gmail 设置 → 账户 → 应用密码</div>
-              </div>
-            </div>
-            <div class="filter-actions">
-              <button class="btn" id="saveAccountBtn" onclick="saveAccount()">保存</button>
-              <button class="btn btn-secondary" onclick="closeAccountForm()">取消</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="panel-query" class="panel">
-      <div class="card">
-        <div class="card-header">
-          <h2>查询条件</h2>
-          <button class="btn btn-secondary btn-sm" onclick="resetQueryForm()">重置</button>
-        </div>
-        <div class="card-body">
-          <div class="form-grid mb-3">
-            <div class="form-field">
-              <label>选择账户</label>
-              <select id="queryAccountId" onchange="onAccountSelect()">
-                <option value="">— 直接输入邮箱(可选) —</option>
-              </select>
-            </div>
-            <div class="form-field">
-              <label>收件人 (To)</label>
-              <input type="text" id="queryTo" placeholder="收件邮箱">
-            </div>
-            <div class="form-field">
-              <label>发件人 (Sender)</label>
-              <input type="text" id="querySender" placeholder="发件邮箱">
-            </div>
-            <div class="form-field">
-              <label>主题 (Subject)</label>
-              <input type="text" id="querySubject" placeholder="主题关键字">
-            </div>
-            <div class="form-field">
-              <label>正文 (Body)</label>
-              <input type="text" id="queryBody" placeholder="正文字段(IMAP)">
-            </div>
-            <div class="form-field">
-              <label>关键词 (本地过滤)</label>
-              <input type="text" id="queryKeyword" placeholder="对发件/收件/主题/正文过滤">
-            </div>
-            <div class="form-field">
-              <label>开始时间 (上海时区)</label>
-              <input type="datetime-local" id="queryStart" step="1">
-            </div>
-            <div class="form-field">
-              <label>结束时间 (上海时区)</label>
-              <input type="datetime-local" id="queryEnd" step="1">
-            </div>
-            <div class="form-field">
-              <label>数量上限</label>
-              <input type="number" id="queryLimit" value="50" min="1" max="500">
-            </div>
-            <div class="form-field">
-              <label>状态</label>
-              <select id="queryUnseen">
-                <option value="">全部</option>
-                <option value="true">仅未读</option>
-                <option value="false">仅已读</option>
-              </select>
-            </div>
-          </div>
-
-          <div id="manualEmailRow" class="form-grid mb-3 hidden">
-            <div class="form-field">
-              <label>邮箱(直填)</label>
-              <input type="email" id="queryEmail" placeholder="example@gmail.com">
-            </div>
-            <div class="form-field">
-              <label>应用密码(直填)</label>
-              <input type="text" id="queryToken" placeholder="16位应用密码">
-            </div>
-          </div>
-
-          <div class="filter-actions">
-            <button class="btn" id="fetchBtn" onclick="fetchEmails()">查询邮件</button>
-            <button class="btn btn-success btn-sm" onclick="markRead()">标记为已读</button>
-            <span class="muted small" id="fetchStatus"></span>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-header">
-          <h2>查询结果 <span id="resultCount" class="muted small"></span></h2>
-          <button class="btn btn-secondary btn-sm" onclick="toggleDebug()">显示/隐藏 原始响应</button>
-        </div>
-        <div class="card-body">
-          <div id="debugBlock" class="debug-block hidden mb-3">// 等待查询...</div>
-          <div style="overflow-x:auto;">
-            <table class="results-table">
-              <thead>
-                <tr>
-                  <th style="width:30px;"></th>
-                  <th class="from-cell">发件人</th>
-                  <th class="to-cell hide-mobile">收件人</th>
-                  <th class="subject-cell">主题</th>
-                  <th>时间</th>
-                  <th class="body-preview">正文预览</th>
-                </tr>
-              </thead>
-              <tbody id="resultsTbody">
-                <tr><td colspan="6" class="empty-row">尚未查询,请填写条件后点击"查询邮件"</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="panel-docs" class="panel">
-      <div class="card">
-        <div class="card-header">
-          <h2>API 接口文档</h2>
-          <span class="muted small">所有接口(除 /api/login 外)需在 Header 中携带 Authorization: Bearer &lt;token&gt;</span>
-        </div>
-        <div class="card-body">
-          <div class="endpoint">
-            <div><span class="method GET">GET</span><span class="path">/health</span></div>
-            <div class="desc">健康检查,返回服务状态与账户数量(无需鉴权)</div>
-            <div class="curl"><span class="c"># 健康检查</span>
-curl http://localhost:8000/health</div>
-          </div>
-
-          <div class="endpoint">
-            <div><span class="method POST">POST</span><span class="path">/api/login</span></div>
-            <div class="desc">登录校验,验证令牌是否正确</div>
-            <table class="params">
-              <tr><th>字段</th><th>类型</th><th>说明</th></tr>
-              <tr><td>token</td><td>string</td><td>管理令牌</td></tr>
-            </table>
-            <div class="curl mt-2"><span class="c"># 登录</span>
-curl -X POST http://localhost:8000/api/login \
-  -H "Content-Type: application/json" \
-  -d '{"token":"__CURRENT_TOKEN__"}'</div>
-          </div>
-
-          <div class="endpoint">
-            <div><span class="method GET">GET</span><span class="path">/api/accounts</span></div>
-            <div class="desc">获取账户列表(token 字段会脱敏显示)</div>
-            <div class="curl"><span class="c"># 获取账户列表</span>
-curl http://localhost:8000/api/accounts \
-  -H "Authorization: Bearer __CURRENT_TOKEN__"</div>
-          </div>
-
-          <div class="endpoint">
-            <div><span class="method POST">POST</span><span class="path">/api/accounts</span></div>
-            <div class="desc">添加账户</div>
-            <table class="params">
-              <tr><th>字段</th><th>类型</th><th>说明</th></tr>
-              <tr><td>email</td><td>string</td><td>Gmail 邮箱地址</td></tr>
-              <tr><td>token</td><td>string</td><td>应用密码 (App Password)</td></tr>
-              <tr><td>label</td><td>string</td><td>账户标签(可选)</td></tr>
-            </table>
-            <div class="curl mt-2"><span class="c"># 添加账户</span>
-curl -X POST http://localhost:8000/api/accounts \
-  -H "Authorization: Bearer __CURRENT_TOKEN__" \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@gmail.com","token":"abcd1234efgh5678","label":"测试号"}'</div>
-          </div>
-
-          <div class="endpoint">
-            <div><span class="method PUT">PUT</span><span class="path">/api/accounts/{account_id}</span></div>
-            <div class="desc">更新账户信息(email/token/label 均为可选)</div>
-            <div class="curl"><span class="c"># 更新账户</span>
-curl -X PUT http://localhost:8000/api/accounts/abcd1234 \
-  -H "Authorization: Bearer __CURRENT_TOKEN__" \
-  -H "Content-Type: application/json" \
-  -d '{"label":"新标签"}'</div>
-          </div>
-
-          <div class="endpoint">
-            <div><span class="method DELETE">DELETE</span><span class="path">/api/accounts/{account_id}</span></div>
-            <div class="desc">删除账户</div>
-            <div class="curl"><span class="c"># 删除账户</span>
-curl -X DELETE http://localhost:8000/api/accounts/abcd1234 \
-  -H "Authorization: Bearer __CURRENT_TOKEN__"</div>
-          </div>
-
-          <div class="endpoint">
-            <div><span class="method POST">POST</span><span class="path">/api/email/fetch</span></div>
-            <div class="desc">查询邮件。需指定 account_id 或同时提供 email+token</div>
-            <table class="params">
-              <tr><th>字段</th><th>类型</th><th>说明</th></tr>
-              <tr><td>account_id</td><td>string</td><td>已存账户 ID(二选一)</td></tr>
-              <tr><td>email</td><td>string</td><td>邮箱(二选一)</td></tr>
-              <tr><td>token</td><td>string</td><td>应用密码(配合 email)</td></tr>
-              <tr><td>to</td><td>string</td><td>收件人过滤(IMAP TO)</td></tr>
-              <tr><td>sender</td><td>string</td><td>发件人过滤(IMAP FROM)</td></tr>
-              <tr><td>subject</td><td>string</td><td>主题过滤(IMAP SUBJECT)</td></tr>
-              <tr><td>body</td><td>string</td><td>正文过滤(IMAP TEXT)</td></tr>
-              <tr><td>keyword</td><td>string</td><td>本地关键词过滤(综合)</td></tr>
-              <tr><td>unseen</td><td>bool</td><td>true 仅未读 / false 仅已读</td></tr>
-              <tr><td>start_time</td><td>string</td><td>开始时间 (YYYY-MM-DDTHH:MM:SS)</td></tr>
-              <tr><td>end_time</td><td>string</td><td>结束时间</td></tr>
-              <tr><td>limit</td><td>int</td><td>返回上限,默认 50</td></tr>
-            </table>
-            <div class="curl mt-2"><span class="c"># 查询邮件</span>
-curl -X POST http://localhost:8000/api/email/fetch \
-  -H "Authorization: Bearer __CURRENT_TOKEN__" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "account_id": "abcd1234",
-    "sender": "noreply@example.com",
-    "start_time": "2026-07-07T00:00:00",
-    "end_time": "2026-07-07T23:59:59",
-    "limit": 20
-  }'</div>
-          </div>
-
-          <div class="endpoint">
-            <div><span class="method POST">POST</span><span class="path">/api/email/mark_read</span></div>
-            <div class="desc">将匹配的邮件标记为已读。可按 sender/subject 过滤,留空则标记全部</div>
-            <table class="params">
-              <tr><th>字段</th><th>类型</th><th>说明</th></tr>
-              <tr><td>account_id</td><td>string</td><td>已存账户 ID(二选一)</td></tr>
-              <tr><td>email</td><td>string</td><td>邮箱(二选一)</td></tr>
-              <tr><td>token</td><td>string</td><td>应用密码(配合 email)</td></tr>
-              <tr><td>sender</td><td>string</td><td>发件人过滤</td></tr>
-              <tr><td>subject</td><td>string</td><td>主题过滤</td></tr>
-            </table>
-            <div class="curl mt-2"><span class="c"># 标记已读</span>
-curl -X POST http://localhost:8000/api/email/mark_read \
-  -H "Authorization: Bearer __CURRENT_TOKEN__" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "account_id": "abcd1234",
-    "sender": "noreply@example.com"
-  }'</div>
-          </div>
-        </div>
-      </div>
-    </section>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-footer" id="modalFooter"></div>
   </div>
 </div>
 
+<!-- Toast -->
 <div id="toast" class="toast"></div>
 
 <script>
-let TOKEN = localStorage.getItem("gmail_alias_token") || "";
+let sessionToken = localStorage.getItem('sessionToken') || '';
+let currentUser = null;
 
-function refreshApiDocsToken() {
-  const displayToken = TOKEN || "<your_token>";
-  document.querySelectorAll(".curl").forEach(el => {
-    el.innerHTML = el.innerHTML.replace(/__CURRENT_TOKEN__/g, displayToken);
-  });
-}
-let ACCOUNTS = [];
-let LAST_RESPONSE = null;
-let EXPANDED_ROW = null;
-
-function $(id) { return document.getElementById(id); }
-
-function toast(msg, type) {
-  const el = $("toast");
-  el.textContent = msg;
-  el.className = "toast show " + (type || "");
-  setTimeout(() => { el.className = "toast"; }, 2800);
-}
-
-async function api(method, path, body) {
-  const opts = { method: method, headers: { "Authorization": "Bearer " + TOKEN } };
-  if (body !== undefined && body !== null) {
-    opts.headers["Content-Type"] = "application/json";
-    opts.body = JSON.stringify(body);
+// ==================== API Helper ====================
+async function api(url, options = {}) {
+  const headers = { 'Content-Type': 'application/json', ...options.headers };
+  if (sessionToken) headers['Authorization'] = 'Bearer ' + sessionToken;
+  try {
+    const resp = await fetch(url, { ...options, headers });
+    const data = await resp.json();
+    if (resp.status === 401) {
+      sessionToken = '';
+      localStorage.removeItem('sessionToken');
+      showLoginView();
+      return null;
+    }
+    return data;
+  } catch (e) {
+    showToast('网络请求失败: ' + e.message, 'error');
+    return null;
   }
-  const res = await fetch(path, opts);
-  const text = await res.text();
-  let data;
-  try { data = text ? JSON.parse(text) : null; } catch (e) { data = { raw: text }; }
-  return { ok: res.ok, status: res.status, data: data };
 }
 
-function escapeHtml(s) {
-  if (s === null || s === undefined) return "";
-  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast toast-' + type + ' show';
+  setTimeout(() => t.className = 'toast toast-' + type, 3000);
 }
 
-function fmtTime(d) {
-  const opts = { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
-                 hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false };
-  const parts = new Intl.DateTimeFormat("en-CA", opts).formatToParts(d);
-  const get = (t) => parts.find(p => p.type === t).value;
-  return get("year") + "-" + get("month") + "-" + get("day") + "T" + get("hour") + ":" + get("minute") + ":" + get("second");
+function showModal(title, bodyHtml, footerHtml) {
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalBody').innerHTML = bodyHtml;
+  document.getElementById('modalFooter').innerHTML = footerHtml || '';
+  document.getElementById('modalOverlay').classList.add('show');
 }
 
-function defaultTimes() {
-  const now = new Date();
-  const startOfDay = new Date(now);
-  startOfDay.setHours(0, 0, 0, 0);
-  return { start: fmtTime(startOfDay), end: fmtTime(now) };
+function closeModal() {
+  document.getElementById('modalOverlay').classList.remove('show');
+}
+
+// ==================== Auth ====================
+function showLoginView() {
+  document.getElementById('loginView').style.display = 'flex';
+  document.getElementById('appView').classList.remove('active');
+  showLoginForm();
+  checkRegistrationAllowed();
+}
+
+function showAppView() {
+  document.getElementById('loginView').style.display = 'none';
+  document.getElementById('appView').classList.add('active');
+  renderTabs();
+  switchTab(getTabs()[0].id);
+}
+
+function showLoginForm() {
+  document.getElementById('loginForm').style.display = 'block';
+  document.getElementById('registerForm').style.display = 'none';
+  document.getElementById('loginTitle').textContent = 'Gmail 邮件管理系统';
+  document.getElementById('loginSubtitle').textContent = '请登录以继续';
+}
+
+function showRegister() {
+  document.getElementById('loginForm').style.display = 'none';
+  document.getElementById('registerForm').style.display = 'block';
+  document.getElementById('loginTitle').textContent = '注册新账户';
+  document.getElementById('loginSubtitle').textContent = '创建您的账户';
+}
+
+async function checkRegistrationAllowed() {
+  const data = await api('/api/admin/settings');
+  if (data && data.code === 0) {
+    document.getElementById('registerLink').style.display = data.data.allow_registration ? 'block' : 'none';
+  }
+}
+
+function showLoginAlert(msg) {
+  const el = document.getElementById('loginAlert');
+  el.textContent = msg;
+  el.classList.add('show');
 }
 
 async function doLogin() {
-  const token = $("loginToken").value.trim();
-  if (!token) { $("loginError").textContent = "请输入令牌"; $("loginError").classList.remove("hidden"); return; }
-  $("loginBtn").disabled = true;
-  $("loginBtn").innerHTML = '<span class="loading"></span> 登录中...';
-  try {
-    const r = await api("POST", "/api/login", { token: token });
-    if (r.ok && r.data && r.data.code === 0) {
-      TOKEN = token;
-      localStorage.setItem("gmail_alias_token", token);
-      enterApp();
-    } else {
-      $("loginError").textContent = (r.data && r.data.detail) || "令牌无效";
-      $("loginError").classList.remove("hidden");
-    }
-  } catch (e) {
-    $("loginError").textContent = "网络错误:" + e.message;
-    $("loginError").classList.remove("hidden");
-  } finally {
-    $("loginBtn").disabled = false;
-    $("loginBtn").textContent = "登录";
-  }
-}
-
-function doLogout() {
-  TOKEN = "";
-  localStorage.removeItem("gmail_alias_token");
-  $("appPage").classList.remove("active");
-  $("loginPage").style.display = "flex";
-  $("loginToken").value = "";
-  $("loginError").classList.add("hidden");
-}
-
-function enterApp() {
-  $("loginPage").style.display = "none";
-  $("appPage").classList.add("active");
-  switchTab("accounts");
-  loadAccounts();
-  const dt = defaultTimes();
-  $("queryStart").value = dt.start;
-  $("queryEnd").value = dt.end;
-  refreshApiDocsToken();
-}
-
-function switchTab(name) {
-  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
-  document.querySelectorAll(".panel").forEach(p => p.classList.toggle("active", p.id === "panel-" + name));
-  if (name === "query") { refreshAccountDropdown(); }
-  if (name === "docs") { refreshApiDocsToken(); }
-}
-
-async function loadAccounts() {
-  const tbody = $("accountsTbody");
-  tbody.innerHTML = '<tr><td colspan="6" class="empty-row">加载中...</td></tr>';
-  const r = await api("GET", "/api/accounts");
-  if (r.ok && r.data && r.data.code === 0) {
-    ACCOUNTS = r.data.data || [];
-    renderAccounts();
-    $("accountCountPill").textContent = "账户: " + ACCOUNTS.length;
-  } else {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty-row">加载失败:' + escapeHtml(r.data && r.data.detail || "未知错误") + '</td></tr>';
-    if (r.status === 401) { doLogout(); }
-  }
-}
-
-function renderAccounts() {
-  const tbody = $("accountsTbody");
-  if (ACCOUNTS.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty-row">暂无账户,点击"添加账户"创建</td></tr>';
-    return;
-  }
-  tbody.innerHTML = ACCOUNTS.map(a => `
-    <tr>
-      <td><span class="label-tag">${escapeHtml(a.label || a.email)}</span></td>
-      <td>${escapeHtml(a.email)}</td>
-      <td class="token-mono">${escapeHtml(a.token || "****")}</td>
-      <td class="small muted">${escapeHtml((a.created_at || "").replace("T", " ").slice(0, 19))}</td>
-      <td class="token-mono small">${escapeHtml(a.id)}</td>
-      <td class="row-actions">
-        <button class="btn btn-secondary btn-sm" onclick='editAccount("${a.id}")'>编辑</button>
-        <button class="btn btn-danger btn-sm" onclick='deleteAccount("${a.id}")'>删除</button>
-      </td>
-    </tr>
-  `).join("");
-}
-
-function openAccountForm() {
-  $("accountFormModal").classList.remove("hidden");
-  $("accountFormTitle").textContent = "添加账户";
-  $("formAccountId").value = "";
-  $("formLabel").value = "";
-  $("formEmail").value = "";
-  $("formToken").value = "";
-  $("formToken").placeholder = "16位应用密码";
-  $("formEmail").focus();
-}
-
-function closeAccountForm() {
-  $("accountFormModal").classList.add("hidden");
-}
-
-function editAccount(id) {
-  const a = ACCOUNTS.find(x => x.id === id);
-  if (!a) return;
-  $("accountFormModal").classList.remove("hidden");
-  $("accountFormTitle").textContent = "编辑账户";
-  $("formAccountId").value = a.id;
-  $("formLabel").value = a.label || "";
-  $("formEmail").value = a.email || "";
-  $("formToken").value = "";
-  $("formToken").placeholder = "留空则不修改应用密码";
-}
-
-async function saveAccount() {
-  const id = $("formAccountId").value.trim();
-  const label = $("formLabel").value.trim();
-  const email = $("formEmail").value.trim();
-  const token = $("formToken").value.trim();
-  if (!email) { toast("请填写邮箱地址", "error"); return; }
-  if (!id && !token) { toast("请填写应用密码", "error"); return; }
-
-  const btn = $("saveAccountBtn");
-  btn.disabled = true; btn.textContent = "保存中...";
-
-  try {
-    let r;
-    if (id) {
-      const body = { email: email, label: label };
-      if (token) body.token = token;
-      r = await api("PUT", "/api/accounts/" + id, body);
-    } else {
-      r = await api("POST", "/api/accounts", { email: email, token: token, label: label });
-    }
-    if (r.ok && r.data && r.data.code === 0) {
-      toast(id ? "更新成功" : "添加成功", "success");
-      closeAccountForm();
-      await loadAccounts();
-    } else {
-      toast((r.data && r.data.detail) || "保存失败", "error");
-    }
-  } catch (e) {
-    toast("网络错误:" + e.message, "error");
-  } finally {
-    btn.disabled = false; btn.textContent = "保存";
-  }
-}
-
-async function deleteAccount(id) {
-  if (!confirm("确定删除该账户吗?")) return;
-  const r = await api("DELETE", "/api/accounts/" + id);
-  if (r.ok && r.data && r.data.code === 0) {
-    toast("删除成功", "success");
-    await loadAccounts();
-  } else {
-    toast((r.data && r.data.detail) || "删除失败", "error");
-  }
-}
-
-function refreshAccountDropdown() {
-  const sel = $("queryAccountId");
-  const cur = sel.value;
-  sel.innerHTML = '<option value="">— 直接输入邮箱(可选) —</option>';
-  ACCOUNTS.forEach(a => {
-    const opt = document.createElement("option");
-    opt.value = a.id;
-    opt.textContent = (a.label || a.email) + " <" + a.email + ">";
-    sel.appendChild(opt);
+  const username = document.getElementById('loginUsername').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  if (!username || !password) { showLoginAlert('请输入用户名和密码'); return; }
+  document.getElementById('loginAlert').classList.remove('show');
+  const data = await api('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password })
   });
-  sel.value = cur;
-  onAccountSelect();
-}
-
-function onAccountSelect() {
-  const v = $("queryAccountId").value;
-  $("manualEmailRow").classList.toggle("hidden", !!v);
-}
-
-function buildFetchBody() {
-  const body = { limit: parseInt($("queryLimit").value) || 50 };
-  const accId = $("queryAccountId").value.trim();
-  if (accId) {
-    body.account_id = accId;
+  if (data && data.code === 0) {
+    sessionToken = data.data.session_token;
+    currentUser = data.data.user;
+    localStorage.setItem('sessionToken', sessionToken);
+    showAppView();
   } else {
-    body.email = $("queryEmail").value.trim();
-    body.token = $("queryToken").value.trim();
+    showLoginAlert(data ? data.detail || '登录失败' : '网络错误');
   }
-  const to = $("queryTo").value.trim();
-  const sender = $("querySender").value.trim();
-  const subject = $("querySubject").value.trim();
-  const text = $("queryBody").value.trim();
-  const keyword = $("queryKeyword").value.trim();
-  const unseen = $("queryUnseen").value;
-  const start = $("queryStart").value;
-  const end = $("queryEnd").value;
-  if (to) body.to = to;
-  if (sender) body.sender = sender;
-  if (subject) body.subject = subject;
-  if (text) body.body = text;
-  if (keyword) body.keyword = keyword;
-  if (unseen === "true") body.unseen = true;
-  else if (unseen === "false") body.unseen = false;
-  if (start) body.start_time = start;
-  if (end) body.end_time = end;
-  return body;
+}
+
+async function doRegister() {
+  const username = document.getElementById('regUsername').value.trim();
+  const password = document.getElementById('regPassword').value;
+  if (!username || !password) { showLoginAlert('请填写完整'); return; }
+  if (username.length < 3) { showLoginAlert('用户名至少3个字符'); return; }
+  if (password.length < 6) { showLoginAlert('密码至少6个字符'); return; }
+  document.getElementById('loginAlert').classList.remove('show');
+  const data = await api('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ username, password })
+  });
+  if (data && data.code === 0) {
+    showToast('注册成功，请登录');
+    showLoginForm();
+    document.getElementById('loginUsername').value = username;
+  } else {
+    showLoginAlert(data ? data.detail || '注册失败' : '网络错误');
+  }
+}
+
+async function doLogout() {
+  await api('/api/auth/logout', { method: 'POST' });
+  sessionToken = '';
+  currentUser = null;
+  localStorage.removeItem('sessionToken');
+  showLoginView();
+}
+
+async function loadCurrentUser() {
+  const data = await api('/api/auth/me');
+  if (data && data.code === 0) {
+    currentUser = data.data;
+    return true;
+  }
+  return false;
+}
+
+// ==================== Tabs ====================
+function getTabs() {
+  if (currentUser && currentUser.is_admin) {
+    return [
+      { id: 'emails', name: '邮件查询' },
+      { id: 'alias', name: '别名管理' },
+      { id: 'users', name: '用户管理' },
+      { id: 'stats', name: '使用统计' },
+      { id: 'settings', name: '系统设置' },
+      { id: 'apidocs', name: 'API 文档' },
+    ];
+  }
+  return [
+    { id: 'emails', name: '邮件查询' },
+    { id: 'alias', name: '我的账户' },
+    { id: 'apidocs', name: 'API 文档' },
+  ];
+}
+
+function renderTabs() {
+  const tabs = getTabs();
+  document.getElementById('tabsInner').innerHTML = tabs.map(t =>
+    `<button class="tab" data-tab="${t.id}" onclick="switchTab('${t.id}')">${t.name}</button>`
+  ).join('');
+  document.getElementById('currentUsername').textContent = currentUser.username;
+  const roleEl = document.getElementById('currentRole');
+  if (currentUser.is_admin) {
+    roleEl.textContent = '管理员';
+    roleEl.className = 'badge badge-admin';
+  } else {
+    roleEl.textContent = '普通用户';
+    roleEl.className = 'badge badge-user';
+  }
+}
+
+function switchTab(tabId) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
+  const content = document.getElementById('tabContent');
+  const renderers = {
+    emails: renderEmailQuery,
+    alias: renderAlias,
+    users: renderUsers,
+    stats: renderStats,
+    settings: renderSettings,
+    apidocs: renderApiDocs,
+  };
+  if (renderers[tabId]) content.innerHTML = renderers[tabId]();
+}
+
+// ==================== Email Query Tab ====================
+function renderEmailQuery() {
+  const now = new Date();
+  const todayStart = now.toISOString().split('T')[0] + 'T00:00:00';
+  const nowStr = now.toTimeString().slice(0, 8);
+  const todayDate = now.toISOString().split('T')[0];
+
+  const isAdmin = currentUser.is_admin;
+  const aliasHint = isAdmin ? '管理员可查看所有邮件，也可按收件人筛选' : '普通用户自动按别名筛选';
+
+  return `
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">邮件查询</div>
+        <div style="font-size:12px;color:var(--text-light)">${aliasHint}</div>
+      </div>
+      <div class="filter-bar">
+        <div class="form-group">
+          <label>发件人</label>
+          <input type="text" id="filterSender" placeholder="发件人邮箱">
+        </div>
+        <div class="form-group">
+          <label>主题</label>
+          <input type="text" id="filterSubject" placeholder="主题关键字">
+        </div>
+        <div class="form-group">
+          <label>关键词</label>
+          <input type="text" id="filterKeyword" placeholder="全文搜索">
+        </div>
+        <div class="form-group">
+          <label>状态</label>
+          <select id="filterUnseen">
+            <option value="">全部</option>
+            <option value="true">仅未读</option>
+            <option value="false">仅已读</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>开始时间</label>
+          <input type="datetime-local" id="filterStart" value="${todayDate}T00:00:00" step="1">
+        </div>
+        <div class="form-group">
+          <label>结束时间</label>
+          <input type="datetime-local" id="filterEnd" value="${todayDate}T${nowStr}" step="1">
+        </div>
+        <div class="form-group">
+          <label>数量限制</label>
+          <input type="number" id="filterLimit" value="50" min="1" max="500">
+        </div>
+        ${isAdmin ? `
+        <div class="form-group">
+          <label>收件人(别名)</label>
+          <input type="text" id="filterTo" placeholder="留空查全部">
+        </div>` : ''}
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <button class="btn" onclick="fetchEmails()">查询邮件</button>
+        <button class="btn btn-secondary" onclick="clearFilters()">重置</button>
+      </div>
+      <div id="emailResults">
+        <div class="empty-state"><div class="icon">📧</div><div>点击「查询邮件」开始搜索</div></div>
+      </div>
+    </div>
+  `;
+}
+
+function clearFilters() {
+  document.getElementById('filterSender').value = '';
+  document.getElementById('filterSubject').value = '';
+  document.getElementById('filterKeyword').value = '';
+  document.getElementById('filterUnseen').value = '';
+  document.getElementById('filterLimit').value = '50';
+  if (document.getElementById('filterTo')) document.getElementById('filterTo').value = '';
 }
 
 async function fetchEmails() {
-  const body = buildFetchBody();
-  if (!body.account_id && (!body.email || !body.token)) {
-    toast("请选择账户或填写邮箱+应用密码", "error");
-    return;
+  const body = {
+    sender: document.getElementById('filterSender').value.trim() || null,
+    subject: document.getElementById('filterSubject').value.trim() || null,
+    keyword: document.getElementById('filterKeyword').value.trim() || null,
+    unseen: document.getElementById('filterUnseen').value === '' ? null : document.getElementById('filterUnseen').value === 'true',
+    start_time: document.getElementById('filterStart').value ? document.getElementById('filterStart').value.replace(' ', 'T') : null,
+    end_time: document.getElementById('filterEnd').value ? document.getElementById('filterEnd').value.replace(' ', 'T') : null,
+    limit: parseInt(document.getElementById('filterLimit').value) || 50,
+  };
+  if (document.getElementById('filterTo')) {
+    body.to = document.getElementById('filterTo').value.trim() || null;
   }
-  const btn = $("fetchBtn");
-  btn.disabled = true; btn.innerHTML = '<span class="loading"></span> 查询中...';
-  $("fetchStatus").textContent = "";
-  $("debugBlock").textContent = "// 请求中...";
-
-  const reqStart = Date.now();
-  let r;
-  try {
-    r = await api("POST", "/api/email/fetch", body);
-  } catch (e) {
-    $("debugBlock").textContent = "// 网络错误:" + e.message;
-    toast("网络错误:" + e.message, "error");
-    btn.disabled = false; btn.textContent = "查询邮件";
-    return;
-  }
-  const elapsed = ((Date.now() - reqStart) / 1000).toFixed(2);
-
-  LAST_RESPONSE = r.data;
-  renderDebug();
-  btn.disabled = false; btn.textContent = "查询邮件";
-
-  if (r.ok && r.data && r.data.code === 0) {
-    const emails = (r.data.data && r.data.data.emails) || [];
-    $("fetchStatus").textContent = "返回 " + emails.length + " 封,耗时 " + elapsed + "s";
-    $("resultCount").textContent = "(共 " + emails.length + " 封)";
-    renderResults(emails);
-    toast("查询完成,共 " + emails.length + " 封", "success");
+  document.getElementById('emailResults').innerHTML = '<div class="empty-state">查询中...</div>';
+  const data = await api('/api/web/email/fetch', {
+    method: 'POST',
+    body: JSON.stringify(body)
+  });
+  if (data && data.code === 0) {
+    renderEmailResults(data.data);
   } else {
-    $("fetchStatus").textContent = "查询失败";
-    $("resultCount").textContent = "";
-    $("resultsTbody").innerHTML = '<tr><td colspan="6" class="empty-row">查询失败:' + escapeHtml((r.data && (r.data.msg || r.data.detail)) || "未知错误") + '</td></tr>';
-    toast((r.data && (r.data.msg || r.data.detail)) || "查询失败", "error");
+    document.getElementById('emailResults').innerHTML = `<div class="empty-state"><div class="icon">❌</div><div>${data ? data.detail || data.msg || '查询失败' : '网络错误'}</div></div>`;
   }
 }
 
-function renderResults(emails) {
-  const tbody = $("resultsTbody");
-  EXPANDED_ROW = null;
-  if (emails.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty-row">未查询到符合条件的邮件</td></tr>';
+function renderEmailResults(data) {
+  const el = document.getElementById('emailResults');
+  if (!data.emails || data.emails.length === 0) {
+    el.innerHTML = '<div class="empty-state"><div class="icon">📭</div><div>没有找到邮件</div></div>';
     return;
   }
-  tbody.innerHTML = emails.map((e, i) => {
-    const dot = e.unread ? '<span class="unread-badge" title="未读"></span>' : '<span class="read-dot" title="已读"></span>';
-    const preview = (e.body || "").slice(0, 200);
-    return `
+  el.innerHTML = `<div style="margin-bottom:8px;font-size:13px;color:var(--text-light)">共 ${data.total} 封邮件</div>` +
+    data.emails.map((e, i) => `
+      <div class="email-item ${e.unread ? 'unread' : ''}" onclick="toggleEmailDetail(${i})">
+        <div class="email-header">
+          <span class="email-from">${escapeHtml(e.from)}</span>
+          <span class="email-date">${e.date}</span>
+        </div>
+        <div class="email-subject">${escapeHtml(e.subject)} ${e.unread ? '<span class="tag tag-blue">未读</span>' : ''}</div>
+        <div class="email-preview">${escapeHtml(e.body.substring(0, 100))}</div>
+        <div class="email-detail" id="emailDetail${i}">
+          <div style="margin-bottom:8px"><strong>收件人:</strong> ${escapeHtml(e.to)}</div>
+          <div style="margin-bottom:8px"><strong>发件人:</strong> ${escapeHtml(e.from)}</div>
+          <div style="margin-bottom:8px"><strong>主题:</strong> ${escapeHtml(e.subject)}</div>
+          <div style="margin-bottom:8px"><strong>时间:</strong> ${e.date}</div>
+          <pre>${escapeHtml(e.body)}</pre>
+        </div>
+      </div>
+    `).join('');
+}
+
+function toggleEmailDetail(i) {
+  document.getElementById('emailDetail' + i).classList.toggle('show');
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ==================== Alias / Account Tab ====================
+function renderAlias() {
+  const u = currentUser;
+  const isAdmin = u.is_admin;
+  const title = isAdmin ? '别名管理' : '我的账户';
+  return `
+    <div class="card">
+      <div class="card-header"><div class="card-title">${title}</div></div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Gmail 邮箱地址</label>
+          <input type="text" id="gmailEmail" value="${u.gmail_email || ''}" placeholder="your@gmail.com">
+        </div>
+        <div class="form-group">
+          <label>Gmail 应用密码</label>
+          <input type="text" id="gmailToken" placeholder="${u.gmail_token_masked || '留空不修改'}">
+          <div class="form-hint">在 Google 账户设置 > 安全 > 应用专用密码 中生成</div>
+        </div>
+      </div>
+      <button class="btn" onclick="saveGmailConfig()">保存邮箱配置</button>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title">别名邮箱</div></div>
+      <div class="form-group">
+        <label>当前别名</label>
+        <input type="text" id="aliasInput" value="${u.alias || ''}" placeholder="your+tag@gmail.com">
+        <div class="form-hint">同时只能存在一个别名，设置新的会替换旧的。格式: 主邮箱+标签@gmail.com</div>
+      </div>
+      <button class="btn" onclick="saveAlias()">保存别名</button>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title">API 密钥</div></div>
+      <div class="api-key-box">
+        <span>${u.api_key || ''}</span>
+        <button class="btn btn-secondary btn-sm copy-btn" onclick="copyText('${u.api_key || ''}')">复制</button>
+      </div>
+      <div style="margin-top:12px">
+        <button class="btn btn-danger" onclick="regenApiKey()">重新生成 Key</button>
+      </div>
+      <div class="form-hint" style="margin-top:8px">API Key 用于调用 /api/email/fetch 接口，不过期但可更新</div>
+    </div>
+  `;
+}
+
+async function saveGmailConfig() {
+  const email = document.getElementById('gmailEmail').value.trim();
+  const token = document.getElementById('gmailToken').value.trim();
+  if (!email) { showToast('请输入邮箱地址', 'error'); return; }
+  const body = { gmail_email: email };
+  if (token) body.gmail_token = token;
+  const data = await api('/api/account', { method: 'PUT', body: JSON.stringify(body) });
+  if (data && data.code === 0) {
+    currentUser = data.data;
+    showToast('保存成功');
+    switchTab('alias');
+  } else {
+    showToast(data ? data.detail || '保存失败' : '网络错误', 'error');
+  }
+}
+
+async function saveAlias() {
+  const alias = document.getElementById('aliasInput').value.trim();
+  if (!alias) { showToast('别名不能为空', 'error'); return; }
+  const data = await api('/api/account/alias', { method: 'POST', body: JSON.stringify({ alias }) });
+  if (data && data.code === 0) {
+    currentUser = data.data;
+    showToast('别名保存成功');
+  } else {
+    showToast(data ? data.detail || '保存失败' : '网络错误', 'error');
+  }
+}
+
+async function regenApiKey() {
+  if (!confirm('确定要重新生成 API Key 吗？旧的 Key 将立即失效。')) return;
+  const data = await api('/api/account/api_key', { method: 'POST' });
+  if (data && data.code === 0) {
+    currentUser = data.data;
+    showToast('API Key 已更新');
+    switchTab('alias');
+  } else {
+    showToast(data ? data.detail || '更新失败' : '网络错误', 'error');
+  }
+}
+
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(() => showToast('已复制到剪贴板'));
+}
+
+// ==================== Users Management (Admin) ====================
+function renderUsers() {
+  return `
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">用户管理</div>
+        <button class="btn btn-sm" onclick="showCreateUser()">+ 添加用户</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>用户名</th><th>角色</th><th>Gmail</th><th>别名</th><th>API Key</th><th>创建时间</th><th>操作</th></tr></thead>
+          <tbody id="usersTableBody"><tr><td colspan="7" style="text-align:center;color:var(--text-lighter)">加载中...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+async function loadUsers() {
+  const data = await api('/api/admin/users');
+  const tbody = document.getElementById('usersTableBody');
+  if (!tbody) return;
+  if (data && data.code === 0) {
+    if (data.data.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-lighter)">暂无用户</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.data.map(u => `
       <tr>
-        <td>${dot}</td>
-        <td class="from-cell">${escapeHtml(e.from)}</td>
-        <td class="to-cell hide-mobile">${escapeHtml(e.to)}</td>
-        <td class="subject-cell"><b>${escapeHtml(e.subject || "(无主题)")}</b></td>
-        <td class="small">${escapeHtml(e.date)}</td>
-        <td class="body-preview">${escapeHtml(preview)}</td>
-      </tr>
-      <tr class="expand-row hidden" id="expand-${i}">
-        <td colspan="6">
-          <div class="expand-meta">
-            <div><b>Message-ID:</b>${escapeHtml(e.id || "-")}</div>
-            <div><b>发件人:</b>${escapeHtml(e.from)}</div>
-            <div><b>收件人:</b>${escapeHtml(e.to)}</div>
-            <div><b>主题:</b>${escapeHtml(e.subject)}</div>
-            <div><b>时间:</b>${escapeHtml(e.date)}</div>
-            <div><b>状态:</b>${e.unread ? "未读" : "已读"}</div>
-            <div><b>ISO:</b>${escapeHtml(e.date_iso || "-")}</div>
-          </div>
-          <div class="expand-body">${escapeHtml(e.body || "(无正文)")}</div>
+        <td>${escapeHtml(u.username)}</td>
+        <td>${u.is_admin ? '<span class="tag tag-blue">管理员</span>' : '<span class="tag tag-green">普通</span>'}</td>
+        <td>${escapeHtml(u.gmail_email || '-')}</td>
+        <td>${escapeHtml(u.alias || '-')}</td>
+        <td><code style="font-size:11px">${u.api_key ? u.api_key.substring(0, 8) + '...' : '-'}</code></td>
+        <td style="font-size:12px">${u.created_at ? u.created_at.substring(0, 19).replace('T', ' ') : '-'}</td>
+        <td>
+          <button class="btn-link" onclick="showEditUser('${u.id}')">编辑</button>
+          ${u.id !== 'admin' ? `<button class="btn-link" style="color:var(--danger)" onclick="deleteUser('${u.id}','${u.username}')">删除</button>` : ''}
         </td>
       </tr>
-    `;
-  }).join("");
-
-  const mainRows = tbody.querySelectorAll("tr:not(.expand-row)");
-  mainRows.forEach((tr, i) => {
-    tr.style.cursor = "pointer";
-    tr.onclick = () => toggleExpand(i);
-  });
+    `).join('');
+  }
 }
 
-function toggleExpand(i) {
-  const row = $("expand-" + i);
-  if (!row) return;
-  if (row.classList.contains("hidden")) {
-    if (EXPANDED_ROW !== null && EXPANDED_ROW !== i) {
-      const prev = $("expand-" + EXPANDED_ROW);
-      if (prev) prev.classList.add("hidden");
+function showCreateUser() {
+  showModal('添加用户', `
+    <div class="form-group"><label>用户名</label><input type="text" id="newUsername" placeholder="至少3个字符"></div>
+    <div class="form-group"><label>密码</label><input type="text" id="newPassword" placeholder="至少6个字符"></div>
+    <div class="form-group"><label>角色</label><select id="newIsAdmin"><option value="false">普通用户</option><option value="true">管理员</option></select></div>
+    <div class="form-group"><label>Gmail 邮箱(可选)</label><input type="text" id="newGmailEmail" placeholder="user@gmail.com"></div>
+    <div class="form-group"><label>Gmail 应用密码(可选)</label><input type="text" id="newGmailToken" placeholder="应用专用密码"></div>
+  `, `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn" onclick="createUser()">创建</button>`);
+}
+
+async function createUser() {
+  const username = document.getElementById('newUsername').value.trim();
+  const password = document.getElementById('newPassword').value;
+  if (!username || !password) { showToast('请填写完整', 'error'); return; }
+  const data = await api('/api/admin/users', {
+    method: 'POST',
+    body: JSON.stringify({
+      username, password,
+      is_admin: document.getElementById('newIsAdmin').value === 'true',
+      gmail_email: document.getElementById('newGmailEmail').value.trim(),
+      gmail_token: document.getElementById('newGmailToken').value.trim(),
+    })
+  });
+  if (data && data.code === 0) {
+    closeModal();
+    showToast('用户创建成功');
+    loadUsers();
+  } else {
+    showToast(data ? data.detail || '创建失败' : '网络错误', 'error');
+  }
+}
+
+async function showEditUser(userId) {
+  const data = await api('/api/admin/users');
+  if (!data || data.code !== 0) return;
+  const u = data.data.find(x => x.id === userId);
+  if (!u) return;
+  showModal('编辑用户 - ' + u.username, `
+    <div class="form-group"><label>新密码(留空不修改)</label><input type="text" id="editPassword" placeholder="留空不修改"></div>
+    <div class="form-group"><label>角色</label><select id="editIsAdmin"><option value="false" ${!u.is_admin ? 'selected' : ''}>普通用户</option><option value="true" ${u.is_admin ? 'selected' : ''}>管理员</option></select></div>
+    <div class="form-group"><label>Gmail 邮箱</label><input type="text" id="editGmailEmail" value="${u.gmail_email || ''}"></div>
+    <div class="form-group"><label>Gmail 应用密码(留空不修改)</label><input type="text" id="editGmailToken" placeholder="${u.gmail_token_masked || '留空不修改'}"></div>
+  `, `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn" onclick="editUser('${userId}')">保存</button>`);
+}
+
+async function editUser(userId) {
+  const body = {
+    is_admin: document.getElementById('editIsAdmin').value === 'true',
+    gmail_email: document.getElementById('editGmailEmail').value.trim(),
+  };
+  const pwd = document.getElementById('editPassword').value;
+  if (pwd) body.password = pwd;
+  const token = document.getElementById('editGmailToken').value.trim();
+  if (token) body.gmail_token = token;
+  const data = await api('/api/admin/users/' + userId, { method: 'PUT', body: JSON.stringify(body) });
+  if (data && data.code === 0) {
+    closeModal();
+    showToast('保存成功');
+    loadUsers();
+  } else {
+    showToast(data ? data.detail || '保存失败' : '网络错误', 'error');
+  }
+}
+
+async function deleteUser(userId, username) {
+  if (!confirm('确定删除用户 "' + username + '" 吗？')) return;
+  const data = await api('/api/admin/users/' + userId, { method: 'DELETE' });
+  if (data && data.code === 0) {
+    showToast('已删除');
+    loadUsers();
+  } else {
+    showToast(data ? data.detail || '删除失败' : '网络错误', 'error');
+  }
+}
+
+// ==================== Stats (Admin) ====================
+function renderStats() {
+  return `
+    <div id="statsContainer">
+      <div class="empty-state">加载中...</div>
+    </div>
+  `;
+}
+
+async function loadStats() {
+  const data = await api('/api/admin/stats');
+  const el = document.getElementById('statsContainer');
+  if (!el) return;
+  if (data && data.code === 0) {
+    const s = data.data.summary;
+    const logs = data.data.logs;
+    let userStatsHtml = '';
+    for (const [user, count] of Object.entries(s.by_user)) {
+      userStatsHtml += `<tr><td>${escapeHtml(user)}</td><td>${count}</td></tr>`;
     }
-    row.classList.remove("hidden");
-    EXPANDED_ROW = i;
+    let aliasStatsHtml = '';
+    for (const [alias, count] of Object.entries(s.by_alias)) {
+      aliasStatsHtml += `<tr><td>${escapeHtml(alias)}</td><td>${count}</td></tr>`;
+    }
+    let logsHtml = '';
+    if (logs.length === 0) {
+      logsHtml = '<tr><td colspan="5" style="text-align:center;color:var(--text-lighter)">暂无记录</td></tr>';
+    } else {
+      logsHtml = logs.slice(0, 100).map(l => `
+        <tr>
+          <td>${escapeHtml(l.username)}</td>
+          <td>${escapeHtml(l.alias || '-')}</td>
+          <td>${escapeHtml(l.action)}</td>
+          <td>${escapeHtml(l.detail || '-')}</td>
+          <td style="font-size:12px">${l.timestamp ? l.timestamp.substring(0, 19).replace('T', ' ') : '-'}</td>
+        </tr>
+      `).join('');
+    }
+    el.innerHTML = `
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-label">总调用次数</div><div class="stat-value primary">${s.total_calls}</div></div>
+        <div class="stat-card"><div class="stat-label">活跃用户数</div><div class="stat-value">${Object.keys(s.by_user).length}</div></div>
+        <div class="stat-card"><div class="stat-label">别名使用数</div><div class="stat-value">${Object.keys(s.by_alias).length}</div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">按用户统计</div></div>
+        <div class="table-wrap"><table><thead><tr><th>用户名</th><th>调用次数</th></tr></thead><tbody>${userStatsHtml || '<tr><td colspan="2" style="text-align:center">暂无数据</td></tr>'}</tbody></table></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">按别名统计</div></div>
+        <div class="table-wrap"><table><thead><tr><th>别名邮箱</th><th>调用次数</th></tr></thead><tbody>${aliasStatsHtml || '<tr><td colspan="2" style="text-align:center">暂无数据</td></tr>'}</tbody></table></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">调用日志 (近30天，最多显示100条)</div></div>
+        <div class="table-wrap"><table><thead><tr><th>用户</th><th>别名</th><th>操作</th><th>详情</th><th>时间</th></tr></thead><tbody>${logsHtml}</tbody></table></div>
+      </div>
+    `;
+  }
+}
+
+// ==================== Settings (Admin) ====================
+function renderSettings() {
+  return `
+    <div class="card">
+      <div class="card-header"><div class="card-title">系统设置</div></div>
+      <div id="settingsContent"><div class="empty-state">加载中...</div></div>
+    </div>
+  `;
+}
+
+async function loadSettings() {
+  const data = await api('/api/admin/settings');
+  const el = document.getElementById('settingsContent');
+  if (!el) return;
+  if (data && data.code === 0) {
+    const allowed = data.data.allow_registration;
+    el.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0">
+        <div>
+          <div style="font-weight:500">允许注册</div>
+          <div class="form-hint">关闭后新用户无法通过注册页面创建账户</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="regToggle" ${allowed ? 'checked' : ''} onchange="toggleRegistration()">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    `;
+  }
+}
+
+async function toggleRegistration() {
+  const val = document.getElementById('regToggle').checked;
+  const data = await api('/api/admin/settings', { method: 'PUT', body: JSON.stringify({ allow_registration: val }) });
+  if (data && data.code === 0) {
+    showToast(val ? '已开启注册' : '已关闭注册');
   } else {
-    row.classList.add("hidden");
-    EXPANDED_ROW = null;
+    showToast('更新失败', 'error');
+    loadSettings();
   }
 }
 
-function renderDebug() {
-  const el = $("debugBlock");
-  if (!LAST_RESPONSE) { el.textContent = "// 暂无数据"; return; }
-  el.innerHTML = syntaxHighlight(JSON.stringify(LAST_RESPONSE, null, 2));
-}
+// ==================== API Docs ====================
+function renderApiDocs() {
+  const key = currentUser.api_key || '<your_api_key>';
+  return `
+    <div class="card">
+      <div class="card-header"><div class="card-title">API 接口文档</div></div>
+      <div class="form-hint" style="margin-bottom:16px">API 调用使用 key 参数进行鉴权，无需请求头。您的 API Key: <code>${key.substring(0, 8)}...${key.substring(24)}</code></div>
 
-function syntaxHighlight(json) {
-  json = escapeHtml(json);
-  return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
-    let cls = 'n';
-    if (/^"/.test(match)) {
-      if (/:$/.test(match)) { cls = 'k'; } else { cls = 's'; }
-    } else if (/true|false/.test(match)) { cls = 'b'; } else if (/null/.test(match)) { cls = 'c'; }
-    return '<span class="' + cls + '">' + match + '</span>';
-  });
-}
+      <h3 style="margin:16px 0 8px;font-size:15px">1. 获取邮件</h3>
+      <div class="code-block"><span class="comment"># POST /api/email/fetch</span>
+<span class="comment"># 参数: key (必填), 其余可选</span>
 
-function toggleDebug() {
-  $("debugBlock").classList.toggle("hidden");
-}
+curl -X POST <span class="string">"http://your-server:8000/api/email/fetch"</span> \\
+  -H <span class="string">"Content-Type: application/json"</span> \\
+  -d <span class="string">'{
+    "key": "${key}",
+    "sender": "noreply@example.com",
+    "subject": "验证码",
+    "keyword": "验证码",
+    "unseen": true,
+    "start_time": "2026-07-06T00:00:00",
+    "end_time": "2026-07-06T23:59:59",
+    "limit": 10
+  }'</span></div>
 
-async function markRead() {
-  const body = buildFetchBody();
-  if (!body.account_id && (!body.email || !body.token)) {
-    toast("请选择账户或填写邮箱+应用密码", "error");
-    return;
-  }
-  const markBody = { account_id: body.account_id, email: body.email, token: body.token };
-  if (body.sender) markBody.sender = body.sender;
-  if (body.subject) markBody.subject = body.subject;
-  if (!confirm("将匹配的邮件标记为已读,继续?")) return;
-  const r = await api("POST", "/api/email/mark_read", markBody);
-  if (r.ok && r.data && r.data.code === 0) {
-    toast("已标记 " + (r.data.data.marked || 0) + " 封为已读", "success");
-  } else {
-    toast((r.data && (r.data.msg || r.data.detail)) || "标记失败", "error");
-  }
-}
+      <h3 style="margin:16px 0 8px;font-size:15px">2. 标记已读</h3>
+      <div class="code-block"><span class="comment"># POST /api/email/mark_read</span>
 
-function resetQueryForm() {
-  $("queryTo").value = "";
-  $("querySender").value = "";
-  $("querySubject").value = "";
-  $("queryBody").value = "";
-  $("queryKeyword").value = "";
-  $("queryUnseen").value = "";
-  $("queryLimit").value = "50";
-  $("queryEmail").value = "";
-  $("queryToken").value = "";
-  const dt = defaultTimes();
-  $("queryStart").value = dt.start;
-  $("queryEnd").value = dt.end;
-}
+curl -X POST <span class="string">"http://your-server:8000/api/email/mark_read"</span> \\
+  -H <span class="string">"Content-Type: application/json"</span> \\
+  -d <span class="string">'{
+    "key": "${key}",
+    "sender": "noreply@example.com"
+  }'</span></div>
 
-window.addEventListener("DOMContentLoaded", () => {
-  $("loginToken").addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
-  if (TOKEN) {
-    api("POST", "/api/login", { token: TOKEN }).then(r => {
-      if (r.ok && r.data && r.data.code === 0) {
-        enterApp();
-      } else {
-        $("loginToken").value = TOKEN;
+      <h3 style="margin:16px 0 8px;font-size:15px">3. Python 调用示例</h3>
+      <div class="code-block"><span class="keyword">import</span> requests
+
+resp = requests.post(<span class="string">"http://your-server:8000/api/email/fetch"</span>, json={
+    <span class="string">"key"</span>: <span class="string">"${key}"</span>,
+    <span class="string">"unseen"</span>: <span class="keyword">True</span>,
+    <span class="string">"limit"</span>: 5
+})
+data = resp.json()
+<span class="keyword">for</span> email <span class="keyword">in</span> data[<span class="string">"data"</span>][<span class="string">"emails"</span>]:
+    print(email[<span class="string">"subject"</span>], email[<span class="string">"body"</span>])</div>
+
+      <h3 style="margin:16px 0 8px;font-size:15px">参数说明</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>参数</th><th>类型</th><th>必填</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>key</code></td><td>string</td><td>是</td><td>32位API密钥</td></tr>
+            <tr><td><code>sender</code></td><td>string</td><td>否</td><td>发件人邮箱筛选</td></tr>
+            <tr><td><code>to</code></td><td>string</td><td>否</td><td>收件人筛选(普通用户自动用别名)</td></tr>
+            <tr><td><code>subject</code></td><td>string</td><td>否</td><td>主题关键字</td></tr>
+            <tr><td><code>body</code></td><td>string</td><td>否</td><td>正文关键字</td></tr>
+            <tr><td><code>keyword</code></td><td>string</td><td>否</td><td>全文搜索(主题+正文+发件人+收件人)</td></tr>
+            <tr><td><code>unseen</code></td><td>bool</td><td>否</td><td>true=仅未读, false=仅已读</td></tr>
+            <tr><td><code>start_time</code></td><td>string</td><td>否</td><td>开始时间 (YYYY-MM-DDTHH:MM:SS)，默认近1小时</td></tr>
+            <tr><td><code>end_time</code></td><td>string</td><td>否</td><td>结束时间，默认当前</td></tr>
+            <tr><td><code>limit</code></td><td>int</td><td>否</td><td>返回数量，默认50</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 style="margin:16px 0 8px;font-size:15px">返回格式</h3>
+      <div class="code-block">{
+  <span class="string">"code"</span>: 0,
+  <span class="string">"msg"</span>: <span class="string">"success"</span>,
+  <span class="string">"data"</span>: {
+    <span class="string">"total"</span>: 2,
+    <span class="string">"emails"</span>: [
+      {
+        <span class="string">"id"</span>: <span class="string">"&lt;message-id&gt;"</span>,
+        <span class="string">"from"</span>: <span class="string">"sender@example.com"</span>,
+        <span class="string">"to"</span>: <span class="string">"you+alias@gmail.com"</span>,
+        <span class="string">"subject"</span>: <span class="string">"验证码"</span>,
+        <span class="string">"date"</span>: <span class="string">"2026-07-06 10:23:11"</span>,
+        <span class="string">"body"</span>: <span class="string">"您的验证码是 123456"</span>,
+        <span class="string">"unread"</span>: <span class="keyword">true</span>
       }
-    }).catch(() => { $("loginToken").value = TOKEN; });
+    ]
   }
-});
+}</div>
+    </div>
+  `;
+}
+
+// ==================== Tab switch with lazy load ====================
+const originalSwitchTab = switchTab;
+switchTab = async function(tabId) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
+  const content = document.getElementById('tabContent');
+  const renderers = {
+    emails: renderEmailQuery,
+    alias: renderAlias,
+    users: renderUsers,
+    stats: renderStats,
+    settings: renderSettings,
+    apidocs: renderApiDocs,
+  };
+  if (renderers[tabId]) content.innerHTML = renderers[tabId]();
+  // Lazy load data
+  if (tabId === 'users') loadUsers();
+  if (tabId === 'stats') loadStats();
+  if (tabId === 'settings') loadSettings();
+};
+
+// ==================== Init ====================
+(async function init() {
+  if (sessionToken) {
+    const ok = await loadCurrentUser();
+    if (ok) {
+      showAppView();
+      return;
+    }
+  }
+  showLoginView();
+})();
 </script>
 </body>
 </html>
