@@ -148,10 +148,13 @@ export async function adminUpdateUser(ctx: Ctx): Promise<Response> {
 export async function adminDeleteUser(ctx: Ctx): Promise<Response> {
   const admin = await requireAdmin(ctx);
   const userId = ctx.url.pathname.split('/')[4];
-  if (userId === 'admin') return fail('不能删除管理员账户');
+  // 通过 is_admin 字段判断,而非硬编码 id='admin'(因为用户 id 是随机 hex)
+  const targetUser = await db.getUserById(ctx.env, userId);
+  if (!targetUser) return fail('用户不存在', 404);
+  if (targetUser.is_admin) return fail('不能删除管理员账户');
   const ok2 = await db.deleteUser(ctx.env, userId);
   if (!ok2) return fail('用户不存在', 404);
-  await db.addLog(ctx.env, admin.id, admin.username, '', 'delete_user', `删除了用户 ${userId}`);
+  await db.addLog(ctx.env, admin.id, admin.username, '', 'delete_user', `删除了用户 ${targetUser.username}`);
   return ok(null);
 }
 
@@ -236,20 +239,27 @@ export async function oauthCallback(ctx: Ctx): Promise<Response> {
   const code = ctx.url.searchParams.get('code');
   const state = ctx.url.searchParams.get('state');
   const error = ctx.url.searchParams.get('error');
-  if (error) return renderOAuthResult(false, `授权失败: ${error}`);
+  if (error) return renderOAuthResult(false, '授权失败,请重试');  // 不回显 error 防注入
   if (!code || !state) return renderOAuthResult(false, '缺少 code 或 state 参数');
   try {
     const result = await handleOAuthCallback(ctx.env, code, state);
-    return renderOAuthResult(true, `已成功绑定 ${result.email}`);
+    return renderOAuthResult(true, `已成功绑定 ${escapeHtml(result.email)}`);
   } catch (e) {
-    return renderOAuthResult(false, (e as Error).message);
+    return renderOAuthResult(false, '授权流程异常,请重新发起');
   }
 }
 
+// HTML 转义防 XSS
+function escapeHtml(s: string): string {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function renderOAuthResult(success: boolean, message: string): Response {
+  // message 已转义,可安全插入 HTML
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>OAuth 绑定结果</title>
   <style>body{font-family:sans-serif;padding:40px;text-align:center;color:${success ? '#16a34a' : '#dc2626'};}</style></head>
-  <body><h2>${success ? '✓ 绑定成功' : '✗ 绑定失败'}</h2><p>${message}</p>
+  <body><h2>${success ? '绑定成功' : '绑定失败'}</h2><p>${message}</p>
   <script>setTimeout(()=>window.close(),3000);</script></body></html>`;
   return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 }
@@ -330,7 +340,7 @@ export async function apiFetchEmails(ctx: Ctx): Promise<Response> {
       },
     });
   } catch (e) {
-    return fail(`API错误: ${(e as Error).message}`, 500);
+    return fail('邮件查询失败,请稍后重试', 500);
   }
 }
 
@@ -346,7 +356,7 @@ export async function apiMarkRead(ctx: Ctx): Promise<Response> {
     await db.addLog(ctx.env, user.id, user.username, to, 'mark_read', `标记${count}封已读`);
     return ok({ marked: count });
   } catch (e) {
-    return fail(`API错误: ${(e as Error).message}`, 500);
+    return fail('标记已读失败,请稍后重试', 500);
   }
 }
 
@@ -368,6 +378,10 @@ export async function webFetchEmails(ctx: Ctx): Promise<Response> {
   }
   if (!accountId) return fail('请选择查询邮箱');
 
+  // 越权防护:校验该邮箱账号归属当前用户(自己的或公开的)
+  const account = await db.getMailAccountRaw(ctx.env, user.id, accountId);
+  if (!account) return fail('无权查询该邮箱', 403);
+
   try {
     const emails = await fetchEmails(ctx.env, accountId, { ...params, to: toFilter });
     await db.addLog(ctx.env, user.id, user.username, toFilter || '(全部)', 'web_fetch', `获取了${emails.length}封邮件`);
@@ -377,7 +391,7 @@ export async function webFetchEmails(ctx: Ctx): Promise<Response> {
       query: { email: '', to: toFilter, sender: params.sender, subject: params.subject, keyword: params.keyword, unseen: params.unseen, limit: params.limit },
     });
   } catch (e) {
-    return fail(`API错误: ${(e as Error).message}`, 500);
+    return fail('邮件查询失败,请稍后重试', 500);
   }
 }
 
@@ -396,9 +410,33 @@ export async function webhookCreate(ctx: Ctx): Promise<Response> {
   if (!url) return fail('请填写回调 URL');
   if (!/^https?:\/\//.test(url)) return fail('URL 必须以 http(s):// 开头');
   if (!events) return fail('请选择订阅事件');
+  // 越权防护:校验邮箱账号归属
+  const account = await db.getMailAccountRaw(ctx.env, user.id, mail_account_id);
+  if (!account) return fail('无权操作该邮箱', 403);
+  // SSRF 防护:拒绝内网/元数据地址
+  if (isPrivateOrUnsafeUrl(url)) return fail('不允许的回调地址');
   const id = await db.createWebhook(ctx.env, user.id, mail_account_id, target_alias || null, url, secret || null, events);
   await db.addLog(ctx.env, user.id, user.username, '', 'create_webhook', `创建了 Webhook ${url}`);
   return ok({ id });
+}
+
+// SSRF 防护:拦截内网 IP 和云元数据地址
+function isPrivateOrUnsafeUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    // 拒绝 localhost 和私有 IP 段
+    if (host === 'localhost' || host === '0.0.0.0') return true;
+    if (/^127\./.test(host)) return true;
+    if (/^10\./.test(host)) return true;
+    if (/^192\.168\./.test(host)) return true;
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
+    if (/^169\.254\./.test(host)) return true;  // 云元数据
+    if (host.startsWith('::1') || host.startsWith('fc') || host.startsWith('fd')) return true;  // IPv6 内网
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 export async function webhookDelete(ctx: Ctx): Promise<Response> {
@@ -424,6 +462,9 @@ export async function webhookPoll(ctx: Ctx): Promise<Response> {
   const user = await requireApiKey(ctx);
   const accountId = ctx.url.searchParams.get('account_id');
   if (!accountId) return fail('缺少 account_id');
+  // 越权防护:校验 account_id 归属当前用户
+  const account = await db.getMailAccountRaw(ctx.env, user.id, accountId);
+  if (!account) return fail('无权操作该邮箱', 403);
   const result = await pollAndPush(ctx.env, accountId);
   await db.addLog(ctx.env, user.id, user.username, accountId, 'webhook_poll', `推送 ${result.pushed} 个`);
   return ok(result);

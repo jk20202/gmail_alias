@@ -1099,152 +1099,94 @@ async function deleteWebhook(id) {
 }
 
 /* ============================================================
- * 4. API 文档页(含 Webhook 推送文档与代码示例)
+ * 4. API 接入文档页(消费者视角,含代码示例与一键复制)
  * ============================================================ */
-function viewDocsHtml() {
-  const apiKey = State.user ? State.user.api_key : 'YOUR_KEY';
-  return `
-  <div class="page-title">API 文档</div>
-  <div class="page-desc">所有接口统一返回 <code class="mono">{ code, msg, data }</code>,<code class="mono">code=0</code> 表示成功</div>
 
-  <div class="doc-section">
-    <h4>鉴权方式</h4>
-    <div class="card card-body">
-      <p style="margin-bottom:8px"><strong>1. Session 认证</strong> — Web 界面使用,请求头携带 <code class="mono">Authorization: Bearer &lt;session_token&gt;</code></p>
-      <p><strong>2. API Key 认证</strong> — 编程调用使用,URL 参数 <code class="mono">?key=&lt;api_key&gt;</code></p>
-    </div>
-  </div>
-
-  <div class="doc-section">
-    <h4>认证接口</h4>
-    ${endpointHtml('POST', '/api/auth/login', '登录', '{ username, password }', '{ session_token, user }')}
-    ${endpointHtml('POST', '/api/auth/register', '注册(受开关控制)', '{ username, password }', 'user')}
-    ${endpointHtml('POST', '/api/auth/logout', '登出', '-', 'null')}
-    ${endpointHtml('GET', '/api/auth/me', '获取当前用户', '-', 'user')}
-  </div>
-
-  <div class="doc-section">
-    <h4>账户与邮箱</h4>
-    ${endpointHtml('GET', '/api/account', '当前用户信息', '-', 'user')}
-    ${endpointHtml('POST', '/api/account/api_key', '重新生成 API Key', '-', 'user')}
-    ${endpointHtml('GET', '/api/account/mail_accounts', '我的邮箱列表', '-', '[account]')}
-    ${endpointHtml('GET', '/api/account/mail_accounts/available', '可用邮箱(含公开)', '-', '[account]')}
-    ${endpointHtml('DELETE', '/api/account/mail_accounts/:id', '删除邮箱', '-', 'null')}
-    ${endpointHtml('GET', '/api/account/oauth/start?provider=gmail', '启动 OAuth 绑定', '-', '{ auth_url }')}
-    ${endpointHtml('GET', '/api/account/alias/random_label', '随机别名标签', '-', '{ label }')}
-    ${endpointHtml('POST', '/api/account/alias', '设置别名', '{ mail_account_id, label }', 'user')}
-  </div>
-
-  <div class="doc-section">
-    <h4>邮件查询接口</h4>
-    ${endpointHtml('POST', '/api/email/fetch?key=KEY', 'API Key 查询邮件(必填 to)', '{ to, sender, subject, keyword, unseen, start_time, end_time, limit }', '{ total, emails[], query }')}
-    ${endpointHtml('POST', '/api/email/mark_read?key=KEY', '标记已读', '{ to, sender, subject }', '{ marked }')}
-    ${endpointHtml('POST', '/api/web/email/fetch', 'Session 查询邮件(优先用别名)', '{ sender, subject, keyword, unseen, start_time, end_time, limit }', '{ total, emails[], query }')}
-    <h5>邮件对象 emails[] 字段</h5>
-    ${tableHtml([
-      ['id', 'string', '邮件唯一 ID'],
-      ['from', 'string', '发件人'],
-      ['to', 'string', '收件人(别名地址)'],
-      ['subject', 'string', '主题'],
-      ['date', 'string', '显示用时间 YYYY-MM-DD HH:MM:SS'],
-      ['date_iso', 'string', 'ISO 8601 时间'],
-      ['body', 'string', '纯文本正文'],
-      ['html', 'string', 'HTML 正文'],
-      ['unread', 'boolean', '是否未读'],
-      ['provider', 'string', '邮箱提供方 gmail/outlook'],
-    ])}
-  </div>
-
-  <div class="doc-section">
-    <h4>Webhook 管理接口</h4>
-    ${endpointHtml('GET', '/api/webhooks', '我的订阅列表', '-', '[webhook]')}
-    ${endpointHtml('POST', '/api/webhooks', '创建订阅', '{ mail_account_id, url, events, target_alias?, secret? }', '{ id }')}
-    ${endpointHtml('DELETE', '/api/webhooks/:id', '删除订阅', '-', 'null')}
-    ${endpointHtml('POST', '/api/webhooks/:id/test', '发送测试推送', '-', '{ success }')}
-    ${endpointHtml('GET', '/api/webhook/poll?key=KEY&account_id=ID', '主动触发轮询推送', '-', '{ pushed, errors[] }')}
-  </div>
-
-  <div class="doc-section">
-    <h4>管理员接口</h4>
-    ${endpointHtml('GET', '/api/admin/users', '用户列表', '-', '[user]')}
-    ${endpointHtml('POST', '/api/admin/users', '创建用户', '{ username, password, is_admin }', 'user')}
-    ${endpointHtml('PUT', '/api/admin/users/:id', '更新用户', '{ password?, is_admin? }', 'user')}
-    ${endpointHtml('DELETE', '/api/admin/users/:id', '删除用户', '-', 'null')}
-    ${endpointHtml('GET', '/api/admin/stats', '系统统计', '-', '{ summary, logs[] }')}
-    ${endpointHtml('GET', '/api/admin/settings', '系统设置', '-', '{ allow_registration }')}
-    ${endpointHtml('PUT', '/api/admin/settings', '更新设置', '{ allow_registration }', '{ allow_registration }')}
-    ${endpointHtml('GET', '/api/admin/mail_accounts', '所有邮箱', '-', '[account]')}
-  </div>
-
-  <div class="doc-section">
-    <h4>Webhook 推送载荷文档 (重点)</h4>
-    <p class="form-hint" style="margin-bottom:12px">系统会以 <strong>POST</strong> 方式向你填写的回调 URL 推送 JSON 数据,Content-Type 为 application/json。若订阅时填写了 secret,则同时附带签名头 <code class="mono">X-Webhook-Signature</code></p>
-    <h5>载荷字段</h5>
-    ${tableHtml([
-      ['event', 'string', '事件类型: new_mail / unread / test'],
-      ['delivered_at', 'string', '推送时间 ISO 8601'],
-      ['mail_account_id', 'string', '邮箱账号 ID'],
-      ['email', 'string', '主邮箱地址'],
-      ['to_alias', 'string?', '命中的别名(未指定时不存在)'],
-      ['count', 'number', '本次推送邮件数量'],
-      ['emails', 'array', '邮件对象数组,字段同上方邮件对象'],
-    ])}
-    <h5>签名校验</h5>
-    <p class="form-hint" style="margin-bottom:8px"><code class="mono">X-Webhook-Signature</code> 是用订阅时填写的 secret 对原始请求 body 做 HMAC-SHA256 后的 <strong>base64url</strong> 编码字符串。务必使用「等长比较」防时序攻击。</p>
-    <pre class="code">${esc(
-`// 签名计算伪代码(与服务端一致)
-const sig = base64url(HMAC_SHA256(secret, requestBodyString))`)}
-    </pre>
-    <h5>Python 验签示例</h5>
-    <pre class="code">${escPy(pythonVerifyCode())}</pre>
-    <h5>Node.js 验签示例</h5>
-    <pre class="code">${escJs(jsVerifyCode())}</pre>
-  </div>
-
-  <div class="doc-section">
-    <h4>Python 调用案例 (重点)</h4>
-    <h5>1. 用 requests 查询别名邮件</h5>
-    <pre class="code">${escPy(pythonFetchExample(apiKey))}</pre>
-    <h5>2. 用 Flask 接收 Webhook 推送并验签(完整示例)</h5>
-    <pre class="code">${escPy(pythonFlaskWebhookExample())}</pre>
-  </div>`;
+// 复制代码到剪贴板: 复制成功后按钮短暂变为「已复制」
+async function copyCode(btn, text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    const original = btn.textContent;
+    btn.textContent = '已复制';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.textContent = original;
+      btn.classList.remove('copied');
+    }, 2000);
+  } catch (e) {
+    btn.textContent = '复制失败';
+    setTimeout(() => btn.textContent = '复制', 2000);
+  }
 }
 
-// 端点展示组件
-function endpointHtml(method, path, desc, req, resp) {
+// 代码块组件: 右上角复制按钮 + pre/code 结构
+// 把代码安全注入到 onclick 属性: 先 JSON 序列化, 再 HTML 转义属性值
+function codeBlock(code) {
+  const attr = JSON.stringify(code)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;');
+  return `<div class="code-block-wrap">
+  <button class="copy-btn" onclick="copyCode(this, ${attr})">复制</button>
+  <pre class="code-block"><code>${esc(code)}</code></pre>
+</div>`;
+}
+
+// 端点标题组件: 方法标签 + 路径 + 简短描述
+function endpointHeader(method, path, desc) {
   const m = method.toLowerCase();
   return `<div class="endpoint">
     <span class="method m-${m}">${method}</span><span class="path">${esc(path)}</span>
-    <div class="desc">${esc(desc)}${req !== '-' ? ` · 请求: <code class="mono">${esc(req)}</code>` : ''} · 返回: <code class="mono">${esc(resp)}</code></div>
+    <div class="desc">${esc(desc)}</div>
   </div>`;
 }
 
-// 字段表格组件
-function tableHtml(rows) {
+// 参数表格组件(四列: 字段/类型/必填/说明)
+function paramTable(rows) {
+  return `<div class="table-wrap"><table class="table">
+    <thead><tr><th>字段</th><th>类型</th><th>必填</th><th>说明</th></tr></thead>
+    <tbody>${rows.map(r => `<tr><td class="mono">${esc(r[0])}</td><td>${esc(r[1])}</td><td>${esc(r[2])}</td><td>${esc(r[3])}</td></tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+// 字段说明表格(三列: 字段/类型/说明)
+function fieldTable(rows) {
   return `<div class="table-wrap"><table class="table">
     <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
     <tbody>${rows.map(r => `<tr><td class="mono">${esc(r[0])}</td><td>${esc(r[1])}</td><td>${esc(r[2])}</td></tr>`).join('')}</tbody>
   </table></div>`;
 }
 
-// Python: 查询邮件示例
-function pythonFetchExample(apiKey) {
-  return `import requests
+function viewDocsHtml() {
+  // 动态读取当前登录用户的 API Key, 未登录用占位符; 每次切换到文档页都会重新渲染
+  const apiKey = (State.user && State.user.api_key) ? State.user.api_key : 'YOUR_API_KEY';
+  const API_BASE = 'https://your-worker.workers.dev';
 
-API_BASE = "https://your-worker.workers.dev"
-API_KEY = "${apiKey}"   # 替换为你的 API Key
+  // A. 查询邮件 — curl / Python / 响应示例
+  const curlFetch = `curl -X POST "${API_BASE}/api/email/fetch?key=${apiKey}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "to": "user+site@gmail.com",
+    "unseen": true,
+    "limit": 20
+  }'`;
+
+  const pyFetch = `import requests
+
+API_BASE = "${API_BASE}"
+API_KEY = "${apiKey}"
 
 # 查询别名邮箱的未读邮件
 resp = requests.post(
     f"{API_BASE}/api/email/fetch",
     params={"key": API_KEY},
     json={
-        "to": "user+newsletter@gmail.com",  # 别名邮箱地址
-        "sender": "",          # 可选: 按发件人筛选
-        "subject": "",         # 可选: 按主题筛选
-        "keyword": "验证码",    # 可选: 正文关键词
-        "unseen": True,        # 可选: 仅未读
-        "limit": 20,           # 可选: 数量上限
+        "to": "user+site@gmail.com",     # 别名邮箱地址
+        "sender": "",                    # 可选: 按发件人筛选
+        "subject": "",                   # 可选: 按主题筛选
+        "keyword": "验证码",              # 可选: 全文搜索
+        "unseen": True,                  # 可选: 仅未读邮件
+        "limit": 20,                     # 可选: 返回数量, 默认 50, 上限 100
         # "start_time": "2026-01-01T00:00:00Z",
         # "end_time":   "2026-07-08T00:00:00Z",
     },
@@ -1258,122 +1200,256 @@ result = data["data"]
 print(f"共 {result['total']} 封邮件")
 for mail in result["emails"]:
     print(f"- [{mail['date']}] {mail['subject']}  from {mail['from']}")
-    print(f"  正文: {mail['body'][:200]}")
+    print(f"  正文: {mail['body'][:200]}")`;
 
-# 标记已读
-requests.post(
+  const respFetch = `{
+  "code": 0,
+  "msg": "ok",
+  "data": {
+    "total": 1,
+    "emails": [
+      {
+        "id": "msg-abc123",
+        "from": "noreply@example.com",
+        "to": "user+site@gmail.com",
+        "subject": "您的验证码",
+        "date": "2026-07-08 14:30:00",
+        "date_iso": "2026-07-08T06:30:00.000Z",
+        "body": "您的验证码是 884213,5 分钟内有效。",
+        "html": "<p>您的验证码是 <b>884213</b>,5 分钟内有效。</p>",
+        "unread": true,
+        "provider": "gmail"
+      }
+    ],
+    "query": {
+      "to": "user+site@gmail.com",
+      "unseen": true,
+      "limit": 20
+    }
+  }
+}`;
+
+  // B. 标记邮件已读 — curl / Python / 响应示例
+  const curlMarkRead = `curl -X POST "${API_BASE}/api/email/mark_read?key=${apiKey}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "to": "user+site@gmail.com",
+    "sender": "noreply@example.com"
+  }'`;
+
+  const pyMarkRead = `import requests
+
+API_BASE = "${API_BASE}"
+API_KEY = "${apiKey}"
+
+# 把指定发件人发来的邮件标记为已读
+resp = requests.post(
     f"{API_BASE}/api/email/mark_read",
     params={"key": API_KEY},
-    json={"to": "user+newsletter@gmail.com", "sender": "", "subject": ""},
-)`;
-}
+    json={
+        "to": "user+site@gmail.com",       # 必填: 别名邮箱
+        "sender": "noreply@example.com",   # 可选: 仅标记该发件人
+        # "subject": "验证码",             # 可选: 仅标记含该主题的邮件
+    },
+    timeout=30,
+)
+data = resp.json()
+if data["code"] != 0:
+    raise RuntimeError(data["msg"])
 
-// Python: 验签代码
-function pythonVerifyCode() {
-  return `import hmac, hashlib, base64
+print(f"已标记 {data['data']['marked']} 封邮件为已读")`;
 
-def verify_signature(secret: str, body: bytes, signature: str) -> bool:
-    """校验 X-Webhook-Signature (HMAC-SHA256 base64url)"""
-    expected = hmac.new(
-        secret.encode("utf-8"), body, hashlib.sha256
-    ).digest()
-    # 转 base64url 并去掉 = 填充
-    expected_b64 = base64.urlsafe_b64encode(expected).rstrip(b"=").decode()
-    # 等长比较,防时序攻击
-    if len(expected_b64) != len(signature):
-        return False
-    return hmac.compare_digest(expected_b64, signature)`;
-}
+  const respMarkRead = `{
+  "code": 0,
+  "msg": "ok",
+  "data": {
+    "marked": 3
+  }
+}`;
 
-// Python: Flask 接收 Webhook 完整示例(>30 行)
-function pythonFlaskWebhookExample() {
-  return `import hmac, hashlib, base64
-from flask import Flask, request, abort, jsonify
+  // C. 触发 Webhook 推送 — curl / Python / 响应示例
+  const curlPoll = `curl "${API_BASE}/api/webhook/poll?key=${apiKey}&account_id=ACCOUNT_ID"`;
+
+  const pyPoll = `import requests
+
+API_BASE = "${API_BASE}"
+API_KEY = "${apiKey}"
+ACCOUNT_ID = "your-account-id"   # 在「我的账户」页可查看
+
+# 主动触发一次轮询: 系统会拉取最近 10 分钟邮件并推送到订阅的回调 URL
+resp = requests.get(
+    f"{API_BASE}/api/webhook/poll",
+    params={"key": API_KEY, "account_id": ACCOUNT_ID},
+    timeout=30,
+)
+data = resp.json()
+if data["code"] != 0:
+    raise RuntimeError(data["msg"])
+
+result = data["data"]
+print(f"本次推送 {result['pushed']} 个订阅, 失败 {len(result['errors'])} 个")`;
+
+  const respPoll = `{
+  "code": 0,
+  "msg": "ok",
+  "data": {
+    "pushed": 2,
+    "errors": []
+  }
+}`;
+
+  // D. 接收 Webhook 推送的 Python 示例(Flask + 飞书推送, 不含验签)
+  const pyFlask = `import requests
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
-WEBHOOK_SECRET = "your-subscribe-secret"   # 与订阅时填写一致
 
-def verify_signature(secret: str, body: bytes, signature: str) -> bool:
-    """校验 X-Webhook-Signature 签名"""
-    expected = hmac.new(
-        secret.encode("utf-8"), body, hashlib.sha256
-    ).digest()
-    expected_b64 = base64.urlsafe_b64encode(expected).rstrip(b"=").decode()
-    if len(expected_b64) != len(signature):
-        return False
-    return hmac.compare_digest(expected_b64, signature)
+# 飞书群机器人 webhook 地址(替换为你自己的)
+FEISHU_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx"
+
+
+def push_to_feishu(text: str):
+    """把消息推送到飞书群机器人"""
+    requests.post(
+        FEISHU_WEBHOOK,
+        json={"msg_type": "text", "content": {"text": text}},
+        timeout=10,
+    )
+
 
 @app.route("/webhook", methods=["POST"])
 def receive_webhook():
-    # 注意: 必须使用原始 body 验签,不要先用 get_json
-    raw_body = request.get_data()
-    signature = request.headers.get("X-Webhook-Signature", "")
-
-    # 如果设置了 secret,必须验签
-    if WEBHOOK_SECRET and not verify_signature(WEBHOOK_SECRET, raw_body, signature):
-        abort(401, "签名校验失败")
-
     payload = request.get_json(force=True)
     event = payload.get("event")
     emails = payload.get("emails", [])
-    alias = payload.get("to_alias")
-    print(f"收到事件 {event}, 共 {payload.get('count', 0)} 封, 别名 {alias}")
+    alias = payload.get("to_alias", "无别名")
 
+    # 拼接飞书消息内容
+    lines = [f"收到新邮件通知 ({event})"]
+    lines.append(f"主邮箱: {payload.get('email')}  别名: {alias}")
+    lines.append(f"共 {payload.get('count', 0)} 封邮件:")
     for mail in emails:
-        print(f"  - {mail.get('subject')} from {mail.get('from')}")
-        print(f"    收件人: {mail.get('to')}")
-        print(f"    时间: {mail.get('date')}")
+        lines.append(
+            f"- [{mail.get('date')}] {mail.get('subject')}"
+            f"  from {mail.get('from')}"
+        )
         body = mail.get("body", "")
-        # 业务处理: 提取验证码、转发、入库等
-        extract_and_handle(body)
+        if body:
+            lines.append(f"  正文: {body[:200]}")
 
+    push_to_feishu("\\n".join(lines))
     return jsonify({"ok": True}), 200
 
-def extract_and_handle(body: str):
-    """示例: 从邮件正文中提取 4-6 位验证码"""
-    import re
-    m = re.search(r"\\b(\\d{4,6})\\b", body)
-    if m:
-        code = m.group(1)
-        print(f"  提取到验证码: {code}")
-        # TODO: 转发到企业微信、写入数据库等
 
 if __name__ == "__main__":
-    # 生产环境建议 gunicorn + nginx 反代
     app.run(host="0.0.0.0", port=5000)`;
-}
 
-// JS: 验签代码
-function jsVerifyCode() {
-  return `const crypto = require('crypto');
+  return `
+  <style>
+    .code-block-wrap { position: relative; margin: 12px 0; }
+    .copy-btn { position: absolute; top: 8px; right: 8px; padding: 4px 10px; font-size: 12px; background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; cursor: pointer; transition: all 0.2s; z-index: 1; }
+    .copy-btn:hover { background: rgba(255,255,255,0.2); }
+    .copy-btn.copied { background: #16a34a; border-color: #16a34a; }
+    .code-block { background: #1e293b; color: #e2e8f0; padding: 16px; padding-top: 40px; border-radius: 8px; overflow-x: auto; font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; line-height: 1.6; }
+    .code-block code { background: none; padding: 0; font: inherit; color: inherit; }
+  </style>
+  <div class="page-title">API 接入文档</div>
+  <div class="page-desc">本页面面向开发者,介绍如何通过 API Key 调用邮件查询接口与 Webhook 推送。所有接口统一返回 <code class="mono">{ code, msg, data }</code>,<code class="mono">code=0</code> 表示成功。</div>
 
-function verifySignature(secret, body, signature) {
-  // HMAC-SHA256 后转 base64url (去掉 = 填充,与服务端一致)
-  const expected = crypto.createHmac('sha256', secret)
-    .update(body, 'utf8')
-    .digest('base64')
-    .replace(/\\+/g, '-')
-    .replace(/\\//g, '_')
-    .replace(/=+$/, '');
-  if (expected.length !== signature.length) return false;
-  // 等长比较防时序攻击
-  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
-}
+  <div class="doc-section">
+    <h4>鉴权方式</h4>
+    <div class="card card-body">
+      <p style="margin-bottom:0"><strong>API Key 认证</strong> — 编程调用时在 URL 上携带查询参数 <code class="mono">?key=&lt;your_api_key&gt;</code>。当前账号的 API Key 可在「我的账户」页重新生成。</p>
+    </div>
+  </div>
 
-// Express 示例: 注意需用 raw body 解析
-const express = require('express');
-const app = express();
-app.use('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
-  const signature = req.headers['x-webhook-signature'] || '';
-  if (!verifySignature(WEBHOOK_SECRET, req.body.toString('utf8'), signature)) {
-    return res.status(401).send('签名校验失败');
-  }
-  const payload = JSON.parse(req.body.toString('utf8'));
-  console.log('收到事件', payload.event, '邮件数', payload.count);
-  payload.emails.forEach(m => console.log('-', m.subject, m.from));
-  res.send('ok');
-});
-app.listen(3000);`;
+  <div class="doc-section">
+    <h4>A. 查询邮件</h4>
+    ${endpointHeader('POST', '/api/email/fetch?key=YOUR_API_KEY', '按收件地址(含别名)查询邮件,支持多维筛选与全文搜索')}
+    <h5>请求参数</h5>
+    ${paramTable([
+      ['to', 'string', '是', '查询邮箱地址(含别名,如 user+site@gmail.com)'],
+      ['sender', 'string', '否', '按发件人邮箱筛选'],
+      ['subject', 'string', '否', '按主题关键字筛选'],
+      ['keyword', 'string', '否', '全文搜索(自动匹配 from/to/subject/body)'],
+      ['unseen', 'boolean', '否', 'true=仅未读邮件'],
+      ['start_time', 'string', '否', '开始时间 ISO 8601'],
+      ['end_time', 'string', '否', '结束时间 ISO 8601'],
+      ['limit', 'number', '否', '返回数量,默认 50,上限 100'],
+    ])}
+    <h5>curl 示例</h5>
+    ${codeBlock(curlFetch)}
+    <h5>Python 示例</h5>
+    ${codeBlock(pyFetch)}
+    <h5>响应示例</h5>
+    ${codeBlock(respFetch)}
+  </div>
+
+  <div class="doc-section">
+    <h4>B. 标记邮件已读</h4>
+    ${endpointHeader('POST', '/api/email/mark_read?key=YOUR_API_KEY', '把符合条件的邮件标记为已读')}
+    <h5>请求参数</h5>
+    ${paramTable([
+      ['to', 'string', '是', '查询邮箱地址(含别名)'],
+      ['sender', 'string', '否', '按发件人筛选,限定标记范围'],
+      ['subject', 'string', '否', '按主题筛选,限定标记范围'],
+    ])}
+    <h5>curl 示例</h5>
+    ${codeBlock(curlMarkRead)}
+    <h5>Python 示例</h5>
+    ${codeBlock(pyMarkRead)}
+    <h5>响应示例</h5>
+    ${codeBlock(respMarkRead)}
+  </div>
+
+  <div class="doc-section">
+    <h4>C. 触发 Webhook 推送</h4>
+    ${endpointHeader('GET', '/api/webhook/poll?key=YOUR_API_KEY&account_id=ACCOUNT_ID', '主动触发一次轮询:系统会拉取该邮箱最近 10 分钟邮件并推送到订阅的回调 URL')}
+    <h5>请求参数</h5>
+    ${paramTable([
+      ['key', 'string', '是', 'API Key(URL 查询参数)'],
+      ['account_id', 'string', '是', '邮箱账号 ID(在「我的账户」页可查看)'],
+    ])}
+    <h5>curl 示例</h5>
+    ${codeBlock(curlPoll)}
+    <h5>Python 示例</h5>
+    ${codeBlock(pyPoll)}
+    <h5>响应示例</h5>
+    ${codeBlock(respPoll)}
+  </div>
+
+  <div class="doc-section">
+    <h4>D. Webhook 推送载荷说明</h4>
+    <p class="form-hint" style="margin-bottom:12px">当邮箱收到新邮件时,系统会以 <strong>POST</strong> 方式向你订阅时填写的回调 URL 推送 JSON 数据,Content-Type 为 <code class="mono">application/json</code>。</p>
+    <h5>载荷字段</h5>
+    ${fieldTable([
+      ['event', 'string', '事件类型: new_mail / unread / test'],
+      ['delivered_at', 'string', '推送时间 ISO 8601'],
+      ['mail_account_id', 'string', '邮箱账号 ID'],
+      ['email', 'string', '主邮箱地址'],
+      ['to_alias', 'string?', '命中的别名(未指定时不存在)'],
+      ['count', 'number', '本次推送邮件数量'],
+      ['emails', 'array', '邮件数组(字段同查询接口返回)'],
+    ])}
+    <h5>接收 Webhook 推送的 Python 示例(Flask + 飞书推送)</h5>
+    ${codeBlock(pyFlask)}
+  </div>
+
+  <div class="doc-section">
+    <h4>邮件对象 emails[] 字段说明</h4>
+    ${fieldTable([
+      ['id', 'string', '邮件唯一 ID'],
+      ['from', 'string', '发件人'],
+      ['to', 'string', '收件人(别名地址)'],
+      ['subject', 'string', '主题'],
+      ['date', 'string', '显示用时间 YYYY-MM-DD HH:MM:SS'],
+      ['date_iso', 'string', 'ISO 8601 时间'],
+      ['body', 'string', '纯文本正文'],
+      ['html', 'string', 'HTML 正文'],
+      ['unread', 'boolean', '是否未读'],
+      ['provider', 'string', '邮箱提供方 gmail/outlook'],
+    ])}
+  </div>`;
 }
 
 // 代码块语法高亮辅助函数(轻量级,仅做注释/字符串着色)

@@ -139,11 +139,7 @@ wrangler secret put BASE_URL                # https://你的-worker.workers.dev
 wrangler deploy
 ```
 
-部署后访问 `https://你的-worker.workers.dev`，默认管理员：
-- 用户名：`admin`
-- 密码：`admin123_`
-
-**首次登录后立即在「我的账户」改密码。**
+部署后访问 `https://你的-worker.workers.dev`，使用 [wrangler.toml](wrangler.toml) 中 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 配置的账户登录。**首次登录后立即在「我的账户」修改密码。**
 
 ## 别名邮箱规则
 
@@ -337,64 +333,7 @@ curl "https://your-worker.workers.dev/api/webhook/poll?key=YOUR_KEY&account_id=g
 | `count` | int | 本次推送邮件数 |
 | `emails` | Email[] | 邮件数组，字段同查询接口 |
 
-### 签名验证
-
-如订阅时填了 `secret`，每次推送会带：
-```
-X-Webhook-Signature: <HMAC-SHA256(secret, body) base64url>
-```
-
-**Python 验签示例（Flask 接收 Webhook）**：
-
-```python
-import hmac
-import hashlib
-import base64
-from flask import Flask, request, jsonify
-
-app = Flask(__name__)
-WEBHOOK_SECRET = "你在订阅时填的 secret"
-
-def verify_signature(body: bytes, signature: str) -> bool:
-    """验证 HMAC-SHA256 签名 (base64url 编码)"""
-    expected = hmac.new(
-        WEBHOOK_SECRET.encode("utf-8"),
-        body,
-        hashlib.sha256
-    ).digest()
-    expected_b64 = base64.urlsafe_b64encode(expected).rstrip(b"=").decode("ascii")
-    # 等长比较防时序攻击
-    return hmac.compare_digest(expected_b64, signature)
-
-
-@app.route("/webhook", methods=["POST"])
-def receive_webhook():
-    body = request.get_data()
-    signature = request.headers.get("X-Webhook-Signature", "")
-    if not verify_signature(body, signature):
-        return jsonify({"error": "invalid signature"}), 401
-
-    payload = request.get_json()
-    print(f"收到 {payload['count']} 封新邮件，主邮箱: {payload['email']}")
-    for email in payload["emails"]:
-        print(f"  - {email['subject']} (from: {email['from']})")
-        # 在这里接入你的业务逻辑：写入数据库、转发到 Telegram 等
-    return jsonify({"ok": True}), 200
-
-
-if __name__ == "__main__":
-    app.run(port=5000)
-```
-
-### Node.js 验签
-
-```js
-const crypto = require('crypto');
-function verify(body, signature, secret) {
-  const expected = crypto.createHmac('sha256', secret).update(body).digest('base64url');
-  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
-}
-```
+> Webhook 签名验签属于可选的高级安全配置，详见 [附录：Webhook 签名验签](#附录webhook-签名验签)。
 
 ## 路由列表
 
@@ -452,6 +391,10 @@ function verify(body, signature, secret) {
 - Webhook 推送 HMAC-SHA256 签名
 - Web 界面需登录，API 调用需 Key
 - 管理员操作全部有日志
+- 越权防护：所有用户操作均校验资源归属
+- SSRF 防护：Webhook URL 拒绝内网/元数据地址
+- XSS 防护：OAuth 回调 HTML 转义
+- 信息泄露防护：错误信息不暴露内部细节
 
 ## 速率限制（第三方 API）
 
@@ -482,6 +425,66 @@ wrangler dev
 | `refresh error: invalid_grant` | refresh_token 失效（用户改密码/撤销授权） | 删除邮箱重新绑定 |
 | 邮件查询返回空但邮箱里有邮件 | 时间范围不对 / 别名过滤太严 | 检查 `to` 参数和 `start_time` |
 | `Mail.Read 权限不足` | Azure 应用没加权限或没管理员同意 | Azure AD → API 权限 → 添加 `Mail.Read` → 点「为 xxx 授予管理员同意」 |
+
+## 附录：Webhook 签名验签
+
+> 此为可选的高级安全配置。Webhook 用于飞书等场景的简单推送可跳过本节。
+
+如订阅时填了 `secret`，每次推送会带：
+```
+X-Webhook-Signature: <HMAC-SHA256(secret, body) base64url>
+```
+
+**Python 验签示例（Flask 接收 Webhook）**：
+
+```python
+import hmac
+import hashlib
+import base64
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+WEBHOOK_SECRET = "你在订阅时填的 secret"
+
+def verify_signature(body: bytes, signature: str) -> bool:
+    """验证 HMAC-SHA256 签名 (base64url 编码)"""
+    expected = hmac.new(
+        WEBHOOK_SECRET.encode("utf-8"),
+        body,
+        hashlib.sha256
+    ).digest()
+    expected_b64 = base64.urlsafe_b64encode(expected).rstrip(b"=").decode("ascii")
+    # 等长比较防时序攻击
+    return hmac.compare_digest(expected_b64, signature)
+
+
+@app.route("/webhook", methods=["POST"])
+def receive_webhook():
+    body = request.get_data()
+    signature = request.headers.get("X-Webhook-Signature", "")
+    if not verify_signature(body, signature):
+        return jsonify({"error": "invalid signature"}), 401
+
+    payload = request.get_json()
+    print(f"收到 {payload['count']} 封新邮件，主邮箱: {payload['email']}")
+    for email in payload["emails"]:
+        print(f"  - {email['subject']} (from: {email['from']})")
+    return jsonify({"ok": True}), 200
+
+
+if __name__ == "__main__":
+    app.run(port=5000)
+```
+
+**Node.js 验签**：
+
+```js
+const crypto = require('crypto');
+function verify(body, signature, secret) {
+  const expected = crypto.createHmac('sha256', secret).update(body).digest('base64url');
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+}
+```
 
 ## License
 
