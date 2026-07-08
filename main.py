@@ -72,13 +72,15 @@ class AdminUserUpdate(BaseModel):
 
 class GmailAccountCreate(BaseModel):
     email: str
-    token: str
+    token: str = ""
+    provider: str = "gmail"
     is_public: bool = False
 
 
 class GmailAccountUpdate(BaseModel):
     email: Optional[str] = None
     token: Optional[str] = None
+    provider: Optional[str] = None
     is_public: Optional[bool] = None
 
 
@@ -245,7 +247,7 @@ async def admin_update_gmail_account(user_id: str, ga_id: str, req: GmailAccount
         raise HTTPException(status_code=400, detail="邮箱格式错误")
     if req.token is not None and len(req.token) < 8:
         raise HTTPException(status_code=400, detail="应用密码长度不足")
-    updated = user_store.admin_update_gmail_account(user_id, ga_id, req.email, req.token, req.is_public)
+    updated = user_store.admin_update_gmail_account(user_id, ga_id, req.email, req.token, req.is_public, req.provider)
     if not updated:
         raise HTTPException(status_code=404, detail="邮箱账号不存在")
     usage_log.add(admin["id"], admin["username"], "", "admin_update_gmail", f"管理员修改了用户 {user_id} 的邮箱 {ga_id}")
@@ -289,18 +291,20 @@ async def list_gmail_accounts(user=Depends(require_session)):
 async def add_gmail_account(req: GmailAccountCreate, user=Depends(require_session)):
     if "@" not in req.email:
         raise HTTPException(status_code=400, detail="邮箱格式错误")
-    if len(req.token) < 8:
+    if req.provider != "outlook" and len(req.token) < 8:
         raise HTTPException(status_code=400, detail="应用密码长度不足")
-    updated = user_store.add_gmail_account(user["id"], req.email, req.token, req.is_public)
+    # outlook 走 OAuth,创建时 token 留空,创建后引导用户完成授权
+    token = req.token if req.provider != "outlook" else ""
+    updated = user_store.add_gmail_account(user["id"], req.email, token, req.is_public, req.provider)
     if not updated:
         raise HTTPException(status_code=404, detail="用户不存在")
-    usage_log.add(user["id"], user["username"], "", "add_gmail", f"绑定了邮箱 {req.email}")
+    usage_log.add(user["id"], user["username"], "", "add_gmail", f"绑定了邮箱 {req.email} ({req.provider})")
     return {"code": 0, "msg": "success", "data": updated}
 
 
 @app.put("/api/account/gmail_accounts/{ga_id}")
 async def update_gmail_account(ga_id: str, req: GmailAccountUpdate, user=Depends(require_session)):
-    updated = user_store.update_gmail_account(user["id"], ga_id, req.email, req.token, req.is_public)
+    updated = user_store.update_gmail_account(user["id"], ga_id, req.email, req.token, req.is_public, req.provider)
     if not updated:
         raise HTTPException(status_code=404, detail="邮箱账号不存在")
     usage_log.add(user["id"], user["username"], "", "update_gmail", f"更新了邮箱配置 {ga_id}")
@@ -346,30 +350,49 @@ async def random_label(user=Depends(require_session)):
 # ==================== Email API (key-based) ====================
 
 def _resolve_gmail_creds(user, gmail_account_id=None, to_email=None):
-    """根据用户和可选的 gmail_account_id 或 to_email 解析出邮箱地址和 token"""
+    """根据用户和可选的 gmail_account_id 或 to_email 解析出邮箱地址、token 和 provider"""
     user_id = user["id"]
 
     # 优先使用指定的 gmail_account_id (web 页面用)
     if gmail_account_id:
         ga = user_store.get_gmail_account_raw(user_id, gmail_account_id)
         if not ga:
-            return None, None, "未找到指定的谷歌邮箱或无权使用"
-        return ga["email"], ga["token"], None
+            return None, None, None, "未找到指定的谷歌邮箱或无权使用"
+        return ga["email"], ga["token"], ga.get("provider", "gmail"), None
 
     # API 调用: 根据 to_email 反查主邮箱凭据
     if to_email:
         if "@" not in to_email:
-            return None, None, "to 邮箱格式错误"
-        prefix, domain = to_email.split("@", 1)
-        main_prefix = prefix.split("+", 1)[0]
-        main_email = f"{main_prefix}@{domain}"
-        # 在用户可用的邮箱(自己的+公开的)中查找主邮箱
+            return None, None, None, "to 邮箱格式错误"
+        to_prefix, to_domain = to_email.split("@", 1)
+        # 遍历可用邮箱，按 domain + 前缀匹配(兼容 gmail +别名 / 2925 _别名或直接追加)
+        candidates = []
         for ga in user_store.list_available_gmail_accounts(user_id):
-            if ga["email"] == main_email:
-                raw = user_store.get_gmail_account_raw(user_id, ga["id"])
-                if raw:
-                    return raw["email"], raw["token"], None
-        return None, None, f"未找到 {main_email} 对应的谷歌邮箱或无权使用"
+            ga_email = ga["email"]
+            if "@" not in ga_email:
+                continue
+            ga_prefix, ga_domain = ga_email.split("@", 1)
+            if ga_domain.lower() != to_domain.lower():
+                continue
+            gp = ga_prefix.lower()
+            tp = to_prefix.lower()
+            if tp == gp:
+                candidates.append((len(gp), ga))
+            elif ga.get("provider") == "2925":
+                # 2925 子邮箱 = 主前缀 + 任意后缀(可带 _ 或直接追加)
+                if tp.startswith(gp):
+                    candidates.append((len(gp), ga))
+            else:
+                # gmail 子邮箱必须用 + 分隔
+                if tp.startswith(gp + "+"):
+                    candidates.append((len(gp), ga))
+        # 取最长前缀匹配，避免 jin@ 误匹配 jinkaifu999@
+        if candidates:
+            candidates.sort(key=lambda x: x[0], reverse=True)
+            raw = user_store.get_gmail_account_raw(user_id, candidates[0][1]["id"])
+            if raw:
+                return raw["email"], raw["token"], raw.get("provider", "gmail"), None
+        return None, None, None, f"未找到 {to_email} 对应的主邮箱或无权使用"
 
     # 无 to_email 且无 gmail_account_id: 用别名关联的邮箱(web 默认场景)
     alias = user.get("alias")
@@ -377,10 +400,10 @@ def _resolve_gmail_creds(user, gmail_account_id=None, to_email=None):
         ga_id = alias.get("gmail_account_id") if isinstance(alias, dict) else None
         ga = user_store.get_gmail_account_raw(user_id, ga_id) if ga_id else None
         if not ga:
-            return None, None, "别名关联的谷歌邮箱不存在或已删除"
-        return ga["email"], ga["token"], None
+            return None, None, None, "别名关联的谷歌邮箱不存在或已删除"
+        return ga["email"], ga["token"], ga.get("provider", "gmail"), None
 
-    return None, None, "未指定查询邮箱"
+    return None, None, None, "未指定查询邮箱"
 
 
 @app.post("/api/email/fetch")
@@ -389,7 +412,7 @@ async def api_fetch_emails(req: FetchRequest, user=Depends(require_api_key)):
     if not req.to:
         raise HTTPException(status_code=400, detail="API调用必须指定to查询邮箱")
 
-    email_addr, email_token, err = _resolve_gmail_creds(user, to_email=req.to)
+    email_addr, email_token, provider, err = _resolve_gmail_creds(user, to_email=req.to)
     if err:
         raise HTTPException(status_code=400, detail=err)
 
@@ -412,6 +435,7 @@ async def api_fetch_emails(req: FetchRequest, user=Depends(require_api_key)):
             start_time=req.start_time,
             end_time=req.end_time,
             limit=req.limit,
+            provider=provider,
         )
         usage_log.add(
             user["id"], user["username"], to_filter or "(全部)",
@@ -444,12 +468,12 @@ async def api_fetch_emails(req: FetchRequest, user=Depends(require_api_key)):
 
 @app.post("/api/email/mark_read")
 async def api_mark_read(req: MarkReadRequest, user=Depends(require_api_key)):
-    email_addr, email_token, err = _resolve_gmail_creds(user, to_email=req.to)
+    email_addr, email_token, provider, err = _resolve_gmail_creds(user, to_email=req.to)
     if err:
         raise HTTPException(status_code=400, detail=err)
 
     try:
-        count = await mark_emails_read(email_addr, email_token, req.sender, req.subject)
+        count = await mark_emails_read(email_addr, email_token, req.sender, req.subject, provider)
         usage_log.add(user["id"], user["username"], req.to, "mark_read", f"标记{count}封已读")
         return {"code": 0, "msg": "success", "data": {"marked": count}}
     except Exception as e:
@@ -462,7 +486,7 @@ async def api_mark_read(req: MarkReadRequest, user=Depends(require_api_key)):
 async def web_fetch_emails(req: WebFetchRequest, user=Depends(require_session)):
     raw_user = user_store.get_user_raw(user["id"])
 
-    email_addr, email_token, err = _resolve_gmail_creds(raw_user, req.gmail_account_id)
+    email_addr, email_token, provider, err = _resolve_gmail_creds(raw_user, req.gmail_account_id)
     if err:
         raise HTTPException(status_code=400, detail=err)
 
@@ -491,6 +515,7 @@ async def web_fetch_emails(req: WebFetchRequest, user=Depends(require_session)):
             start_time=req.start_time,
             end_time=req.end_time,
             limit=req.limit,
+            provider=provider,
         )
         usage_log.add(user["id"], user["username"], to_filter or "(全部)", "web_fetch", f"获取了{len(emails)}封邮件")
         return {
@@ -515,6 +540,73 @@ async def web_fetch_emails(req: WebFetchRequest, user=Depends(require_session)):
         raise
     except Exception as e:
         return JSONResponse(status_code=500, content={"code": 1, "msg": f"IMAP错误: {str(e)}", "data": None})
+
+
+# ==================== Microsoft OAuth 授权 ====================
+
+@app.get("/api/ms_auth/start")
+async def ms_auth_start(ga_id: str, user=Depends(require_session)):
+    """生成微软 OAuth 授权 URL,前端跳转过去让用户登录"""
+    import ms_oauth
+    # 校验该 ga_id 属于当前用户
+    ga = user_store.get_gmail_account_raw(user["id"], ga_id)
+    if not ga:
+        raise HTTPException(status_code=404, detail="邮箱账号不存在或无权操作")
+    if ga.get("provider") != "outlook":
+        raise HTTPException(status_code=400, detail="仅微软邮箱需要 OAuth 授权")
+    auth_url, state = ms_oauth.get_auth_url(user["id"], ga_id)
+    return {"code": 0, "msg": "success", "data": {"auth_url": auth_url, "state": state}}
+
+
+@app.get("/api/ms_auth/callback")
+async def ms_auth_callback(code: str, state: str):
+    """微软 OAuth 回调:用 code 换 token 并回写到对应邮箱账户"""
+    import ms_oauth
+    payload = ms_oauth._decode_state(state)
+    if not payload:
+        return HTMLResponse("<h3>授权失败: state 参数无效</h3>", status_code=400)
+    user_id = payload.get("u")
+    ga_id = payload.get("g")
+    if not user_id or not ga_id:
+        return HTMLResponse("<h3>授权失败: state 信息缺失</h3>", status_code=400)
+    ga = user_store.get_gmail_account_raw(user_id, ga_id)
+    if not ga:
+        return HTMLResponse("<h3>授权失败: 邮箱账号不存在</h3>", status_code=404)
+    try:
+        token_data = ms_oauth.exchange_code_for_token(code)
+        token_json = ms_oauth.save_token_str(token_data)
+        ok = user_store.update_outlook_token_by_email(ga["email"], token_json)
+        if not ok:
+            return HTMLResponse("<h3>授权失败: token 回写失败</h3>", status_code=500)
+    except Exception as e:
+        return HTMLResponse(f"<h3>授权失败: {e}</h3>", status_code=500)
+    usage_log.add(user_id, "", ga["email"], "ms_oauth", f"微软邮箱 {ga['email']} 授权成功")
+    return HTMLResponse(
+        "<h3>授权成功!</h3><p>微软邮箱已绑定,可关闭此页面返回管理系统。</p>"
+        "<script>setTimeout(()=>window.close(),3000);</script>"
+    )
+
+
+@app.post("/api/ms_auth/reauth/{ga_id}")
+async def ms_auth_reauth(ga_id: str, user=Depends(require_session)):
+    """清除 OAuth token 并重新发起授权(用于 token 失效后重新授权)"""
+    ga = user_store.get_gmail_account_raw(user["id"], ga_id)
+    if not ga:
+        raise HTTPException(status_code=404, detail="邮箱账号不存在或无权操作")
+    if ga.get("provider") != "outlook":
+        raise HTTPException(status_code=400, detail="仅微软邮箱需要 OAuth 授权")
+    user_store.update_outlook_token_by_email(ga["email"], "")
+    import ms_oauth
+    auth_url, state = ms_oauth.get_auth_url(user["id"], ga_id)
+    return {"code": 0, "msg": "success", "data": {"auth_url": auth_url, "state": state}}
+
+
+# 注册 OAuth token 自动刷新后的回写回调
+def _on_outlook_token_refreshed(email_addr, new_token_json):
+    user_store.update_outlook_token_by_email(email_addr, new_token_json)
+
+import email_service
+email_service.set_outlook_token_refresh_callback(_on_outlook_token_refreshed)
 
 
 if __name__ == "__main__":

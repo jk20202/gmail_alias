@@ -905,26 +905,35 @@ function renderAccount() {
     </div>
     <div class="card">
       <div class="card-header">
-        <div class="card-title">谷歌邮箱绑定</div>
+        <div class="card-title">邮箱绑定</div>
         <button class="btn btn-sm" onclick="showAddGmail()">+ 添加绑定</button>
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>邮箱地址</th><th>公开</th><th>应用密码</th><th>创建时间</th><th>操作</th></tr></thead>
+          <thead><tr><th>邮箱地址</th><th>类型</th><th>公开</th><th>凭据/授权</th><th>创建时间</th><th>操作</th></tr></thead>
           <tbody>
-            ${accounts.length === 0 ? '<tr><td colspan="5" style="text-align:center;color:var(--text-lighter)">暂未绑定谷歌邮箱</td></tr>' :
-              accounts.map(ga => `
+            ${accounts.length === 0 ? '<tr><td colspan="6" style="text-align:center;color:var(--text-lighter)">暂未绑定邮箱</td></tr>' :
+              accounts.map(ga => {
+                const isOutlook = (ga.provider || 'gmail') === 'outlook';
+                const credCell = isOutlook
+                  ? (ga.auth_status === 'authorized'
+                      ? '<span class="tag tag-green">已授权</span>'
+                      : '<span class="tag tag-red">未授权</span>')
+                  : `<code style="font-size:11px">${ga.token_masked || '****'}</code>`;
+                const actions = `
+                    <button class="btn-link" onclick="showEditGmail('${ga.id}')">编辑</button>
+                    ${isOutlook ? `<button class="btn-link" onclick="startMsAuth('${ga.id}')">${ga.auth_status === 'authorized' ? '重新授权' : '去授权'}</button>` : ''}
+                    <button class="btn-link" style="color:var(--danger)" onclick="deleteGmail('${ga.id}','${escapeHtml(ga.email)}')">删除</button>`;
+                return `
                 <tr>
                   <td>${escapeHtml(ga.email)}</td>
+                  <td><span class="tag tag-gray">${escapeHtml(ga.provider || 'gmail')}</span></td>
                   <td>${ga.is_public ? '<span class="tag tag-green">公开</span>' : '<span class="tag tag-gray">私有</span>'}</td>
-                  <td><code style="font-size:11px">${ga.token_masked || '****'}</code></td>
+                  <td>${credCell}</td>
                   <td style="font-size:12px">${ga.created_at ? ga.created_at.substring(0, 19).replace('T', ' ') : '-'}</td>
-                  <td>
-                    <button class="btn-link" onclick="showEditGmail('${ga.id}')">编辑</button>
-                    <button class="btn-link" style="color:var(--danger)" onclick="deleteGmail('${ga.id}','${escapeHtml(ga.email)}')">删除</button>
-                  </td>
-                </tr>
-              `).join('')
+                  <td>${actions}</td>
+                </tr>`;
+              }).join('')
             }
           </tbody>
         </table>
@@ -934,16 +943,33 @@ function renderAccount() {
   `;
 }
 
+function providerHint(provider) {
+  if (provider === '2925')
+    return '2925 邮箱用登录密码(非授权码)，别名格式: 前缀_标签@2925.com';
+  if (provider === 'outlook')
+    return '微软邮箱(hotmail/outlook/live)走网页 OAuth 授权，无需应用密码。别名格式: 前缀+标签@outlook.com';
+  return '在 Google 账户 > 安全 > 应用专用密码 中生成，别名格式: 前缀+标签@gmail.com';
+}
+
 function showAddGmail() {
-  showModal('添加谷歌邮箱绑定', `
+  showModal('添加邮箱绑定', `
+    <div class="form-group">
+      <label>邮箱类型</label>
+      <select id="newGmailProvider" onchange="onNewProviderChange(this.value)">
+        <option value="gmail">Gmail (imap.gmail.com / 993 SSL / +别名)</option>
+        <option value="2925">2925邮箱 (imap.2925.com / 143 明文 / _别名)</option>
+        <option value="outlook">微软邮箱 (Graph API / 网页OAuth / +别名)</option>
+      </select>
+      <div class="form-hint" id="newGmailProviderHint">${providerHint('gmail')}</div>
+    </div>
     <div class="form-group">
       <label>邮箱地址</label>
       <input type="text" id="newGmailEmail" placeholder="your@gmail.com">
     </div>
-    <div class="form-group">
+    <div class="form-group" id="newGmailTokenGroup">
       <label>应用密码</label>
-      <input type="text" id="newGmailToken" placeholder="16位应用密码">
-      <div class="form-hint">在 Google 账户 > 安全 > 应用专用密码 中生成</div>
+      <input type="text" id="newGmailToken" placeholder="应用密码 / 2925登录密码">
+      <div class="form-hint" id="newGmailTokenHint"></div>
     </div>
     <div class="form-group">
       <label>是否公开给其他用户</label>
@@ -959,21 +985,41 @@ function showAddGmail() {
   document.getElementById('newGmailPublic').onchange = (e) => {
     document.getElementById('newGmailPublicText').textContent = e.target.checked ? '公开' : '私有';
   };
+  onNewProviderChange('gmail');
+}
+
+function onNewProviderChange(provider) {
+  document.getElementById('newGmailProviderHint').textContent = providerHint(provider);
+  const grp = document.getElementById('newGmailTokenGroup');
+  const hint = document.getElementById('newGmailTokenHint');
+  if (provider === 'outlook') {
+    grp.style.display = 'none';
+  } else {
+    grp.style.display = '';
+    hint.textContent = provider === '2925' ? '填写登录密码' : '在 Google 账户生成应用专用密码';
+  }
 }
 
 async function addGmail() {
   const email = document.getElementById('newGmailEmail').value.trim();
   const token = document.getElementById('newGmailToken').value.trim();
+  const provider = document.getElementById('newGmailProvider').value;
   const is_public = document.getElementById('newGmailPublic').checked;
-  if (!email || !token) { showToast('请填写完整', 'error'); return; }
+  if (!email) { showToast('请填写邮箱地址', 'error'); return; }
   if (!email.includes('@')) { showToast('邮箱格式错误', 'error'); return; }
+  if (provider !== 'outlook' && !token) { showToast('请填写应用密码', 'error'); return; }
   const data = await api('/api/account/gmail_accounts', {
     method: 'POST',
-    body: JSON.stringify({ email, token, is_public })
+    body: JSON.stringify({ email, token: provider === 'outlook' ? '' : token, provider, is_public })
   });
   if (data && data.code === 0) {
     currentUser = data.data;
     closeModal();
+    if (provider === 'outlook') {
+      // 创建后引导用户完成 OAuth 授权
+      const ga = (currentUser.gmail_accounts || []).find(g => g.email === email);
+      if (ga) { showToast('已创建,请完成微软授权', 'info'); startMsAuth(ga.id); return; }
+    }
     showToast('添加成功');
     switchTab('account');
   } else {
@@ -981,18 +1027,47 @@ async function addGmail() {
   }
 }
 
+async function startMsAuth(gaId) {
+  const data = await api(`/api/ms_auth/start?ga_id=${encodeURIComponent(gaId)}`);
+  if (data && data.code === 0) {
+    window.open(data.data.auth_url, '_blank');
+    showToast('请在新窗口完成微软登录授权,完成后刷新页面', 'info');
+    switchTab('account');
+  } else {
+    showToast(data ? data.detail || '获取授权链接失败' : '网络错误', 'error');
+  }
+}
+
 async function showEditGmail(gaId) {
   const ga = (currentUser.gmail_accounts || []).find(g => g.id === gaId);
   if (!ga) return;
-  showModal('编辑谷歌邮箱', `
+  const provider = ga.provider || 'gmail';
+  const isOutlook = provider === 'outlook';
+  const credInfo = isOutlook
+    ? (ga.auth_status === 'authorized' ? '已授权 OAuth' : '未授权 - 请在列表点"去授权"')
+    : `当前: ${ga.token_masked || '****'}`;
+  showModal('编辑邮箱', `
+    <div class="form-group">
+      <label>邮箱类型</label>
+      <select id="editGmailProvider" onchange="onEditProviderChange(this.value)">
+        <option value="gmail" ${provider === 'gmail' ? 'selected' : ''}>Gmail</option>
+        <option value="2925" ${provider === '2925' ? 'selected' : ''}>2925邮箱</option>
+        <option value="outlook" ${isOutlook ? 'selected' : ''}>微软邮箱</option>
+      </select>
+      <div class="form-hint" id="editGmailProviderHint">${providerHint(provider)}</div>
+    </div>
     <div class="form-group">
       <label>邮箱地址</label>
       <input type="text" id="editGmailEmail" value="${escapeHtml(ga.email)}">
     </div>
-    <div class="form-group">
+    <div class="form-group" id="editGmailTokenGroup" style="${isOutlook ? 'display:none' : ''}">
       <label>应用密码</label>
       <input type="text" id="editGmailToken" placeholder="留空不修改">
-      <div class="form-hint">当前: ${ga.token_masked || '****'}</div>
+      <div class="form-hint">${credInfo}</div>
+    </div>
+    <div class="form-group" id="editGmailOAuthInfo" style="${isOutlook ? '' : 'display:none'}">
+      <label>授权状态</label>
+      <div class="form-hint">${credInfo}</div>
     </div>
     <div class="form-group">
       <label>是否公开</label>
@@ -1010,11 +1085,19 @@ async function showEditGmail(gaId) {
   };
 }
 
+function onEditProviderChange(provider) {
+  document.getElementById('editGmailProviderHint').textContent = providerHint(provider);
+  const isOutlook = provider === 'outlook';
+  document.getElementById('editGmailTokenGroup').style.display = isOutlook ? 'none' : '';
+  document.getElementById('editGmailOAuthInfo').style.display = isOutlook ? '' : 'none';
+}
+
 async function editGmail(gaId) {
   const email = document.getElementById('editGmailEmail').value.trim();
   const tokenVal = document.getElementById('editGmailToken').value.trim();
+  const provider = document.getElementById('editGmailProvider').value;
   const is_public = document.getElementById('editGmailPublic').checked;
-  const body = { email, is_public };
+  const body = { email, provider, is_public };
   if (tokenVal) body.token = tokenVal;
   const data = await api(`/api/account/gmail_accounts/${gaId}`, {
     method: 'PUT',
@@ -1276,8 +1359,8 @@ function renderSettings() {
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>所属用户</th><th>邮箱地址</th><th>公开</th><th>Token</th><th>创建时间</th><th>操作</th></tr></thead>
-          <tbody id="adminGmailTableBody"><tr><td colspan="6" style="text-align:center;color:var(--text-lighter)">加载中...</td></tr></tbody>
+          <thead><tr><th>所属用户</th><th>邮箱地址</th><th>类型</th><th>公开</th><th>Token</th><th>创建时间</th><th>操作</th></tr></thead>
+          <tbody id="adminGmailTableBody"><tr><td colspan="7" style="text-align:center;color:var(--text-lighter)">加载中...</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -1312,53 +1395,88 @@ async function loadAdminGmailAccounts() {
   const data = await api('/api/admin/gmail_accounts');
   const tbody = document.getElementById('adminGmailTableBody');
   if (!tbody) return;
+  window._adminGmailCache = (data && data.code === 0) ? data.data : [];
   if (data && data.code === 0) {
     if (data.data.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-lighter)">暂无主邮箱</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-lighter)">暂无主邮箱</td></tr>';
       return;
     }
-    tbody.innerHTML = data.data.map(g => `
+    tbody.innerHTML = data.data.map(g => {
+      const isOutlook = (g.provider || 'gmail') === 'outlook';
+      const credCell = isOutlook
+        ? (g.auth_status === 'authorized' ? '<span class="tag tag-green">已授权</span>' : '<span class="tag tag-red">未授权</span>')
+        : `<code style="font-size:11px">${g.token_masked || '****'}</code>`;
+      return `
       <tr>
         <td>${escapeHtml(g.owner_username)}</td>
         <td style="font-size:12px">${escapeHtml(g.email)}</td>
+        <td><span class="tag tag-gray">${escapeHtml(g.provider || 'gmail')}</span></td>
         <td>${g.is_public ? '<span class="tag tag-green">公开</span>' : '<span class="tag tag-gray">私有</span>'}</td>
-        <td><code style="font-size:11px">${g.token_masked || '****'}</code></td>
+        <td>${credCell}</td>
         <td style="font-size:12px">${g.created_at ? g.created_at.substring(0, 19).replace('T', ' ') : '-'}</td>
         <td>
           <button class="btn-link" onclick="showEditAdminGmail('${g.owner_id}','${g.id}')">编辑</button>
           <button class="btn-link" style="color:var(--danger)" onclick="deleteAdminGmail('${g.owner_id}','${g.id}','${g.email}')">删除</button>
         </td>
       </tr>
-    `).join('');
+    `}).join('');
   }
 }
 
 function showEditAdminGmail(ownerId, gaId) {
+  const g = (window._adminGmailCache || []).find(x => x.owner_id === ownerId && x.id === gaId) || {};
+  const provider = g.provider || 'gmail';
+  const isOutlook = provider === 'outlook';
+  const credInfo = isOutlook
+    ? (g.auth_status === 'authorized' ? '已授权 OAuth(由用户自行授权)' : '未授权 - 需用户登录后授权')
+    : `当前: ${g.token_masked || '****'}`;
   showModal('编辑主邮箱', `
     <div class="form-group">
-      <label>邮箱地址</label>
-      <input type="text" id="adminGmailEmail" placeholder="邮箱地址">
+      <label>邮箱类型</label>
+      <select id="adminGmailProvider" onchange="onAdminProviderChange(this.value)">
+        <option value="gmail" ${provider === 'gmail' ? 'selected' : ''}>Gmail</option>
+        <option value="2925" ${provider === '2925' ? 'selected' : ''}>2925邮箱</option>
+        <option value="outlook" ${isOutlook ? 'selected' : ''}>微软邮箱</option>
+      </select>
+      <div class="form-hint" id="adminGmailProviderHint">${providerHint(provider)}</div>
     </div>
     <div class="form-group">
+      <label>邮箱地址</label>
+      <input type="text" id="adminGmailEmail" value="${escapeHtml(g.email || '')}" placeholder="邮箱地址">
+    </div>
+    <div class="form-group" id="adminGmailTokenGroup" style="${isOutlook ? 'display:none' : ''}">
       <label>应用密码 (留空不修改)</label>
       <input type="text" id="adminGmailToken" placeholder="留空不修改">
+      <div class="form-hint">${credInfo}</div>
+    </div>
+    <div class="form-group" id="adminGmailOAuthInfo" style="${isOutlook ? '' : 'display:none'}">
+      <label>授权状态</label>
+      <div class="form-hint">${credInfo}</div>
     </div>
     <div class="form-group">
       <label>是否公开</label>
       <select id="adminGmailPublic">
-        <option value="false">私有</option>
-        <option value="true">公开</option>
+        <option value="false" ${!g.is_public ? 'selected' : ''}>私有</option>
+        <option value="true" ${g.is_public ? 'selected' : ''}>公开</option>
       </select>
     </div>
   `, `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn" onclick="editAdminGmail('${ownerId}','${gaId}')">保存</button>`);
 }
 
+function onAdminProviderChange(provider) {
+  document.getElementById('adminGmailProviderHint').textContent = providerHint(provider);
+  const isOutlook = provider === 'outlook';
+  document.getElementById('adminGmailTokenGroup').style.display = isOutlook ? 'none' : '';
+  document.getElementById('adminGmailOAuthInfo').style.display = isOutlook ? '' : 'none';
+}
+
 async function editAdminGmail(ownerId, gaId) {
   const email = document.getElementById('adminGmailEmail').value.trim();
   const token = document.getElementById('adminGmailToken').value;
+  const provider = document.getElementById('adminGmailProvider').value;
   const is_public = document.getElementById('adminGmailPublic').value === 'true';
   if (!email) { showToast('请填写邮箱地址', 'error'); return; }
-  const body = { email, is_public };
+  const body = { email, provider, is_public };
   if (token) body.token = token;
   const data = await api(`/api/admin/users/${ownerId}/gmail_accounts/${gaId}`, {
     method: 'PUT',

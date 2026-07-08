@@ -37,12 +37,13 @@ def _gen_alias_label():
     return "".join(secrets.choice(chars) for _ in range(length))
 
 
-def _build_alias_full(gmail_email, label):
-    """拼接别名: prefix+label@domain"""
+def _build_alias_full(gmail_email, label, provider="gmail"):
+    """拼接别名: gmail 用 prefix+label@domain; 2925 用 prefix_label@domain"""
     if not gmail_email or "@" not in gmail_email:
         return ""
     prefix, domain = gmail_email.split("@", 1)
-    return f"{prefix}+{label}@{domain}"
+    sep = "_" if provider == "2925" else "+"
+    return f"{prefix}{sep}{label}@{domain}"
 
 
 class UserStore:
@@ -127,21 +128,33 @@ class UserStore:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
     def _safe_user(self, u):
+        accounts = []
+        for ga in u.get("gmail_accounts", []):
+            provider = ga.get("provider", "gmail")
+            acct = {
+                "id": ga["id"],
+                "email": ga["email"],
+                "provider": provider,
+                "is_public": ga.get("is_public", False),
+                "created_at": ga.get("created_at", ""),
+            }
+            if provider == "outlook":
+                # outlook 走 OAuth,token 是 JSON,不脱敏展示;只显示授权状态
+                import ms_oauth
+                token_data = ms_oauth.load_token_str(ga.get("token", ""))
+                acct["auth_status"] = "authorized" if token_data and token_data.get("access_token") else "pending"
+                acct["token_masked"] = "OAuth" if token_data else "未授权"
+            else:
+                acct["auth_status"] = "ok"
+                raw_token = ga.get("token", "")
+                acct["token_masked"] = (raw_token[:4] + "****" + raw_token[-4:]) if len(raw_token) > 8 else "****"
+            accounts.append(acct)
         return {
             "id": u["id"],
             "username": u["username"],
             "api_key": u["api_key"],
             "is_admin": u.get("is_admin", False),
-            "gmail_accounts": [
-                {
-                    "id": ga["id"],
-                    "email": ga["email"],
-                    "is_public": ga.get("is_public", False),
-                    "created_at": ga.get("created_at", ""),
-                    "token_masked": (ga.get("token", "")[:4] + "****" + ga.get("token", "")[-4:]) if len(ga.get("token", "")) > 8 else "****",
-                }
-                for ga in u.get("gmail_accounts", [])
-            ],
+            "gmail_accounts": accounts,
             "alias": u.get("alias"),
             "created_at": u.get("created_at", ""),
         }
@@ -262,7 +275,7 @@ class UserStore:
                     return u.get("gmail_accounts", [])
         return []
 
-    def add_gmail_account(self, user_id, email, token, is_public=False):
+    def add_gmail_account(self, user_id, email, token, is_public=False, provider="gmail"):
         with self._lock:
             data = self._load_users()
             for u in data["users"]:
@@ -271,6 +284,7 @@ class UserStore:
                         "id": _gen_gmail_id(),
                         "email": email,
                         "token": token,
+                        "provider": provider,
                         "is_public": is_public,
                         "created_at": datetime.now().isoformat(),
                     }
@@ -279,7 +293,7 @@ class UserStore:
                     return self._safe_user(u)
         return None
 
-    def update_gmail_account(self, user_id, ga_id, email=None, token=None, is_public=None):
+    def update_gmail_account(self, user_id, ga_id, email=None, token=None, is_public=None, provider=None):
         with self._lock:
             data = self._load_users()
             for u in data["users"]:
@@ -293,6 +307,8 @@ class UserStore:
                             ga["token"] = token
                         if is_public is not None:
                             ga["is_public"] = is_public
+                        if provider is not None:
+                            ga["provider"] = provider
                         self._save_users(data)
                         return self._safe_user(u)
         return None
@@ -324,6 +340,7 @@ class UserStore:
                         result.append({
                             "id": ga["id"],
                             "email": ga["email"],
+                            "provider": ga.get("provider", "gmail"),
                             "is_public": ga.get("is_public", False),
                             "owner": u["username"],
                             "is_own": u["id"] == user_id,
@@ -332,23 +349,34 @@ class UserStore:
 
     def admin_list_all_gmail_accounts(self):
         """管理员: 列出所有用户的主邮箱(含 owner 信息)，token 脱敏"""
+        import ms_oauth
         with self._lock:
             data = self._load_users()
             result = []
             for u in data["users"]:
                 for ga in u.get("gmail_accounts", []):
-                    result.append({
+                    provider = ga.get("provider", "gmail")
+                    entry = {
                         "id": ga["id"],
                         "email": ga["email"],
+                        "provider": provider,
                         "is_public": ga.get("is_public", False),
                         "created_at": ga.get("created_at", ""),
-                        "token_masked": (ga.get("token", "")[:4] + "****" + ga.get("token", "")[-4:]) if len(ga.get("token", "")) > 8 else "****",
                         "owner_id": u["id"],
                         "owner_username": u["username"],
-                    })
+                    }
+                    if provider == "outlook":
+                        token_data = ms_oauth.load_token_str(ga.get("token", ""))
+                        entry["auth_status"] = "authorized" if token_data and token_data.get("access_token") else "pending"
+                        entry["token_masked"] = "OAuth" if token_data else "未授权"
+                    else:
+                        entry["auth_status"] = "ok"
+                        raw_token = ga.get("token", "")
+                        entry["token_masked"] = (raw_token[:4] + "****" + raw_token[-4:]) if len(raw_token) > 8 else "****"
+                    result.append(entry)
             return result
 
-    def admin_update_gmail_account(self, user_id, ga_id, email=None, token=None, is_public=None):
+    def admin_update_gmail_account(self, user_id, ga_id, email=None, token=None, is_public=None, provider=None):
         """管理员: 修改任意用户的主邮箱"""
         with self._lock:
             data = self._load_users()
@@ -363,6 +391,8 @@ class UserStore:
                             ga["token"] = token
                         if is_public is not None:
                             ga["is_public"] = is_public
+                        if provider is not None:
+                            ga["provider"] = provider
                         self._save_users(data)
                         return self._safe_user(u)
         return None
@@ -405,6 +435,28 @@ class UserStore:
                         return ga
         return None
 
+    def update_outlook_token_by_email(self, email, token_json):
+        """OAuth token 刷新后,按邮箱地址回写新 token"""
+        with self._lock:
+            data = self._load_users()
+            for u in data["users"]:
+                for ga in u.get("gmail_accounts", []):
+                    if ga["email"] == email:
+                        ga["token"] = token_json
+                        self._save_users(data)
+                        return True
+        return False
+
+    def get_user_id_by_ga_id(self, ga_id):
+        """根据 gmail_account_id 查找所属 user_id"""
+        with self._lock:
+            data = self._load_users()
+            for u in data["users"]:
+                for ga in u.get("gmail_accounts", []):
+                    if ga["id"] == ga_id:
+                        return u["id"]
+        return None
+
     # ==================== Alias ====================
 
     def set_alias(self, user_id, gmail_account_id, label):
@@ -426,13 +478,15 @@ class UserStore:
                         break
                 if not ga:
                     return None, "未找到指定的谷歌邮箱或无权使用"
-                full = _build_alias_full(ga["email"], label)
+                provider = ga.get("provider", "gmail")
+                full = _build_alias_full(ga["email"], label, provider)
                 if not full:
                     return None, "别名生成失败，邮箱格式错误"
                 u["alias"] = {
                     "gmail_account_id": gmail_account_id,
                     "label": label,
                     "full": full,
+                    "provider": provider,
                 }
                 self._save_users(data)
                 return self._safe_user(u), None
