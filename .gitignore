@@ -1,32 +1,6 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-venv/
-env/
-ENV/
-.venv/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# 数据文件(含账户敏感信息)
-data/
-*.json
-
-# 日志
+node_modules/
+.wrangler/
+.dev.vars
+dist/
 *.log
-logs/
-
-# OS
 .DS_Store
-Thumbs.db
-
-# 配置覆盖
-.env
-config.local.ini

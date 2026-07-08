@@ -1,0 +1,35 @@
+name = "mail-alias"
+main = "src/index.ts"
+compatibility_date = "2024-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Workers 静态资源(前端界面)
+[assets]
+directory = "./static"
+binding = "ASSETS"
+
+# D1 数据库(用户/邮箱账号/Webhook/日志)
+[[d1_databases]]
+binding = "DB"
+database_name = "mail_alias"
+database_id = "REPLACE_WITH_YOUR_D1_ID"
+
+# KV(会话/OAuth state 缓存)
+[[kv_namespaces]]
+binding = "KV"
+id = "REPLACE_WITH_YOUR_KV_ID"
+
+# 变量(可在 wrangler secret 中覆盖,或在此明文填入测试值)
+[vars]
+# OAuth 应用凭据 - 实际部署请用 `wrangler secret put` 写入
+# GOOGLE_CLIENT_ID = "xxx"
+# GOOGLE_CLIENT_SECRET = "xxx"
+# MS_CLIENT_ID = "xxx"
+# MS_CLIENT_SECRET = "xxx"
+# JWT_SECRET = "随机长字符串"
+# ENCRYPT_KEY = "32字节hex,用于加密refresh_token"
+# BASE_URL = "https://your-worker.workers.dev"
+
+# 默认管理员(首次部署后请改密码)
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "admin123_"

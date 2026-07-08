@@ -3,12 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Gmail 邮件管理系统</title>
+<title>别名邮箱管理系统</title>
 <style>
+/* ============ 全局变量与基础样式 ============ */
 :root {
   --primary: #4f46e5;
   --primary-hover: #4338ca;
   --primary-light: #eef2ff;
+  --primary-dark: #3730a3;
   --success: #16a34a;
   --success-light: #dcfce7;
   --danger: #dc2626;
@@ -16,1596 +18,1598 @@
   --danger-light: #fee2e2;
   --warning: #d97706;
   --warning-light: #fef3c7;
-  --bg: #f5f7fb;
+  --bg: #f8fafc;
   --card-bg: #ffffff;
-  --border: #e5e7eb;
-  --text: #1f2937;
-  --text-light: #6b7280;
-  --text-lighter: #9ca3af;
-  --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+  --border: #e2e8f0;
+  --text: #1e293b;
+  --text-light: #64748b;
+  --text-lighter: #94a3b8;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
   --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -2px rgba(0,0,0,0.05);
   --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.05);
   --radius: 8px;
-  --radius-sm: 4px;
+  --radius-sm: 6px;
+  --radius-lg: 12px;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   background: var(--bg);
   color: var(--text);
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
 }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
 
-/* Login */
-.login-wrap {
-  min-height: 100vh; display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px;
-}
-.login-card {
-  background: var(--card-bg); border-radius: 12px; box-shadow: var(--shadow-lg);
-  padding: 40px; width: 100%; max-width: 380px;
-}
-.login-card .logo {
-  width: 56px; height: 56px; margin: 0 auto 16px;
-  background: var(--primary); border-radius: 14px;
-  display: flex; align-items: center; justify-content: center;
-  color: #fff; font-size: 28px; font-weight: 700;
-}
-.login-card h1 { font-size: 22px; text-align: center; margin-bottom: 8px; }
-.login-card .subtitle { text-align: center; color: var(--text-light); margin-bottom: 28px; font-size: 13px; }
-.login-card .field { margin-bottom: 18px; }
-.login-card label { display: block; margin-bottom: 6px; font-weight: 500; font-size: 13px; }
-.login-card input {
-  width: 100%; padding: 10px 12px; border: 1px solid var(--border);
-  border-radius: var(--radius-sm); font-size: 14px; background: #fff;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-.login-card input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,70,229,0.1); }
-.login-card .switch-link { text-align: center; margin-top: 16px; font-size: 13px; color: var(--text-light); }
-.login-card .switch-link a { color: var(--primary); cursor: pointer; text-decoration: none; }
-.login-card .switch-link a:hover { text-decoration: underline; }
-.login-card .alert { padding: 10px 12px; border-radius: var(--radius-sm); margin-bottom: 16px; font-size: 13px; display: none; }
-.login-card .alert.show { display: block; }
-.login-card .alert-error { background: var(--danger-light); color: var(--danger); }
-
-/* Buttons */
+/* ============ 通用组件 ============ */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 9px 16px; border: none; border-radius: var(--radius-sm);
-  font-size: 14px; font-weight: 500; cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
-  background: var(--primary); color: #fff; white-space: nowrap;
+  padding: 8px 16px; border: 1px solid transparent; border-radius: var(--radius-sm);
+  font-size: 14px; font-weight: 500; cursor: pointer; transition: all .15s ease;
+  background: var(--primary); color: #fff; line-height: 1.4;
 }
 .btn:hover { background: var(--primary-hover); }
-.btn:disabled { opacity: 0.55; cursor: not-allowed; }
-.btn-block { width: 100%; }
-.btn-secondary { background: #fff; color: var(--text); border: 1px solid var(--border); }
-.btn-secondary:hover { background: #f9fafb; }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: .55; cursor: not-allowed; }
+.btn-secondary { background: #fff; color: var(--text); border-color: var(--border); }
+.btn-secondary:hover { background: #f8fafc; border-color: var(--text-lighter); }
 .btn-danger { background: var(--danger); }
 .btn-danger:hover { background: var(--danger-hover); }
 .btn-success { background: var(--success); }
-.btn-success:hover { background: #15803d; }
-.btn-sm { padding: 5px 10px; font-size: 12px; }
-.btn-link { background: none; border: none; color: var(--primary); padding: 4px 8px; font-size: 13px; cursor: pointer; }
-.btn-link:hover { text-decoration: underline; }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+.btn-block { width: 100%; }
 
-/* App layout */
-.app { display: none; }
-.app.active { display: block; }
-.app-header {
-  background: var(--card-bg); border-bottom: 1px solid var(--border);
-  padding: 0 24px; position: sticky; top: 0; z-index: 10;
-}
-.app-header-inner {
-  max-width: 1400px; margin: 0 auto; display: flex; align-items: center;
-  justify-content: space-between; height: 56px;
-}
-.app-title { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; }
-.app-title .dot {
-  width: 28px; height: 28px; background: var(--primary); border-radius: 7px;
-  display: flex; align-items: center; justify-content: center;
-  color: #fff; font-weight: 700; font-size: 14px;
-}
-.app-header .user-info { display: flex; align-items: center; gap: 12px; font-size: 13px; }
-.app-header .badge {
-  padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600;
-}
-.app-header .badge-admin { background: var(--primary-light); color: var(--primary); }
-.app-header .badge-user { background: var(--success-light); color: var(--success); }
-
-/* Tabs */
-.tabs {
-  display: flex; gap: 4px; background: var(--card-bg);
-  border-bottom: 1px solid var(--border); padding: 0 24px;
-  position: sticky; top: 56px; z-index: 9;
-}
-.tabs-inner { max-width: 1400px; margin: 0 auto; display: flex; gap: 4px; }
-.tab {
-  padding: 10px 16px; border: none; background: none; cursor: pointer;
-  font-size: 14px; color: var(--text-light); border-bottom: 2px solid transparent;
-  transition: color 0.15s, border-color 0.15s;
-}
-.tab:hover { color: var(--text); }
-.tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 500; }
-
-/* Content */
-.content { max-width: 1400px; margin: 0 auto; padding: 24px; }
-.tab-panel { display: none; }
-.tab-panel.active { display: block; }
-
-/* Cards */
 .card {
-  background: var(--card-bg); border-radius: var(--radius);
-  box-shadow: var(--shadow); padding: 20px; margin-bottom: 16px;
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
 }
-.card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-.card-title { font-size: 16px; font-weight: 600; }
+.card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.card-header h3 { font-size: 16px; font-weight: 600; }
+.card-body { padding: 20px; }
 
-/* Stats grid */
-.stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px; }
-.stat-card {
-  background: var(--card-bg); border-radius: var(--radius);
-  box-shadow: var(--shadow); padding: 20px;
+.form-group { margin-bottom: 16px; }
+.form-group:last-child { margin-bottom: 0; }
+.form-label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 500; color: var(--text); }
+.form-label .req { color: var(--danger); margin-left: 2px; }
+.form-control {
+  width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 14px; color: var(--text); background: #fff; transition: border-color .15s, box-shadow .15s;
+  font-family: inherit;
 }
-.stat-card .stat-label { font-size: 12px; color: var(--text-light); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
-.stat-card .stat-value { font-size: 28px; font-weight: 700; color: var(--text); }
-.stat-card .stat-value.primary { color: var(--primary); }
+.form-control:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,70,229,.12); }
+.form-control::placeholder { color: var(--text-lighter); }
+textarea.form-control { resize: vertical; min-height: 80px; }
+select.form-control { cursor: pointer; }
+.form-hint { margin-top: 4px; font-size: 12px; color: var(--text-light); }
+.form-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.form-row > .form-group { flex: 1; min-width: 160px; }
 
-/* Table */
-table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
-th { font-weight: 600; color: var(--text-light); background: #f9fafb; }
-tr:hover { background: #f9fafb; }
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 999px;
+  font-size: 12px; font-weight: 500; line-height: 1.5;
+}
+.badge-primary { background: var(--primary-light); color: var(--primary); }
+.badge-success { background: var(--success-light); color: var(--success); }
+.badge-danger { background: var(--danger-light); color: var(--danger); }
+.badge-warning { background: var(--warning-light); color: var(--warning); }
+.badge-gray { background: #f1f5f9; color: var(--text-light); }
+
+.table { width: 100%; border-collapse: collapse; }
+.table th, .table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; }
+.table th { font-weight: 600; color: var(--text-light); background: #f8fafc; white-space: nowrap; }
+.table tr:hover td { background: #fafbfd; }
 .table-wrap { overflow-x: auto; }
 
-/* Form */
-.form-group { margin-bottom: 16px; }
-.form-group label { display: block; margin-bottom: 6px; font-weight: 500; font-size: 13px; }
-.form-group input, .form-group select, .form-group textarea {
-  width: 100%; padding: 9px 12px; border: 1px solid var(--border);
-  border-radius: var(--radius-sm); font-size: 14px; background: #fff;
+/* ============ 登录页 ============ */
+.login-wrap {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); padding: 20px;
 }
-.form-group input:focus, .form-group select:focus, .form-group textarea:focus {
-  outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,70,229,0.1);
+.login-card {
+  background: #fff; border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+  padding: 40px; width: 100%; max-width: 400px;
 }
-.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.form-hint { font-size: 12px; color: var(--text-lighter); margin-top: 4px; }
+.login-card .brand { text-align: center; margin-bottom: 28px; }
+.login-card .brand .logo {
+  width: 56px; height: 56px; margin: 0 auto 12px; border-radius: 14px;
+  background: var(--primary); display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 26px; font-weight: 700; box-shadow: 0 8px 16px rgba(79,70,229,.3);
+}
+.login-card .brand h1 { font-size: 22px; font-weight: 700; color: var(--text); }
+.login-card .brand p { font-size: 13px; color: var(--text-light); margin-top: 4px; }
+.login-tabs { display: flex; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+.login-tabs button {
+  flex: 1; padding: 10px; background: none; border: none; cursor: pointer;
+  font-size: 14px; font-weight: 500; color: var(--text-light); border-bottom: 2px solid transparent;
+}
+.login-tabs button.active { color: var(--primary); border-bottom-color: var(--primary); }
+.login-error {
+  background: var(--danger-light); color: var(--danger); padding: 10px 12px;
+  border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 16px; display: none;
+}
+.login-card .form-control { padding: 10px 14px; }
+.login-card .btn { padding: 10px 16px; font-size: 15px; }
+.login-card .toggle-tip { text-align: center; margin-top: 16px; font-size: 13px; color: var(--text-light); }
 
-/* Modal */
-.modal-overlay {
-  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4);
-  z-index: 100; align-items: center; justify-content: center;
+/* ============ 主应用框架 ============ */
+.app { min-height: 100vh; display: flex; flex-direction: column; }
+.app-header {
+  background: #fff; border-bottom: 1px solid var(--border);
+  box-shadow: var(--shadow-sm); position: sticky; top: 0; z-index: 100;
 }
-.modal-overlay.show { display: flex; }
-.modal {
-  background: var(--card-bg); border-radius: 12px; box-shadow: var(--shadow-lg);
-  width: 90%; max-width: 500px; max-height: 90vh; overflow-y: auto;
+.app-header-inner {
+  max-width: 1200px; margin: 0 auto; padding: 0 20px;
+  display: flex; align-items: center; justify-content: space-between; height: 56px; gap: 16px;
 }
-.modal-header {
-  padding: 16px 20px; border-bottom: 1px solid var(--border);
-  display: flex; justify-content: space-between; align-items: center;
+.app-logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; color: var(--text); white-space: nowrap; }
+.app-logo .mark { width: 30px; height: 30px; border-radius: 8px; background: var(--primary); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-size: 15px; }
+.app-nav { display: flex; gap: 4px; flex-wrap: wrap; }
+.app-nav button {
+  padding: 6px 12px; background: none; border: none; cursor: pointer;
+  font-size: 14px; color: var(--text-light); border-radius: var(--radius-sm); font-family: inherit;
 }
+.app-nav button:hover { background: var(--primary-light); color: var(--primary); }
+.app-nav button.active { background: var(--primary); color: #fff; }
+.app-user { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+.app-user .meta { font-size: 12px; line-height: 1.4; text-align: right; }
+.app-user .meta .name { font-weight: 600; color: var(--text); }
+.app-user .meta .role { color: var(--text-light); }
+
+.app-main { flex: 1; max-width: 1200px; width: 100%; margin: 0 auto; padding: 24px 20px; }
+
+/* ============ 页面区块 ============ */
+.page-title { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+.page-desc { font-size: 13px; color: var(--text-light); margin-bottom: 20px; }
+.section { margin-bottom: 24px; }
+.section:last-child { margin-bottom: 0; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; }
+
+/* 信息项 */
+.info-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); gap: 12px; }
+.info-item:last-child { border-bottom: none; }
+.info-item .label { color: var(--text-light); font-size: 13px; white-space: nowrap; }
+.info-item .value { font-weight: 500; word-break: break-all; text-align: right; }
+.mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+.apikey-box {
+  display: flex; align-items: center; gap: 8px; background: #f8fafc; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 6px 10px; font-family: ui-monospace, monospace; font-size: 13px;
+}
+
+/* 邮件列表 */
+.mail-list { display: flex; flex-direction: column; gap: 8px; }
+.mail-item { border: 1px solid var(--border); border-radius: var(--radius); background: #fff; overflow: hidden; }
+.mail-item.unread { border-left: 3px solid var(--primary); }
+.mail-head { padding: 12px 16px; cursor: pointer; display: flex; align-items: center; gap: 12px; }
+.mail-head:hover { background: #f8fafc; }
+.mail-head .from { font-weight: 600; font-size: 13px; min-width: 0; }
+.mail-head .subject { color: var(--text-light); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.mail-item.unread .mail-head .subject { color: var(--text); font-weight: 600; }
+.mail-head .date { color: var(--text-lighter); font-size: 12px; white-space: nowrap; }
+.mail-head .unread-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); flex-shrink: 0; }
+.mail-body { padding: 0 16px 16px; border-top: 1px solid var(--border); display: none; }
+.mail-item.expanded .mail-body { display: block; }
+.mail-body .body-text { white-space: pre-wrap; word-break: break-word; padding: 12px 0; font-size: 13px; line-height: 1.7; max-height: 400px; overflow-y: auto; background: #f8fafc; padding: 12px; border-radius: var(--radius-sm); margin-top: 12px; }
+.mail-body .meta-row { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 12px; font-size: 12px; color: var(--text-light); }
+.mail-body .actions { margin-top: 12px; display: flex; gap: 8px; }
+.mail-empty { text-align: center; padding: 40px 20px; color: var(--text-lighter); font-size: 14px; }
+
+/* 加载与提示 */
+.loading { text-align: center; padding: 40px; color: var(--text-light); }
+.spinner { display: inline-block; width: 24px; height: 24px; border: 3px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.toast {
+  position: fixed; top: 20px; right: 20px; z-index: 9999; min-width: 240px; max-width: 380px;
+  padding: 12px 16px; border-radius: var(--radius-sm); box-shadow: var(--shadow-lg);
+  font-size: 14px; color: #fff; background: var(--text); animation: slideIn .2s ease;
+}
+.toast.success { background: var(--success); }
+.toast.error { background: var(--danger); }
+.toast.warning { background: var(--warning); }
+@keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+/* 模态框 */
+.modal-mask {
+  position: fixed; inset: 0; background: rgba(15,23,42,.5); z-index: 1000;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.modal { background: #fff; border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); width: 100%; max-width: 460px; max-height: 90vh; overflow-y: auto; }
+.modal-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
 .modal-header h3 { font-size: 16px; font-weight: 600; }
-.modal-close { background: none; border: none; font-size: 22px; cursor: pointer; color: var(--text-light); line-height: 1; }
+.modal-header .close { background: none; border: none; font-size: 22px; cursor: pointer; color: var(--text-light); line-height: 1; }
 .modal-body { padding: 20px; }
 .modal-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
 
-/* Badge */
-.tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
-.tag-green { background: var(--success-light); color: var(--success); }
-.tag-red { background: var(--danger-light); color: var(--danger); }
-.tag-blue { background: var(--primary-light); color: var(--primary); }
-.tag-gray { background: #f3f4f6; color: var(--text-light); }
+/* API 文档 */
+.doc-section { margin-bottom: 28px; }
+.doc-section h4 { font-size: 15px; font-weight: 600; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 2px solid var(--primary-light); }
+.doc-section h5 { font-size: 13px; font-weight: 600; color: var(--text-light); margin: 12px 0 6px; }
+.endpoint { background: #f8fafc; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 8px; font-size: 13px; }
+.endpoint .method { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; color: #fff; margin-right: 8px; font-family: ui-monospace, monospace; }
+.m-get { background: #0891b2; }
+.m-post { background: var(--success); }
+.m-put { background: var(--warning); }
+.m-delete { background: var(--danger); }
+.endpoint .path { font-family: ui-monospace, monospace; font-weight: 600; }
+.endpoint .desc { color: var(--text-light); margin-top: 4px; }
+pre.code {
+  background: #0f172a; color: #e2e8f0; border-radius: var(--radius-sm);
+  padding: 14px 16px; overflow-x: auto; font-size: 12.5px; line-height: 1.6;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+pre.code .cmt { color: #64748b; }
+pre.code .kw { color: #f472b6; }
+pre.code .str { color: #86efac; }
+pre.code .num { color: #fcd34d; }
 
-/* Toast */
-.toast {
-  position: fixed; top: 20px; right: 20px; z-index: 200;
-  padding: 12px 20px; border-radius: var(--radius-sm); box-shadow: var(--shadow-lg);
-  font-size: 14px; max-width: 400px; opacity: 0; transform: translateX(100%);
-  transition: opacity 0.3s, transform 0.3s;
-}
-.toast.show { opacity: 1; transform: translateX(0); }
-.toast-success { background: var(--success); color: #fff; }
-.toast-error { background: var(--danger); color: #fff; }
+/* 统计卡片 */
+.stat-card { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+.stat-card .num { font-size: 24px; font-weight: 700; color: var(--primary); }
+.stat-card .lbl { font-size: 12px; color: var(--text-light); margin-top: 4px; }
 
-/* Email list */
-.email-item {
-  border: 1px solid var(--border); border-radius: var(--radius-sm);
-  padding: 12px 16px; margin-bottom: 8px; cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-.email-item:hover { border-color: var(--primary); box-shadow: var(--shadow); }
-.email-item.unread { border-left: 3px solid var(--primary); }
-.email-item .email-header { display: flex; justify-content: space-between; align-items: start; margin-bottom: 4px; }
-.email-item .email-from { font-weight: 500; font-size: 13px; }
-.email-item .email-date { font-size: 12px; color: var(--text-lighter); }
-.email-item .email-subject { font-size: 13px; color: var(--text); margin-bottom: 4px; }
-.email-item .email-preview { font-size: 12px; color: var(--text-light); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.email-detail { background: #f9fafb; border-radius: var(--radius-sm); padding: 16px; margin-top: 8px; display: none; }
-.email-detail.show { display: block; }
-.email-detail pre { white-space: pre-wrap; word-wrap: break-word; font-size: 13px; font-family: inherit; }
+/* 复选开关 */
+.switch { position: relative; display: inline-flex; align-items: center; cursor: pointer; gap: 8px; }
+.switch input { display: none; }
+.switch .track { width: 40px; height: 22px; background: #cbd5e1; border-radius: 999px; position: relative; transition: background .2s; }
+.switch .track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; background: #fff; border-radius: 50%; transition: transform .2s; box-shadow: var(--shadow-sm); }
+.switch input:checked + .track { background: var(--primary); }
+.switch input:checked + .track::after { transform: translateX(18px); }
 
-/* Code block */
-.code-block {
-  position: relative; background: #1e293b; color: #e2e8f0;
-  border-radius: var(--radius-sm); padding: 16px 44px 16px 16px;
-  overflow-x: auto; font-family: "Fira Code", "Consolas", "Courier New", monospace;
-  font-size: 13px; line-height: 1.6; margin: 8px 0;
-}
-.code-block .code-content { white-space: pre; }
-.code-block .copy-icon {
-  position: absolute; top: 10px; right: 10px;
-  background: rgba(255,255,255,0.1); border: none; border-radius: 4px;
-  color: #e2e8f0; width: 28px; height: 28px; cursor: pointer;
-  font-size: 14px; display: flex; align-items: center; justify-content: center;
-  transition: background 0.15s;
-}
-.code-block .copy-icon:hover { background: rgba(255,255,255,0.2); }
-.code-block .copy-icon.copied { background: var(--success); }
+.hidden { display: none !important; }
 
-/* API Key display */
-.api-key-box {
-  display: flex; align-items: center; gap: 8px; padding: 10px 12px;
-  background: #f9fafb; border: 1px solid var(--border); border-radius: var(--radius-sm);
-  font-family: monospace; font-size: 13px; word-break: break-all;
-}
-.api-key-box .copy-btn { margin-left: auto; flex-shrink: 0; }
-
-/* Filter bar */
-.filter-bar {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 12px; margin-bottom: 16px; align-items: end;
-}
-.filter-bar .form-group { margin-bottom: 0; }
-.filter-bar .form-group label { font-size: 12px; }
-.filter-bar .form-group input, .filter-bar .form-group select { padding: 7px 10px; font-size: 13px; }
-
-/* Toggle switch */
-.toggle { position: relative; display: inline-block; width: 44px; height: 24px; }
-.toggle input { opacity: 0; width: 0; height: 0; }
-.toggle-slider {
-  position: absolute; cursor: pointer; inset: 0; background: #cbd5e1;
-  border-radius: 12px; transition: 0.3s;
-}
-.toggle-slider:before {
-  content: ""; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px;
-  background: #fff; border-radius: 50%; transition: 0.3s;
-}
-.toggle input:checked + .toggle-slider { background: var(--success); }
-.toggle input:checked + .toggle-slider:before { transform: translateX(20px); }
-
-/* Empty state */
-.empty-state { text-align: center; padding: 40px 20px; color: var(--text-lighter); }
-.empty-state .icon { font-size: 36px; margin-bottom: 12px; }
-
-/* Alias display */
-.alias-display {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 8px 12px; background: var(--primary-light); color: var(--primary);
-  border-radius: var(--radius-sm); font-family: monospace; font-size: 13px;
-  font-weight: 500; word-break: break-all;
-}
-.alias-display .copy-icon-small {
-  background: none; border: none; color: var(--primary); cursor: pointer;
-  font-size: 14px; padding: 2px; opacity: 0.7;
-}
-.alias-display .copy-icon-small:hover { opacity: 1; }
-
-/* Code toggle buttons */
-.code-toggle { display: flex; gap: 4px; margin: 8px 0; }
-.code-toggle button {
-  padding: 4px 12px; border: 1px solid var(--border); background: #fff;
-  border-radius: var(--radius-sm); font-size: 12px; cursor: pointer; color: var(--text-light);
-}
-.code-toggle button.active { background: var(--primary); color: #fff; border-color: var(--primary); }
-
-/* Searchable select */
-.search-select { position: relative; }
-.search-select-input {
-  width: 100%; padding: 9px 12px; border: 1px solid var(--border);
-  border-radius: var(--radius-sm); font-size: 14px; background: #fff;
-}
-.search-select-dropdown {
-  display: none; position: absolute; top: 100%; left: 0; right: 0;
-  background: #fff; border: 1px solid var(--border); border-top: none;
-  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
-  max-height: 200px; overflow-y: auto; z-index: 50; box-shadow: var(--shadow-md);
-}
-.search-select-dropdown.show { display: block; }
-.search-select-option {
-  padding: 8px 12px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #f3f4f6;
-}
-.search-select-option:hover { background: var(--primary-light); }
-.search-select-option .opt-owner { font-size: 11px; color: var(--text-lighter); margin-left: 6px; }
-
-/* Responsive */
+/* 响应式 */
 @media (max-width: 768px) {
-  .form-row { grid-template-columns: 1fr; }
-  .filter-bar { grid-template-columns: 1fr; }
-  .content { padding: 16px; }
-  .tabs-inner { flex-wrap: wrap; }
+  .app-header-inner { flex-wrap: wrap; height: auto; padding: 10px 16px; gap: 8px; }
+  .app-nav { order: 3; width: 100%; overflow-x: auto; }
+  .app-user .meta { display: none; }
+  .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  .app-main { padding: 16px; }
+  .login-card { padding: 28px 24px; }
+  .form-row { flex-direction: column; }
+  .form-row > .form-group { min-width: 0; }
 }
 </style>
 </head>
 <body>
 
-<!-- Login View -->
+<!-- ============ 登录页 ============ -->
 <div id="loginView" class="login-wrap">
   <div class="login-card">
-    <div class="logo">G</div>
-    <h1 id="loginTitle">Gmail 邮件管理系统</h1>
-    <p class="subtitle" id="loginSubtitle">请登录以继续</p>
-    <div id="loginAlert" class="alert alert-error"></div>
-    <div id="loginForm">
-      <div class="field">
-        <label>用户名</label>
-        <input type="text" id="loginUsername" placeholder="输入用户名" autocomplete="username">
-      </div>
-      <div class="field">
-        <label>密码</label>
-        <input type="password" id="loginPassword" placeholder="输入密码" autocomplete="current-password">
-      </div>
-      <button class="btn btn-block" onclick="doLogin()">登录</button>
-      <div class="switch-link" id="registerLink" style="display:none">
-        没有账户？<a onclick="showRegister()">注册新账户</a>
-      </div>
+    <div class="brand">
+      <div class="logo">A</div>
+      <h1>别名邮箱管理系统</h1>
+      <p>多邮箱别名 · 邮件查询 · Webhook 推送</p>
     </div>
-    <div id="registerForm" style="display:none">
-      <div class="field">
-        <label>用户名</label>
-        <input type="text" id="regUsername" placeholder="至少3个字符" autocomplete="username">
-      </div>
-      <div class="field">
-        <label>密码</label>
-        <input type="password" id="regPassword" placeholder="至少6个字符" autocomplete="new-password">
-      </div>
-      <button class="btn btn-block" onclick="doRegister()">注册</button>
-      <div class="switch-link">
-        已有账户？<a onclick="showLogin()">返回登录</a>
-      </div>
+    <div id="loginError" class="login-error"></div>
+    <div class="login-tabs">
+      <button id="tabLogin" class="active" onclick="switchLoginTab('login')">登录</button>
+      <button id="tabRegister" onclick="switchLoginTab('register')">注册</button>
     </div>
+    <!-- 登录表单 -->
+    <form id="loginForm" onsubmit="return doLogin(event)">
+      <div class="form-group">
+        <label class="form-label">用户名</label>
+        <input type="text" id="loginUsername" class="form-control" placeholder="请输入用户名" autocomplete="username" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">密码</label>
+        <input type="password" id="loginPassword" class="form-control" placeholder="请输入密码" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn btn-block">登录</button>
+    </form>
+    <!-- 注册表单 -->
+    <form id="registerForm" class="hidden" onsubmit="return doRegister(event)">
+      <div class="form-group">
+        <label class="form-label">用户名 <span class="req">*</span></label>
+        <input type="text" id="regUsername" class="form-control" placeholder="至少 3 个字符" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">密码 <span class="req">*</span></label>
+        <input type="password" id="regPassword" class="form-control" placeholder="至少 6 个字符" required>
+      </div>
+      <button type="submit" class="btn btn-block">注册</button>
+    </form>
+    <div class="toggle-tip">默认管理员 admin / admin123_</div>
   </div>
 </div>
 
-<!-- App View -->
-<div id="appView" class="app">
-  <div class="app-header">
+<!-- ============ 主应用 ============ -->
+<div id="appView" class="app hidden">
+  <header class="app-header">
     <div class="app-header-inner">
-      <div class="app-title">
-        <div class="dot">G</div>
-        <span>Gmail 邮件管理系统</span>
+      <div class="app-logo">
+        <span class="mark">A</span>
+        <span>别名邮箱管理</span>
       </div>
-      <div class="user-info">
-        <span id="currentUsername"></span>
-        <span id="currentRole" class="badge"></span>
-        <button class="btn btn-secondary btn-sm" onclick="doLogout()">退出</button>
+      <nav class="app-nav" id="appNav"></nav>
+      <div class="app-user">
+        <div class="meta">
+          <div class="name" id="navUsername"></div>
+          <div class="role" id="navRole"></div>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="doLogout()">登出</button>
       </div>
     </div>
-  </div>
-  <div class="tabs">
-    <div class="tabs-inner" id="tabsInner"></div>
-  </div>
-  <div class="content" id="tabContent"></div>
+  </header>
+  <main class="app-main" id="appMain"></main>
 </div>
 
-<!-- Modal -->
-<div id="modalOverlay" class="modal-overlay">
-  <div class="modal">
-    <div class="modal-header">
-      <h3 id="modalTitle">标题</h3>
-      <button class="modal-close" onclick="closeModal()">&times;</button>
-    </div>
-    <div class="modal-body" id="modalBody"></div>
-    <div class="modal-footer" id="modalFooter"></div>
-  </div>
-</div>
-
-<!-- Toast -->
-<div id="toast" class="toast"></div>
+<div id="toastBox"></div>
+<div id="modalRoot"></div>
 
 <script>
-let sessionToken = localStorage.getItem('sessionToken') || '';
-let currentUser = null;
-let availableGmailAccounts = [];
-let currentGmailAccountId = null;
+/* ============================================================
+ * 全局状态与工具
+ * ============================================================ */
+const State = {
+  user: null,           // 当前登录用户
+  token: null,          // session_token
+  tab: 'mail',          // 当前标签
+  availableAccounts: [], // 可用邮箱缓存(邮件查询用)
+  mailAccounts: [],     // 我的邮箱缓存
+  oauthTimer: null,     // OAuth 轮询定时器
+};
 
-// ==================== API Helper ====================
-async function api(url, options = {}) {
-  const headers = { 'Content-Type': 'application/json', ...options.headers };
-  if (sessionToken) headers['Authorization'] = 'Bearer ' + sessionToken;
+// localStorage 持久化键
+const LS_TOKEN = 'mail_alias_token';
+const LS_USER = 'mail_alias_user';
+
+/* ============ 统一 API 封装 ============
+ * 自动注入 Authorization 头、解析 JSON、处理 401 跳登录
+ * 统一响应格式: { code, msg, data }, code != 0 抛错
+ */
+async function api(path, opts = {}) {
+  const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
+  if (State.token) headers['Authorization'] = 'Bearer ' + State.token;
+  let res;
   try {
-    const resp = await fetch(url, { ...options, headers });
-    const data = await resp.json();
-    if (resp.status === 401) {
-      sessionToken = '';
-      localStorage.removeItem('sessionToken');
-      if (document.getElementById('appView').classList.contains('active')) {
-        showLoginView();
-      }
-      return null;
-    }
-    return data;
+    res = await fetch(path, {
+      method: opts.method || 'GET',
+      headers,
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    });
   } catch (e) {
-    showToast('网络请求失败: ' + e.message, 'error');
-    return null;
+    throw new Error('网络请求失败: ' + e.message);
   }
+  // 401: 会话失效,清除并跳登录
+  if (res.status === 401) {
+    clearSession();
+    showLoginView();
+    throw new Error('会话已过期，请重新登录');
+  }
+  let data;
+  try { data = await res.json(); }
+  catch { throw new Error('响应解析失败'); }
+  if (data.code !== 0) {
+    throw new Error(data.msg || '请求失败');
+  }
+  return data.data;
 }
 
-function showToast(msg, type = 'success') {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.className = 'toast toast-' + type + ' show';
-  setTimeout(() => t.className = 'toast toast-' + type, 3000);
-}
-
-function showModal(title, bodyHtml, footerHtml) {
-  document.getElementById('modalTitle').textContent = title;
-  document.getElementById('modalBody').innerHTML = bodyHtml;
-  document.getElementById('modalFooter').innerHTML = footerHtml || '';
-  document.getElementById('modalOverlay').classList.add('show');
-}
-
-function closeModal() {
-  document.getElementById('modalOverlay').classList.remove('show');
-}
-
-function escapeHtml(s) {
-  if (!s) return '';
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-function copyText(text, btnEl) {
-  navigator.clipboard.writeText(text).then(() => {
-    showToast('已复制到剪贴板');
-    if (btnEl) {
-      const orig = btnEl.innerHTML;
-      btnEl.innerHTML = '✓';
-      btnEl.classList.add('copied');
-      setTimeout(() => { btnEl.innerHTML = orig; btnEl.classList.remove('copied'); }, 1500);
-    }
-  });
-}
-
-function copyCode(btnEl) {
-  const block = btnEl.closest('.code-block');
-  // 获取纯文本（去除 HTML 标签）
-  const text = block.querySelector('.code-content').innerText;
-  copyText(text, btnEl);
-}
-
-// ==================== Auth ====================
-function showLoginView() {
-  document.getElementById('loginView').style.display = 'flex';
-  document.getElementById('appView').classList.remove('active');
-  showLoginForm();
-  checkRegistrationAllowed();
-}
-
-function showAppView() {
-  document.getElementById('loginView').style.display = 'none';
-  document.getElementById('appView').classList.add('active');
-  renderTabs();
-  switchTab(getTabs()[0].id);
-}
-
-function showLoginForm() {
-  document.getElementById('loginForm').style.display = 'block';
-  document.getElementById('registerForm').style.display = 'none';
-  document.getElementById('loginTitle').textContent = 'Gmail 邮件管理系统';
-  document.getElementById('loginSubtitle').textContent = '请登录以继续';
-}
-
-function showRegister() {
-  document.getElementById('loginForm').style.display = 'none';
-  document.getElementById('registerForm').style.display = 'block';
-  document.getElementById('loginTitle').textContent = '注册新账户';
-  document.getElementById('loginSubtitle').textContent = '创建您的账户';
-}
-
-async function checkRegistrationAllowed() {
-  try {
-    const resp = await fetch('/api/admin/settings');
-    const data = await resp.json();
-    if (data && data.code === 0) {
-      document.getElementById('registerLink').style.display = data.data.allow_registration ? 'block' : 'none';
-    }
-  } catch (e) {}
-}
-
-function showLoginAlert(msg) {
-  const el = document.getElementById('loginAlert');
+// 轻提示
+function toast(msg, type = 'info', duration = 2600) {
+  const box = document.getElementById('toastBox');
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
   el.textContent = msg;
-  el.classList.add('show');
+  box.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, duration);
 }
 
-async function doLogin() {
+// 转义 HTML,防 XSS
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// 格式化时间(显示用)
+function fmtTime(iso) {
+  if (!iso) return '-';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return new Intl.DateTimeFormat('zh-CN', {
+      timeZone: 'Asia/Shanghai', hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit'
+    }).format(d).replace(/\//g, '-');
+  } catch { return iso; }
+}
+
+// 模态框
+function showModal(title, bodyHtml, footerHtml = '') {
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = `<div class="modal-mask" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <div class="modal-header"><h3>${esc(title)}</h3><button class="close" onclick="closeModal()">&times;</button></div>
+      <div class="modal-body">${bodyHtml}</div>
+      ${footerHtml ? `<div class="modal-footer">${footerHtml}</div>` : ''}
+    </div></div>`;
+}
+function closeModal() { document.getElementById('modalRoot').innerHTML = ''; }
+// 通用确认弹窗
+function confirmDialog(msg, onOk) {
+  showModal('确认操作', `<p>${esc(msg)}</p>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn btn-danger" id="confirmOkBtn">确定</button>`);
+  document.getElementById('confirmOkBtn').onclick = () => { closeModal(); onOk(); };
+}
+
+/* ============================================================
+ * 会话与登录
+ * ============================================================ */
+function saveSession(token, user) {
+  State.token = token;
+  State.user = user;
+  localStorage.setItem(LS_TOKEN, token);
+  localStorage.setItem(LS_USER, JSON.stringify(user));
+}
+function clearSession() {
+  State.token = null;
+  State.user = null;
+  localStorage.removeItem(LS_TOKEN);
+  localStorage.removeItem(LS_USER);
+}
+
+function showLoginView() {
+  document.getElementById('loginView').classList.remove('hidden');
+  document.getElementById('appView').classList.add('hidden');
+}
+function showAppView() {
+  document.getElementById('loginView').classList.add('hidden');
+  document.getElementById('appView').classList.remove('hidden');
+  renderApp();
+}
+
+// 登录/注册标签切换
+function switchLoginTab(which) {
+  const isLogin = which === 'login';
+  document.getElementById('tabLogin').classList.toggle('active', isLogin);
+  document.getElementById('tabRegister').classList.toggle('active', !isLogin);
+  document.getElementById('loginForm').classList.toggle('hidden', !isLogin);
+  document.getElementById('registerForm').classList.toggle('hidden', isLogin);
+  document.getElementById('loginError').style.display = 'none';
+}
+
+function showLoginError(msg) {
+  const el = document.getElementById('loginError');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+// 登录
+async function doLogin(e) {
+  e.preventDefault();
   const username = document.getElementById('loginUsername').value.trim();
   const password = document.getElementById('loginPassword').value;
-  if (!username || !password) { showLoginAlert('请输入用户名和密码'); return; }
-  document.getElementById('loginAlert').classList.remove('show');
-  const data = await api('/api/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({ username, password })
-  });
-  if (data && data.code === 0) {
-    sessionToken = data.data.session_token;
-    currentUser = data.data.user;
-    localStorage.setItem('sessionToken', sessionToken);
+  if (!username || !password) { showLoginError('请输入用户名和密码'); return false; }
+  try {
+    const data = await api('/api/auth/login', { method: 'POST', body: { username, password } });
+    saveSession(data.session_token, data.user);
     showAppView();
-  } else {
-    showLoginAlert(data ? data.detail || '登录失败' : '网络错误');
-  }
-}
-
-async function doRegister() {
-  const username = document.getElementById('regUsername').value.trim();
-  const password = document.getElementById('regPassword').value;
-  if (!username || !password) { showLoginAlert('请填写完整'); return; }
-  if (username.length < 3) { showLoginAlert('用户名至少3个字符'); return; }
-  if (password.length < 6) { showLoginAlert('密码至少6个字符'); return; }
-  document.getElementById('loginAlert').classList.remove('show');
-  const data = await api('/api/auth/register', {
-    method: 'POST',
-    body: JSON.stringify({ username, password })
-  });
-  if (data && data.code === 0) {
-    showToast('注册成功，请登录');
-    showLoginForm();
-    document.getElementById('loginUsername').value = username;
-  } else {
-    showLoginAlert(data ? data.detail || '注册失败' : '网络错误');
-  }
-}
-
-async function doLogout() {
-  await api('/api/auth/logout', { method: 'POST' });
-  sessionToken = '';
-  currentUser = null;
-  localStorage.removeItem('sessionToken');
-  showLoginView();
-}
-
-async function loadCurrentUser() {
-  const data = await api('/api/auth/me');
-  if (data && data.code === 0) {
-    currentUser = data.data;
-    return true;
+  } catch (err) {
+    showLoginError(err.message);
   }
   return false;
 }
 
-// ==================== Tabs ====================
-function getTabs() {
-  if (currentUser && currentUser.is_admin) {
-    return [
-      { id: 'emails', name: '邮件查询' },
-      { id: 'account', name: '个人中心' },
-      { id: 'stats', name: '使用统计' },
-      { id: 'settings', name: '系统设置' },
-      { id: 'apidocs', name: 'API 文档' },
-    ];
+// 注册
+async function doRegister(e) {
+  e.preventDefault();
+  const username = document.getElementById('regUsername').value.trim();
+  const password = document.getElementById('regPassword').value;
+  if (!username || username.length < 3) { showLoginError('用户名至少 3 个字符'); return false; }
+  if (!password || password.length < 6) { showLoginError('密码至少 6 个字符'); return false; }
+  try {
+    await api('/api/auth/register', { method: 'POST', body: { username, password } });
+    toast('注册成功，请登录', 'success');
+    switchLoginTab('login');
+    document.getElementById('loginUsername').value = username;
+    document.getElementById('loginPassword').focus();
+  } catch (err) {
+    showLoginError(err.message);
   }
-  return [
-    { id: 'emails', name: '邮件查询' },
-    { id: 'account', name: '个人中心' },
-    { id: 'apidocs', name: 'API 文档' },
+  return false;
+}
+
+// 登出
+async function doLogout() {
+  try { await api('/api/auth/logout', { method: 'POST' }); }
+  catch { /* 忽略登出错误 */ }
+  clearSession();
+  showLoginView();
+}
+
+// 启动时检查注册开关(注册按钮显隐)
+async function checkRegistrationAllowed() {
+  try {
+    // adminGetSettings 接口无需鉴权,可读取 allow_registration
+    const data = await api('/api/admin/settings');
+    const allowed = data && data.allow_registration;
+    document.getElementById('tabRegister').style.display = allowed ? '' : 'none';
+  } catch {
+    // 接口异常默认隐藏注册
+    document.getElementById('tabRegister').style.display = 'none';
+  }
+}
+
+/* ============================================================
+ * 主应用渲染
+ * ============================================================ */
+function renderApp() {
+  const u = State.user;
+  if (!u) return;
+  // 顶部用户信息
+  document.getElementById('navUsername').textContent = u.username;
+  document.getElementById('navRole').innerHTML = u.is_admin
+    ? '<span class="badge badge-primary">管理员</span>'
+    : '<span class="badge badge-gray">用户</span>';
+  // 导航
+  const nav = document.getElementById('appNav');
+  const tabs = [
+    { key: 'mail', label: '邮件查询' },
+    { key: 'account', label: '我的账户' },
+    { key: 'webhook', label: 'Webhook 订阅' },
+    { key: 'docs', label: 'API 文档' },
   ];
-}
-
-function renderTabs() {
-  const tabs = getTabs();
-  document.getElementById('tabsInner').innerHTML = tabs.map(t =>
-    `<button class="tab" data-tab="${t.id}" onclick="switchTab('${t.id}')">${t.name}</button>`
+  if (u.is_admin) {
+    tabs.push({ key: 'users', label: '用户管理' });
+    tabs.push({ key: 'settings', label: '系统设置' });
+  }
+  nav.innerHTML = tabs.map(t =>
+    `<button class="${State.tab === t.key ? 'active' : ''}" onclick="switchTab('${t.key}')">${t.label}</button>`
   ).join('');
-  document.getElementById('currentUsername').textContent = currentUser.username;
-  const roleEl = document.getElementById('currentRole');
-  if (currentUser.is_admin) {
-    roleEl.textContent = '管理员';
-    roleEl.className = 'badge badge-admin';
-  } else {
-    roleEl.textContent = '普通用户';
-    roleEl.className = 'badge badge-user';
+  // 渲染当前页
+  const main = document.getElementById('appMain');
+  switch (State.tab) {
+    case 'mail': main.innerHTML = viewMailHtml(); initMailPage(); break;
+    case 'account': main.innerHTML = viewAccountHtml(); initAccountPage(); break;
+    case 'webhook': main.innerHTML = viewWebhookHtml(); initWebhookPage(); break;
+    case 'docs': main.innerHTML = viewDocsHtml(); break;
+    case 'users': main.innerHTML = viewUsersHtml(); initUsersPage(); break;
+    case 'settings': main.innerHTML = viewSettingsHtml(); initSettingsPage(); break;
   }
 }
 
-async function switchTab(tabId) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
-  const content = document.getElementById('tabContent');
-  const renderers = {
-    emails: renderEmailQuery,
-    account: renderAccount,
-    stats: renderStats,
-    settings: renderSettings,
-    apidocs: renderApiDocs,
-  };
-  if (renderers[tabId]) content.innerHTML = renderers[tabId]();
-  // Lazy load data
-  if (tabId === 'emails') await loadAvailableGmailAccounts();
-  if (tabId === 'stats') loadStats();
-  if (tabId === 'settings') loadSettings();
+function switchTab(key) {
+  State.tab = key;
+  renderApp();
 }
 
-// ==================== Email Query Tab ====================
-async function loadAvailableGmailAccounts() {
-  const data = await api('/api/gmail_accounts/available');
-  if (data && data.code === 0) {
-    availableGmailAccounts = data.data;
-    renderAliasGenerator();
-  }
-}
-
-function renderEmailQuery() {
-  const now = new Date();
-  const todayDate = now.toISOString().split('T')[0];
-  const nowStr = now.toTimeString().slice(0, 8);
-  const isAdmin = currentUser.is_admin;
-  const aliasHint = isAdmin ? '管理员可查看所有邮件，也可按收件人筛选' : '普通用户自动按别名筛选';
-  const alias = currentUser.alias;
-  const aliasFull = alias && alias.full ? alias.full : '';
-
+/* ============================================================
+ * 1. 邮件查询页
+ * ============================================================ */
+function viewMailHtml() {
   return `
+  <div class="page-title">邮件查询</div>
+  <div class="page-desc">选择邮箱并设置别名后，可查询该别名收件箱中的邮件</div>
+  <div class="section">
     <div class="card">
-      <div class="card-header">
-        <div class="card-title">别名邮箱生成</div>
+      <div class="card-header"><h3>别名设置</h3></div>
+      <div class="card-body">
+        <div class="form-row">
+          <div class="form-group" style="flex:2">
+            <label class="form-label">选择邮箱</label>
+            <select id="aliasAccount" class="form-control"><option value="">加载中...</option></select>
+          </div>
+          <div class="form-group" style="flex:2">
+            <label class="form-label">别名标签</label>
+            <div style="display:flex;gap:8px">
+              <input type="text" id="aliasLabel" class="form-control" placeholder="如 newsletter">
+              <button class="btn btn-secondary" onclick="genRandomLabel()">随机生成</button>
+            </div>
+          </div>
+          <div class="form-group" style="flex:1; display:flex; align-items:flex-end">
+            <button class="btn btn-block" onclick="setAlias()">设置别名</button>
+          </div>
+        </div>
+        <div id="currentAlias" class="form-hint"></div>
       </div>
-      <div id="aliasGenerator">
-        ${aliasFull ? `
-          <div style="margin-bottom:12px">
-            <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;">当前别名</label>
-            <div class="alias-display">
-              <span>${escapeHtml(aliasFull)}</span>
-              <button class="copy-icon-small" onclick="copyText('${aliasFull}', this)" title="复制">📋</button>
-            </div>
-          </div>
-        ` : '<div class="form-hint" style="margin-bottom:12px">尚未生成别名，生成后将自动用于邮件查询筛选</div>'}
-        <div class="filter-bar">
+    </div>
+  </div>
+  <div class="section">
+    <div class="card">
+      <div class="card-header"><h3>查询条件</h3></div>
+      <div class="card-body">
+        <div class="form-row">
           <div class="form-group">
-            <label>谷歌邮箱前缀</label>
-            <div class="search-select">
-              <input type="text" class="search-select-input" id="aliasGmailSelect"
-                placeholder="搜索或选择邮箱..." oninput="filterGmailOptions()" onfocus="showGmailDropdown()">
-              <div class="search-select-dropdown" id="aliasGmailDropdown"></div>
-            </div>
-            <input type="hidden" id="aliasGmailId">
+            <label class="form-label">发件人</label>
+            <input type="text" id="qSender" class="form-control" placeholder="按发件人筛选">
           </div>
           <div class="form-group">
-            <label>别名标签</label>
-            <div style="display:flex;gap:6px">
-              <input type="text" id="aliasLabel" placeholder="自定义标签" style="flex:1">
-              <button class="btn btn-secondary" onclick="randomAliasLabel()" title="随机生成">🎲</button>
-            </div>
+            <label class="form-label">主题</label>
+            <input type="text" id="qSubject" class="form-control" placeholder="按主题筛选">
           </div>
-          <div class="form-group" style="display:flex;align-items:end">
-            <button class="btn" onclick="generateAlias()" style="width:100%">生成别名</button>
+          <div class="form-group">
+            <label class="form-label">关键词</label>
+            <input type="text" id="qKeyword" class="form-control" placeholder="正文关键词">
           </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">开始时间</label>
+            <input type="datetime-local" id="qStart" class="form-control">
+          </div>
+          <div class="form-group">
+            <label class="form-label">结束时间</label>
+            <input type="datetime-local" id="qEnd" class="form-control">
+          </div>
+          <div class="form-group">
+            <label class="form-label">数量上限</label>
+            <input type="number" id="qLimit" class="form-control" value="20" min="1" max="100">
+          </div>
+          <div class="form-group" style="display:flex; align-items:flex-end; gap:8px">
+            <label class="switch">
+              <input type="checkbox" id="qUnread">
+              <span class="track"></span>
+              <span>仅未读</span>
+            </label>
+          </div>
+        </div>
+        <div style="margin-top:8px">
+          <button class="btn" onclick="fetchMails()">查询邮件</button>
         </div>
       </div>
     </div>
+  </div>
+  <div class="section">
     <div class="card">
-      <div class="card-header">
-        <div class="card-title">邮件查询</div>
-        <div style="font-size:12px;color:var(--text-light)">${aliasHint}</div>
+      <div class="card-header"><h3>邮件列表 <span id="mailCount" class="badge badge-gray" style="margin-left:8px">0</span></h3></div>
+      <div class="card-body">
+        <div id="mailList"><div class="mail-empty">请设置查询条件后点击「查询邮件」</div></div>
       </div>
-      <div class="filter-bar">
-        <div class="form-group">
-          <label>发件人</label>
-          <input type="text" id="filterSender" placeholder="发件人邮箱">
+    </div>
+  </div>`;
+}
+
+async function initMailPage() {
+  await loadAvailableAccounts();
+  refreshCurrentAlias();
+}
+
+// 加载可用邮箱(自己 + 公开)
+async function loadAvailableAccounts() {
+  const sel = document.getElementById('aliasAccount');
+  try {
+    const list = await api('/api/account/mail_accounts/available');
+    State.availableAccounts = list || [];
+    if (!list.length) {
+      sel.innerHTML = '<option value="">无可用的邮箱，请先绑定</option>';
+      return;
+    }
+    sel.innerHTML = list.map(a =>
+      `<option value="${esc(a.id)}">${esc(a.email)} (${a.provider}${a.is_own ? '' : ' · 公开'})</option>`
+    ).join('');
+  } catch (err) {
+    sel.innerHTML = '<option value="">加载失败</option>';
+    toast(err.message, 'error');
+  }
+}
+
+// 当前别名展示
+function refreshCurrentAlias() {
+  const a = State.user.alias;
+  const el = document.getElementById('currentAlias');
+  if (!el) return;
+  if (a) {
+    el.innerHTML = `当前别名：<span class="mono">${esc(a.full)}</span> <span class="badge badge-success">已设置</span> (更新于 ${fmtTime(a.updated_at)})`;
+    // 回填到表单
+    const sel = document.getElementById('aliasAccount');
+    if (sel && a.mail_account_id) sel.value = a.mail_account_id;
+    const lbl = document.getElementById('aliasLabel');
+    if (lbl && !lbl.value) lbl.value = a.label;
+  } else {
+    el.innerHTML = '<span class="badge badge-warning">未设置别名</span> 普通用户查询邮件前需先设置别名';
+  }
+}
+
+// 随机标签
+async function genRandomLabel() {
+  try {
+    const data = await api('/api/account/alias/random_label');
+    document.getElementById('aliasLabel').value = data.label;
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+// 设置别名
+async function setAlias() {
+  const mail_account_id = document.getElementById('aliasAccount').value;
+  const label = document.getElementById('aliasLabel').value.trim();
+  if (!mail_account_id) { toast('请选择邮箱', 'warning'); return; }
+  if (!label) { toast('请输入别名标签', 'warning'); return; }
+  try {
+    const updated = await api('/api/account/alias', { method: 'POST', body: { mail_account_id, label } });
+    State.user = updated;
+    localStorage.setItem(LS_USER, JSON.stringify(updated));
+    refreshCurrentAlias();
+    document.getElementById('navUsername').textContent = updated.username;
+    toast('别名设置成功: ' + (updated.alias ? updated.alias.full : ''), 'success');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+// 查询邮件
+async function fetchMails() {
+  const params = {
+    sender: document.getElementById('qSender').value.trim() || undefined,
+    subject: document.getElementById('qSubject').value.trim() || undefined,
+    keyword: document.getElementById('qKeyword').value.trim() || undefined,
+    unseen: document.getElementById('qUnread').checked || undefined,
+    limit: parseInt(document.getElementById('qLimit').value) || 20,
+  };
+  const start = document.getElementById('qStart').value;
+  const end = document.getElementById('qEnd').value;
+  if (start) params.start_time = new Date(start).toISOString();
+  if (end) params.end_time = new Date(end).toISOString();
+
+  const list = document.getElementById('mailList');
+  list.innerHTML = '<div class="loading"><span class="spinner"></span> 正在查询...</div>';
+  try {
+    const data = await api('/api/web/email/fetch', { method: 'POST', body: params });
+    renderMailList(data.emails || []);
+  } catch (err) {
+    list.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
+  }
+}
+
+function renderMailList(emails) {
+  const list = document.getElementById('mailList');
+  document.getElementById('mailCount').textContent = emails.length;
+  if (!emails.length) {
+    list.innerHTML = '<div class="mail-empty">没有符合条件的邮件</div>';
+    return;
+  }
+  list.className = 'mail-list';
+  list.innerHTML = emails.map((m, i) => `
+    <div class="mail-item ${m.unread ? 'unread' : ''}" id="mail-${i}">
+      <div class="mail-head" onclick="toggleMail(${i})">
+        ${m.unread ? '<span class="unread-dot"></span>' : ''}
+        <span class="from">${esc(m.from || '(未知发件人)')}</span>
+        <span class="subject">${esc(m.subject || '(无主题)')}</span>
+        <span class="date">${esc(m.date || '')}</span>
+      </div>
+      <div class="mail-body">
+        <div class="meta-row">
+          <span>收件人: ${esc(m.to || '-')}</span>
+          <span>时间: ${esc(m.date || '-')}</span>
+          ${m.unread ? '<span class="badge badge-primary">未读</span>' : '<span class="badge badge-gray">已读</span>'}
         </div>
-        <div class="form-group">
-          <label>主题</label>
-          <input type="text" id="filterSubject" placeholder="主题关键字">
+        <div class="body-text" id="body-${i}">${esc(m.body || '(无正文)')}</div>
+        <div class="actions">
+          ${m.html ? `<button class="btn btn-secondary btn-sm" onclick="viewHtmlMail(${i})">查看 HTML</button>` : ''}
+          ${m.unread ? `<button class="btn btn-success btn-sm" onclick="markMailRead(${i})">标记已读</button>` : ''}
         </div>
-        <div class="form-group">
-          <label>关键词</label>
-          <input type="text" id="filterKeyword" placeholder="全文搜索">
+      </div>
+    </div>`).join('');
+  // 缓存邮件数据供展开/操作使用
+  State._mails = emails;
+}
+
+function toggleMail(i) {
+  document.getElementById('mail-' + i).classList.toggle('expanded');
+}
+
+// 在沙箱 iframe 中查看 HTML 邮件(防 XSS)
+function viewHtmlMail(i) {
+  const m = State._mails[i];
+  showModal('HTML 邮件预览',
+    `<iframe sandbox="allow-same-origin" srcdoc="${esc(m.html || '')}" style="width:100%;min-height:400px;border:1px solid var(--border);border-radius:6px"></iframe>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">关闭</button>`);
+}
+
+// 标记已读(使用 API Key 端点)
+async function markMailRead(i) {
+  const m = State._mails[i];
+  if (!m) return;
+  try {
+    const data = await api('/api/email/mark_read?key=' + encodeURIComponent(State.user.api_key), {
+      method: 'POST', body: { to: m.to, sender: m.from, subject: m.subject }
+    });
+    toast('已标记 ' + (data.marked || 0) + ' 封已读', 'success');
+    // 局部刷新状态
+    m.unread = false;
+    const item = document.getElementById('mail-' + i);
+    item.classList.remove('unread');
+    item.querySelector('.unread-dot')?.remove();
+    const badge = item.querySelector('.badge-primary');
+    if (badge) { badge.className = 'badge badge-gray'; badge.textContent = '已读'; }
+    const btn = item.querySelector('.btn-success');
+    if (btn) btn.remove();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+/* ============================================================
+ * 2. 我的账户页
+ * ============================================================ */
+function viewAccountHtml() {
+  const u = State.user;
+  return `
+  <div class="page-title">我的账户</div>
+  <div class="page-desc">管理个人信息、API Key 与 OAuth 邮箱绑定</div>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header"><h3>基本信息</h3></div>
+      <div class="card-body">
+        <div class="info-item">
+          <span class="label">用户名</span>
+          <span class="value">${esc(u.username)}</span>
         </div>
-        <div class="form-group">
-          <label>状态</label>
-          <select id="filterUnseen">
-            <option value="">全部</option>
-            <option value="true">仅未读</option>
-            <option value="false">仅已读</option>
-          </select>
+        <div class="info-item">
+          <span class="label">角色</span>
+          <span class="value">${u.is_admin ? '<span class="badge badge-primary">管理员</span>' : '<span class="badge badge-gray">普通用户</span>'}</span>
         </div>
-        <div class="form-group">
-          <label>开始时间</label>
-          <input type="datetime-local" id="filterStart" value="${todayDate}T00:00:00" step="1">
+        <div class="info-item">
+          <span class="label">创建时间</span>
+          <span class="value">${fmtTime(u.created_at)}</span>
         </div>
-        <div class="form-group">
-          <label>结束时间</label>
-          <input type="datetime-local" id="filterEnd" value="${todayDate}T${nowStr}" step="1">
+        <div class="info-item" style="flex-direction:column; align-items:stretch">
+          <span class="label" style="margin-bottom:6px">API Key</span>
+          <div class="apikey-box">
+            <span class="mono" id="apiKeyText" style="flex:1">${esc(u.api_key)}</span>
+            <button class="btn btn-secondary btn-sm" onclick="copyText('${esc(u.api_key)}')">复制</button>
+          </div>
+          <button class="btn btn-danger btn-sm" style="margin-top:8px" onclick="regenApiKey()">重新生成 API Key</button>
         </div>
-        <div class="form-group">
-          <label>数量限制</label>
-          <input type="number" id="filterLimit" value="50" min="1" max="500">
-        </div>
-        ${isAdmin ? `
-        <div class="form-group">
-          <label>收件人(别名)</label>
-          <input type="text" id="filterTo" placeholder="留空查全部">
+        ${u.alias ? `
+        <div class="info-item" style="flex-direction:column; align-items:stretch">
+          <span class="label" style="margin-bottom:6px">当前别名</span>
+          <div class="apikey-box"><span class="mono" style="flex:1">${esc(u.alias.full)}</span></div>
+          <div class="form-hint">标签: ${esc(u.alias.label)} · 更新于 ${fmtTime(u.alias.updated_at)}</div>
         </div>` : ''}
       </div>
-      <div style="display:flex;gap:8px;margin-bottom:16px">
-        <button class="btn" onclick="fetchEmails()">查询邮件</button>
-        <button class="btn btn-secondary" onclick="clearFilters()">重置</button>
-      </div>
-      <div id="emailResults"></div>
     </div>
-  `;
-}
-
-function renderAliasGenerator() {
-  // 仅更新下拉选项，不重建整个区域
-  const dropdown = document.getElementById('aliasGmailDropdown');
-  if (!dropdown) return;
-  if (availableGmailAccounts.length === 0) {
-    dropdown.innerHTML = '<div class="search-select-option" style="color:var(--text-lighter)">暂无可用邮箱，请先在个人中心绑定</div>';
-    return;
-  }
-  dropdown.innerHTML = availableGmailAccounts.map(ga => `
-    <div class="search-select-option" onclick="selectGmailAccount('${ga.id}','${escapeHtml(ga.email)}')">
-      ${escapeHtml(ga.email)}
-      <span class="opt-owner">${ga.is_own ? '本人' : '公开·' + escapeHtml(ga.owner)}</span>
-    </div>
-  `).join('');
-}
-
-function showGmailDropdown() {
-  document.getElementById('aliasGmailDropdown').classList.add('show');
-}
-
-function filterGmailOptions() {
-  const kw = document.getElementById('aliasGmailSelect').value.toLowerCase();
-  const dropdown = document.getElementById('aliasGmailDropdown');
-  const filtered = availableGmailAccounts.filter(g => g.email.toLowerCase().includes(kw));
-  if (filtered.length === 0) {
-    dropdown.innerHTML = '<div class="search-select-option" style="color:var(--text-lighter)">无匹配邮箱</div>';
-  } else {
-    dropdown.innerHTML = filtered.map(ga => `
-      <div class="search-select-option" onclick="selectGmailAccount('${ga.id}','${escapeHtml(ga.email)}')">
-        ${escapeHtml(ga.email)}
-        <span class="opt-owner">${ga.is_own ? '本人' : '公开·' + escapeHtml(ga.owner)}</span>
+    <div class="card">
+      <div class="card-header"><h3>OAuth 邮箱绑定</h3></div>
+      <div class="card-body">
+        <p class="form-hint" style="margin-bottom:12px">绑定 Gmail / Outlook 后,系统将自动刷新访问令牌并代为查询邮件</p>
+        <div style="display:flex; gap:8px; margin-bottom:16px">
+          <button class="btn" onclick="startOAuth('gmail')">绑定 Gmail</button>
+          <button class="btn" onclick="startOAuth('outlook')">绑定 Outlook</button>
+        </div>
+        <h4 style="font-size:13px; color:var(--text-light); margin-bottom:8px">已绑定的邮箱</h4>
+        <div id="myAccounts"><div class="loading"><span class="spinner"></span> 加载中...</div></div>
       </div>
-    `).join('');
-  }
-  document.getElementById('aliasGmailId').value = '';
-  dropdown.classList.add('show');
+    </div>
+  </div>`;
 }
 
-function selectGmailAccount(id, email) {
-  document.getElementById('aliasGmailSelect').value = email;
-  document.getElementById('aliasGmailId').value = id;
-  document.getElementById('aliasGmailDropdown').classList.remove('show');
+async function initAccountPage() {
+  await loadMyAccounts();
 }
 
-document.addEventListener('click', (e) => {
-  const ss = e.target.closest('.search-select');
-  if (!ss) {
-    document.querySelectorAll('.search-select-dropdown').forEach(d => d.classList.remove('show'));
-  }
-});
-
-async function randomAliasLabel() {
-  const data = await api('/api/account/alias/random_label');
-  if (data && data.code === 0) {
-    document.getElementById('aliasLabel').value = data.data.label;
-  }
-}
-
-async function generateAlias() {
-  const gmailId = document.getElementById('aliasGmailId').value;
-  const label = document.getElementById('aliasLabel').value.trim();
-  if (!gmailId) { showToast('请选择谷歌邮箱', 'error'); return; }
-  if (!label) { showToast('请填写别名标签', 'error'); return; }
-  const data = await api('/api/account/alias', {
-    method: 'POST',
-    body: JSON.stringify({ gmail_account_id: gmailId, label })
-  });
-  if (data && data.code === 0) {
-    currentUser = data.data;
-    showToast('别名生成成功');
-    renderAliasGenerator();
-    // 刷新当前别名显示
-    const aliasDiv = document.querySelector('#aliasGenerator .alias-display');
-    if (aliasDiv) {
-      const full = currentUser.alias.full;
-      aliasDiv.innerHTML = `<span>${escapeHtml(full)}</span><button class="copy-icon-small" onclick="copyText('${full}', this)" title="复制">📋</button>`;
-    } else {
-      // 之前没有别名，重新渲染整个生成器
-      switchTab('emails');
+async function loadMyAccounts() {
+  const box = document.getElementById('myAccounts');
+  if (!box) return;
+  try {
+    const list = await api('/api/account/mail_accounts');
+    State.mailAccounts = list || [];
+    if (!list.length) {
+      box.innerHTML = '<div class="mail-empty">尚未绑定任何邮箱</div>';
+      return;
     }
-  } else {
-    showToast(data ? data.detail || '生成失败' : '网络错误', 'error');
-  }
-}
-
-function clearFilters() {
-  document.getElementById('filterSender').value = '';
-  document.getElementById('filterSubject').value = '';
-  document.getElementById('filterKeyword').value = '';
-  document.getElementById('filterUnseen').value = '';
-  const today = new Date().toISOString().split('T')[0];
-  document.getElementById('filterStart').value = today + 'T00:00:00';
-  document.getElementById('filterEnd').value = today + 'T' + new Date().toTimeString().slice(0,8);
-  document.getElementById('filterLimit').value = '50';
-  const fto = document.getElementById('filterTo');
-  if (fto) fto.value = '';
-}
-
-async function fetchEmails() {
-  document.getElementById('emailResults').innerHTML = '<div class="empty-state">查询中...</div>';
-  const body = {
-    sender: document.getElementById('filterSender').value.trim() || null,
-    subject: document.getElementById('filterSubject').value.trim() || null,
-    keyword: document.getElementById('filterKeyword').value.trim() || null,
-    unseen: document.getElementById('filterUnseen').value === '' ? null : document.getElementById('filterUnseen').value === 'true',
-    start_time: document.getElementById('filterStart').value,
-    end_time: document.getElementById('filterEnd').value,
-    limit: parseInt(document.getElementById('filterLimit').value) || 50,
-  };
-  if (currentUser.is_admin) {
-    const fto = document.getElementById('filterTo');
-    if (fto) body.to = fto.value.trim() || null;
-  }
-  const data = await api('/api/web/email/fetch', {
-    method: 'POST',
-    body: JSON.stringify(body)
-  });
-  if (data && data.code === 0) {
-    renderEmailResults(data.data);
-  } else {
-    document.getElementById('emailResults').innerHTML = `<div class="empty-state"><div class="icon">❌</div><div>${data ? data.detail || data.msg || '查询失败' : '网络错误'}</div></div>`;
-  }
-}
-
-function renderEmailResults(data) {
-  const el = document.getElementById('emailResults');
-  if (!data.emails || data.emails.length === 0) {
-    el.innerHTML = '<div class="empty-state"><div class="icon">📭</div><div>暂无邮件</div></div>';
-    return;
-  }
-  el.innerHTML = `<div style="margin-bottom:8px;font-size:12px;color:var(--text-light)">共 ${data.total} 封邮件</div>` +
-    data.emails.map((e, i) => `
-      <div class="email-item ${e.unread ? 'unread' : ''}" onclick="toggleEmailDetail(${i})">
-        <div class="email-header">
-          <span class="email-from">${escapeHtml(e.from)}</span>
-          <span class="email-date">${e.date}</span>
+    box.innerHTML = list.map(a => `
+      <div class="mail-item" style="margin-bottom:8px">
+        <div class="mail-head" style="cursor:default">
+          <span class="badge ${a.provider === 'gmail' ? 'badge-primary' : 'badge-warning'}">${esc(a.provider)}</span>
+          <span class="from">${esc(a.email)}</span>
+          ${a.is_public ? '<span class="badge badge-gray">公开</span>' : ''}
+          <span style="margin-left:auto"></span>
+          <button class="btn btn-danger btn-sm" onclick="deleteAccount('${esc(a.id)}','${esc(a.email)}')">删除</button>
         </div>
-        <div class="email-subject">${escapeHtml(e.subject)} ${e.unread ? '<span class="tag tag-blue">未读</span>' : ''}</div>
-        <div class="email-preview">${escapeHtml(e.body.substring(0, 100))}</div>
-        <div class="email-detail" id="emailDetail${i}">
-          <div style="margin-bottom:8px"><strong>收件人:</strong> ${escapeHtml(e.to)}</div>
-          <pre>${escapeHtml(e.body)}</pre>
-        </div>
-      </div>
-    `).join('');
-}
-
-function toggleEmailDetail(i) {
-  document.getElementById('emailDetail' + i).classList.toggle('show');
-}
-
-// ==================== Account / Personal Center ====================
-function renderAccount() {
-  const u = currentUser;
-  const accounts = u.gmail_accounts || [];
-  return `
-    <div class="card">
-      <div class="card-header"><div class="card-title">API 密钥</div></div>
-      <div class="api-key-box">
-        <span>${u.api_key || ''}</span>
-        <button class="btn btn-secondary btn-sm copy-btn" onclick="copyText('${u.api_key || ''}')">复制</button>
-      </div>
-      <div style="margin-top:12px">
-        <button class="btn btn-danger" onclick="regenApiKey()">重新生成 Key</button>
-      </div>
-      <div class="form-hint" style="margin-top:8px">API Key 用于调用 /api/email/fetch 接口，不过期但可更新</div>
-    </div>
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title">谷歌邮箱绑定</div>
-        <button class="btn btn-sm" onclick="showAddGmail()">+ 添加绑定</button>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>邮箱地址</th><th>公开</th><th>应用密码</th><th>创建时间</th><th>操作</th></tr></thead>
-          <tbody>
-            ${accounts.length === 0 ? '<tr><td colspan="5" style="text-align:center;color:var(--text-lighter)">暂未绑定谷歌邮箱</td></tr>' :
-              accounts.map(ga => `
-                <tr>
-                  <td>${escapeHtml(ga.email)}</td>
-                  <td>${ga.is_public ? '<span class="tag tag-green">公开</span>' : '<span class="tag tag-gray">私有</span>'}</td>
-                  <td><code style="font-size:11px">${ga.token_masked || '****'}</code></td>
-                  <td style="font-size:12px">${ga.created_at ? ga.created_at.substring(0, 19).replace('T', ' ') : '-'}</td>
-                  <td>
-                    <button class="btn-link" onclick="showEditGmail('${ga.id}')">编辑</button>
-                    <button class="btn-link" style="color:var(--danger)" onclick="deleteGmail('${ga.id}','${escapeHtml(ga.email)}')">删除</button>
-                  </td>
-                </tr>
-              `).join('')
-            }
-          </tbody>
-        </table>
-      </div>
-      <div class="form-hint" style="margin-top:12px">公开后，其他用户可使用该邮箱前缀生成别名（系统会用您的凭据拉取对应别名的邮件）</div>
-    </div>
-  `;
-}
-
-function showAddGmail() {
-  showModal('添加谷歌邮箱绑定', `
-    <div class="form-group">
-      <label>邮箱地址</label>
-      <input type="text" id="newGmailEmail" placeholder="your@gmail.com">
-    </div>
-    <div class="form-group">
-      <label>应用密码</label>
-      <input type="text" id="newGmailToken" placeholder="16位应用密码">
-      <div class="form-hint">在 Google 账户 > 安全 > 应用专用密码 中生成</div>
-    </div>
-    <div class="form-group">
-      <label>是否公开给其他用户</label>
-      <div style="display:flex;align-items:center;gap:8px">
-        <label class="toggle">
-          <input type="checkbox" id="newGmailPublic">
-          <span class="toggle-slider"></span>
-        </label>
-        <span id="newGmailPublicText" style="font-size:13px;color:var(--text-light)">私有</span>
-      </div>
-    </div>
-  `, `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn" onclick="addGmail()">添加</button>`);
-  document.getElementById('newGmailPublic').onchange = (e) => {
-    document.getElementById('newGmailPublicText').textContent = e.target.checked ? '公开' : '私有';
-  };
-}
-
-async function addGmail() {
-  const email = document.getElementById('newGmailEmail').value.trim();
-  const token = document.getElementById('newGmailToken').value.trim();
-  const is_public = document.getElementById('newGmailPublic').checked;
-  if (!email || !token) { showToast('请填写完整', 'error'); return; }
-  if (!email.includes('@')) { showToast('邮箱格式错误', 'error'); return; }
-  const data = await api('/api/account/gmail_accounts', {
-    method: 'POST',
-    body: JSON.stringify({ email, token, is_public })
-  });
-  if (data && data.code === 0) {
-    currentUser = data.data;
-    closeModal();
-    showToast('添加成功');
-    switchTab('account');
-  } else {
-    showToast(data ? data.detail || '添加失败' : '网络错误', 'error');
+      </div>`).join('');
+  } catch (err) {
+    box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
   }
 }
 
-async function showEditGmail(gaId) {
-  const ga = (currentUser.gmail_accounts || []).find(g => g.id === gaId);
-  if (!ga) return;
-  showModal('编辑谷歌邮箱', `
-    <div class="form-group">
-      <label>邮箱地址</label>
-      <input type="text" id="editGmailEmail" value="${escapeHtml(ga.email)}">
-    </div>
-    <div class="form-group">
-      <label>应用密码</label>
-      <input type="text" id="editGmailToken" placeholder="留空不修改">
-      <div class="form-hint">当前: ${ga.token_masked || '****'}</div>
-    </div>
-    <div class="form-group">
-      <label>是否公开</label>
-      <div style="display:flex;align-items:center;gap:8px">
-        <label class="toggle">
-          <input type="checkbox" id="editGmailPublic" ${ga.is_public ? 'checked' : ''}>
-          <span class="toggle-slider"></span>
-        </label>
-        <span id="editGmailPublicText" style="font-size:13px;color:var(--text-light)">${ga.is_public ? '公开' : '私有'}</span>
-      </div>
-    </div>
-  `, `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn" onclick="editGmail('${gaId}')">保存</button>`);
-  document.getElementById('editGmailPublic').onchange = (e) => {
-    document.getElementById('editGmailPublicText').textContent = e.target.checked ? '公开' : '私有';
-  };
-}
-
-async function editGmail(gaId) {
-  const email = document.getElementById('editGmailEmail').value.trim();
-  const tokenVal = document.getElementById('editGmailToken').value.trim();
-  const is_public = document.getElementById('editGmailPublic').checked;
-  const body = { email, is_public };
-  if (tokenVal) body.token = tokenVal;
-  const data = await api(`/api/account/gmail_accounts/${gaId}`, {
-    method: 'PUT',
-    body: JSON.stringify(body)
-  });
-  if (data && data.code === 0) {
-    currentUser = data.data;
-    closeModal();
-    showToast('保存成功');
-    switchTab('account');
-  } else {
-    showToast(data ? data.detail || '保存失败' : '网络错误', 'error');
-  }
-}
-
-async function deleteGmail(gaId, email) {
-  if (!confirm(`确定删除 ${email} 的绑定吗？`)) return;
-  const data = await api(`/api/account/gmail_accounts/${gaId}`, { method: 'DELETE' });
-  if (data && data.code === 0) {
-    currentUser = data.data;
-    showToast('删除成功');
-    switchTab('account');
-  } else {
-    showToast(data ? data.detail || '删除失败' : '网络错误', 'error');
-  }
-}
-
+// 重新生成 API Key
 async function regenApiKey() {
-  if (!confirm('确定要重新生成 API Key 吗？旧的 Key 将立即失效。')) return;
-  const data = await api('/api/account/api_key', { method: 'POST' });
-  if (data && data.code === 0) {
-    currentUser = data.data;
-    showToast('API Key 已更新');
-    switchTab('account');
+  confirmDialog('重新生成后旧 API Key 将立即失效，确认操作？', async () => {
+    try {
+      const updated = await api('/api/account/api_key', { method: 'POST' });
+      State.user = updated;
+      localStorage.setItem(LS_USER, JSON.stringify(updated));
+      renderApp();
+      toast('API Key 已重新生成', 'success');
+    } catch (err) { toast(err.message, 'error'); }
+  });
+}
+
+// 删除邮箱
+async function deleteAccount(id, email) {
+  confirmDialog(`确认删除邮箱 ${email}？关联的别名也会被清除`, async () => {
+    try {
+      await api('/api/account/mail_accounts/' + id, { method: 'DELETE' });
+      toast('已删除邮箱', 'success');
+      loadMyAccounts();
+      loadAvailableAccounts();
+    } catch (err) { toast(err.message, 'error'); }
+  });
+}
+
+// 启动 OAuth 绑定: 新窗口打开授权页,主页面轮询直到窗口关闭
+async function startOAuth(provider) {
+  try {
+    const data = await api('/api/account/oauth/start?provider=' + provider);
+    if (!data.auth_url) { toast('未获取到授权地址', 'error'); return; }
+    const win = window.open(data.auth_url, '_blank');
+    if (!win) { toast('浏览器拦截了弹窗，请允许后重试', 'warning'); return; }
+    toast('请在弹出的窗口完成授权', 'info', 4000);
+    // 清理已有定时器
+    if (State.oauthTimer) clearInterval(State.oauthTimer);
+    // 每 2 秒检查授权窗口是否已关闭,关闭后刷新邮箱列表
+    State.oauthTimer = setInterval(() => {
+      if (win.closed) {
+        clearInterval(State.oauthTimer);
+        State.oauthTimer = null;
+        loadMyAccounts();
+        loadAvailableAccounts();
+        toast('授权流程结束', 'success');
+      }
+    }, 2000);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+// 复制文本到剪贴板
+function copyText(text) {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(() => toast('已复制', 'success'));
   } else {
-    showToast(data ? data.detail || '更新失败' : '网络错误', 'error');
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); toast('已复制', 'success'); } catch { toast('复制失败', 'error'); }
+    ta.remove();
   }
 }
 
-// ==================== Users Management (Admin) ====================
-function renderUsers() {
+/* ============================================================
+ * 3. Webhook 订阅页
+ * ============================================================ */
+function viewWebhookHtml() {
   return `
+  <div class="page-title">Webhook 订阅</div>
+  <div class="page-desc">当邮箱收到新邮件时,系统会主动向你的回调 URL 推送邮件数据</div>
+  <div class="grid-2">
     <div class="card">
-      <div class="card-header">
-        <div class="card-title">用户管理</div>
-        <button class="btn btn-sm" onclick="showCreateUser()">+ 添加用户</button>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>用户名</th><th>角色</th><th>绑定邮箱</th><th>别名</th><th>API Key</th><th>创建时间</th><th>操作</th></tr></thead>
-          <tbody id="usersTableBody"><tr><td colspan="7" style="text-align:center;color:var(--text-lighter)">加载中...</td></tr></tbody>
-        </table>
+      <div class="card-header"><h3>创建订阅</h3></div>
+      <div class="card-body">
+        <div class="form-group">
+          <label class="form-label">监听邮箱 <span class="req">*</span></label>
+          <select id="whAccount" class="form-control"><option value="">加载中...</option></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">回调 URL <span class="req">*</span></label>
+          <input type="text" id="whUrl" class="form-control" placeholder="https://your-server.com/webhook">
+        </div>
+        <div class="form-group">
+          <label class="form-label">订阅事件 <span class="req">*</span></label>
+          <div style="display:flex; gap:16px; padding-top:6px">
+            <label class="switch"><input type="checkbox" id="whEvNew" checked><span class="track"></span><span>new_mail 新邮件</span></label>
+            <label class="switch"><input type="checkbox" id="whEvUnread"><span class="track"></span><span>unread 未读</span></label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">目标别名 (可选)</label>
+          <input type="text" id="whAlias" class="form-control" placeholder="仅推送命中此别名的邮件,留空表示全部">
+        </div>
+        <div class="form-group">
+          <label class="form-label">签名密钥 Secret (可选)</label>
+          <input type="text" id="whSecret" class="form-control" placeholder="填写后推送将携带 X-Webhook-Signature 签名">
+        </div>
+        <button class="btn" onclick="createWebhook()">创建订阅</button>
       </div>
     </div>
-  `;
+    <div class="card">
+      <div class="card-header"><h3>已订阅列表</h3></div>
+      <div class="card-body">
+        <div id="whList"><div class="loading"><span class="spinner"></span> 加载中...</div></div>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function initWebhookPage() {
+  try {
+    const list = await api('/api/account/mail_accounts/available');
+    const sel = document.getElementById('whAccount');
+    if (!list || !list.length) {
+      sel.innerHTML = '<option value="">无可用邮箱</option>';
+    } else {
+      sel.innerHTML = list.map(a =>
+        `<option value="${esc(a.id)}">${esc(a.email)} (${a.provider})</option>`).join('');
+    }
+  } catch (err) { toast(err.message, 'error'); }
+  loadWebhooks();
+}
+
+async function loadWebhooks() {
+  const box = document.getElementById('whList');
+  if (!box) return;
+  try {
+    const list = await api('/api/webhooks');
+    if (!list.length) {
+      box.innerHTML = '<div class="mail-empty">暂无订阅</div>';
+      return;
+    }
+    box.innerHTML = list.map(w => `
+      <div class="mail-item" style="margin-bottom:10px">
+        <div class="mail-head" style="cursor:default; flex-wrap:wrap">
+          <span class="badge ${w.is_active ? 'badge-success' : 'badge-gray'}">${w.is_active ? '启用' : '停用'}</span>
+          <span class="mono" style="font-size:12px">${esc(w.url)}</span>
+        </div>
+        <div class="mail-body" style="display:block; border-top:1px solid var(--border)">
+          <div class="meta-row">
+            <span>邮箱ID: ${esc(w.mail_account_id)}</span>
+            <span>事件: ${esc(w.events)}</span>
+            ${w.target_alias ? `<span>别名: ${esc(w.target_alias)}</span>` : ''}
+            ${w.secret ? '<span class="badge badge-primary">已设签名</span>' : ''}
+            <span>创建: ${fmtTime(w.created_at)}</span>
+          </div>
+          <div class="actions">
+            <button class="btn btn-secondary btn-sm" onclick="testWebhook('${esc(w.id)}')">测试推送</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteWebhook('${esc(w.id)}')">删除</button>
+          </div>
+        </div>
+      </div>`).join('');
+  } catch (err) {
+    box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
+  }
+}
+
+async function createWebhook() {
+  const events = [];
+  if (document.getElementById('whEvNew').checked) events.push('new_mail');
+  if (document.getElementById('whEvUnread').checked) events.push('unread');
+  const body = {
+    mail_account_id: document.getElementById('whAccount').value,
+    url: document.getElementById('whUrl').value.trim(),
+    events: events.join(','),
+    target_alias: document.getElementById('whAlias').value.trim() || undefined,
+    secret: document.getElementById('whSecret').value.trim() || undefined,
+  };
+  if (!body.mail_account_id) { toast('请选择监听邮箱', 'warning'); return; }
+  if (!body.url) { toast('请填写回调 URL', 'warning'); return; }
+  if (!events.length) { toast('请至少选择一个事件', 'warning'); return; }
+  try {
+    await api('/api/webhooks', { method: 'POST', body });
+    toast('订阅创建成功', 'success');
+    ['whUrl', 'whAlias', 'whSecret'].forEach(id => document.getElementById(id).value = '');
+    loadWebhooks();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function testWebhook(id) {
+  try {
+    const data = await api('/api/webhooks/' + id + '/test', { method: 'POST' });
+    toast(data.success ? '测试推送已发送' : '测试推送失败', data.success ? 'success' : 'error');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function deleteWebhook(id) {
+  confirmDialog('确认删除此 Webhook 订阅？', async () => {
+    try {
+      await api('/api/webhooks/' + id, { method: 'DELETE' });
+      toast('已删除', 'success');
+      loadWebhooks();
+    } catch (err) { toast(err.message, 'error'); }
+  });
+}
+
+/* ============================================================
+ * 4. API 文档页(含 Webhook 推送文档与代码示例)
+ * ============================================================ */
+function viewDocsHtml() {
+  const apiKey = State.user ? State.user.api_key : 'YOUR_KEY';
+  return `
+  <div class="page-title">API 文档</div>
+  <div class="page-desc">所有接口统一返回 <code class="mono">{ code, msg, data }</code>,<code class="mono">code=0</code> 表示成功</div>
+
+  <div class="doc-section">
+    <h4>鉴权方式</h4>
+    <div class="card card-body">
+      <p style="margin-bottom:8px"><strong>1. Session 认证</strong> — Web 界面使用,请求头携带 <code class="mono">Authorization: Bearer &lt;session_token&gt;</code></p>
+      <p><strong>2. API Key 认证</strong> — 编程调用使用,URL 参数 <code class="mono">?key=&lt;api_key&gt;</code></p>
+    </div>
+  </div>
+
+  <div class="doc-section">
+    <h4>认证接口</h4>
+    ${endpointHtml('POST', '/api/auth/login', '登录', '{ username, password }', '{ session_token, user }')}
+    ${endpointHtml('POST', '/api/auth/register', '注册(受开关控制)', '{ username, password }', 'user')}
+    ${endpointHtml('POST', '/api/auth/logout', '登出', '-', 'null')}
+    ${endpointHtml('GET', '/api/auth/me', '获取当前用户', '-', 'user')}
+  </div>
+
+  <div class="doc-section">
+    <h4>账户与邮箱</h4>
+    ${endpointHtml('GET', '/api/account', '当前用户信息', '-', 'user')}
+    ${endpointHtml('POST', '/api/account/api_key', '重新生成 API Key', '-', 'user')}
+    ${endpointHtml('GET', '/api/account/mail_accounts', '我的邮箱列表', '-', '[account]')}
+    ${endpointHtml('GET', '/api/account/mail_accounts/available', '可用邮箱(含公开)', '-', '[account]')}
+    ${endpointHtml('DELETE', '/api/account/mail_accounts/:id', '删除邮箱', '-', 'null')}
+    ${endpointHtml('GET', '/api/account/oauth/start?provider=gmail', '启动 OAuth 绑定', '-', '{ auth_url }')}
+    ${endpointHtml('GET', '/api/account/alias/random_label', '随机别名标签', '-', '{ label }')}
+    ${endpointHtml('POST', '/api/account/alias', '设置别名', '{ mail_account_id, label }', 'user')}
+  </div>
+
+  <div class="doc-section">
+    <h4>邮件查询接口</h4>
+    ${endpointHtml('POST', '/api/email/fetch?key=KEY', 'API Key 查询邮件(必填 to)', '{ to, sender, subject, keyword, unseen, start_time, end_time, limit }', '{ total, emails[], query }')}
+    ${endpointHtml('POST', '/api/email/mark_read?key=KEY', '标记已读', '{ to, sender, subject }', '{ marked }')}
+    ${endpointHtml('POST', '/api/web/email/fetch', 'Session 查询邮件(优先用别名)', '{ sender, subject, keyword, unseen, start_time, end_time, limit }', '{ total, emails[], query }')}
+    <h5>邮件对象 emails[] 字段</h5>
+    ${tableHtml([
+      ['id', 'string', '邮件唯一 ID'],
+      ['from', 'string', '发件人'],
+      ['to', 'string', '收件人(别名地址)'],
+      ['subject', 'string', '主题'],
+      ['date', 'string', '显示用时间 YYYY-MM-DD HH:MM:SS'],
+      ['date_iso', 'string', 'ISO 8601 时间'],
+      ['body', 'string', '纯文本正文'],
+      ['html', 'string', 'HTML 正文'],
+      ['unread', 'boolean', '是否未读'],
+      ['provider', 'string', '邮箱提供方 gmail/outlook'],
+    ])}
+  </div>
+
+  <div class="doc-section">
+    <h4>Webhook 管理接口</h4>
+    ${endpointHtml('GET', '/api/webhooks', '我的订阅列表', '-', '[webhook]')}
+    ${endpointHtml('POST', '/api/webhooks', '创建订阅', '{ mail_account_id, url, events, target_alias?, secret? }', '{ id }')}
+    ${endpointHtml('DELETE', '/api/webhooks/:id', '删除订阅', '-', 'null')}
+    ${endpointHtml('POST', '/api/webhooks/:id/test', '发送测试推送', '-', '{ success }')}
+    ${endpointHtml('GET', '/api/webhook/poll?key=KEY&account_id=ID', '主动触发轮询推送', '-', '{ pushed, errors[] }')}
+  </div>
+
+  <div class="doc-section">
+    <h4>管理员接口</h4>
+    ${endpointHtml('GET', '/api/admin/users', '用户列表', '-', '[user]')}
+    ${endpointHtml('POST', '/api/admin/users', '创建用户', '{ username, password, is_admin }', 'user')}
+    ${endpointHtml('PUT', '/api/admin/users/:id', '更新用户', '{ password?, is_admin? }', 'user')}
+    ${endpointHtml('DELETE', '/api/admin/users/:id', '删除用户', '-', 'null')}
+    ${endpointHtml('GET', '/api/admin/stats', '系统统计', '-', '{ summary, logs[] }')}
+    ${endpointHtml('GET', '/api/admin/settings', '系统设置', '-', '{ allow_registration }')}
+    ${endpointHtml('PUT', '/api/admin/settings', '更新设置', '{ allow_registration }', '{ allow_registration }')}
+    ${endpointHtml('GET', '/api/admin/mail_accounts', '所有邮箱', '-', '[account]')}
+  </div>
+
+  <div class="doc-section">
+    <h4>Webhook 推送载荷文档 (重点)</h4>
+    <p class="form-hint" style="margin-bottom:12px">系统会以 <strong>POST</strong> 方式向你填写的回调 URL 推送 JSON 数据,Content-Type 为 application/json。若订阅时填写了 secret,则同时附带签名头 <code class="mono">X-Webhook-Signature</code></p>
+    <h5>载荷字段</h5>
+    ${tableHtml([
+      ['event', 'string', '事件类型: new_mail / unread / test'],
+      ['delivered_at', 'string', '推送时间 ISO 8601'],
+      ['mail_account_id', 'string', '邮箱账号 ID'],
+      ['email', 'string', '主邮箱地址'],
+      ['to_alias', 'string?', '命中的别名(未指定时不存在)'],
+      ['count', 'number', '本次推送邮件数量'],
+      ['emails', 'array', '邮件对象数组,字段同上方邮件对象'],
+    ])}
+    <h5>签名校验</h5>
+    <p class="form-hint" style="margin-bottom:8px"><code class="mono">X-Webhook-Signature</code> 是用订阅时填写的 secret 对原始请求 body 做 HMAC-SHA256 后的 <strong>base64url</strong> 编码字符串。务必使用「等长比较」防时序攻击。</p>
+    <pre class="code">${esc(
+`// 签名计算伪代码(与服务端一致)
+const sig = base64url(HMAC_SHA256(secret, requestBodyString))`)}
+    </pre>
+    <h5>Python 验签示例</h5>
+    <pre class="code">${escPy(pythonVerifyCode())}</pre>
+    <h5>Node.js 验签示例</h5>
+    <pre class="code">${escJs(jsVerifyCode())}</pre>
+  </div>
+
+  <div class="doc-section">
+    <h4>Python 调用案例 (重点)</h4>
+    <h5>1. 用 requests 查询别名邮件</h5>
+    <pre class="code">${escPy(pythonFetchExample(apiKey))}</pre>
+    <h5>2. 用 Flask 接收 Webhook 推送并验签(完整示例)</h5>
+    <pre class="code">${escPy(pythonFlaskWebhookExample())}</pre>
+  </div>`;
+}
+
+// 端点展示组件
+function endpointHtml(method, path, desc, req, resp) {
+  const m = method.toLowerCase();
+  return `<div class="endpoint">
+    <span class="method m-${m}">${method}</span><span class="path">${esc(path)}</span>
+    <div class="desc">${esc(desc)}${req !== '-' ? ` · 请求: <code class="mono">${esc(req)}</code>` : ''} · 返回: <code class="mono">${esc(resp)}</code></div>
+  </div>`;
+}
+
+// 字段表格组件
+function tableHtml(rows) {
+  return `<div class="table-wrap"><table class="table">
+    <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
+    <tbody>${rows.map(r => `<tr><td class="mono">${esc(r[0])}</td><td>${esc(r[1])}</td><td>${esc(r[2])}</td></tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+// Python: 查询邮件示例
+function pythonFetchExample(apiKey) {
+  return `import requests
+
+API_BASE = "https://your-worker.workers.dev"
+API_KEY = "${apiKey}"   # 替换为你的 API Key
+
+# 查询别名邮箱的未读邮件
+resp = requests.post(
+    f"{API_BASE}/api/email/fetch",
+    params={"key": API_KEY},
+    json={
+        "to": "user+newsletter@gmail.com",  # 别名邮箱地址
+        "sender": "",          # 可选: 按发件人筛选
+        "subject": "",         # 可选: 按主题筛选
+        "keyword": "验证码",    # 可选: 正文关键词
+        "unseen": True,        # 可选: 仅未读
+        "limit": 20,           # 可选: 数量上限
+        # "start_time": "2026-01-01T00:00:00Z",
+        # "end_time":   "2026-07-08T00:00:00Z",
+    },
+    timeout=30,
+)
+data = resp.json()
+if data["code"] != 0:
+    raise RuntimeError(data["msg"])
+
+result = data["data"]
+print(f"共 {result['total']} 封邮件")
+for mail in result["emails"]:
+    print(f"- [{mail['date']}] {mail['subject']}  from {mail['from']}")
+    print(f"  正文: {mail['body'][:200]}")
+
+# 标记已读
+requests.post(
+    f"{API_BASE}/api/email/mark_read",
+    params={"key": API_KEY},
+    json={"to": "user+newsletter@gmail.com", "sender": "", "subject": ""},
+)`;
+}
+
+// Python: 验签代码
+function pythonVerifyCode() {
+  return `import hmac, hashlib, base64
+
+def verify_signature(secret: str, body: bytes, signature: str) -> bool:
+    """校验 X-Webhook-Signature (HMAC-SHA256 base64url)"""
+    expected = hmac.new(
+        secret.encode("utf-8"), body, hashlib.sha256
+    ).digest()
+    # 转 base64url 并去掉 = 填充
+    expected_b64 = base64.urlsafe_b64encode(expected).rstrip(b"=").decode()
+    # 等长比较,防时序攻击
+    if len(expected_b64) != len(signature):
+        return False
+    return hmac.compare_digest(expected_b64, signature)`;
+}
+
+// Python: Flask 接收 Webhook 完整示例(>30 行)
+function pythonFlaskWebhookExample() {
+  return `import hmac, hashlib, base64
+from flask import Flask, request, abort, jsonify
+
+app = Flask(__name__)
+WEBHOOK_SECRET = "your-subscribe-secret"   # 与订阅时填写一致
+
+def verify_signature(secret: str, body: bytes, signature: str) -> bool:
+    """校验 X-Webhook-Signature 签名"""
+    expected = hmac.new(
+        secret.encode("utf-8"), body, hashlib.sha256
+    ).digest()
+    expected_b64 = base64.urlsafe_b64encode(expected).rstrip(b"=").decode()
+    if len(expected_b64) != len(signature):
+        return False
+    return hmac.compare_digest(expected_b64, signature)
+
+@app.route("/webhook", methods=["POST"])
+def receive_webhook():
+    # 注意: 必须使用原始 body 验签,不要先用 get_json
+    raw_body = request.get_data()
+    signature = request.headers.get("X-Webhook-Signature", "")
+
+    # 如果设置了 secret,必须验签
+    if WEBHOOK_SECRET and not verify_signature(WEBHOOK_SECRET, raw_body, signature):
+        abort(401, "签名校验失败")
+
+    payload = request.get_json(force=True)
+    event = payload.get("event")
+    emails = payload.get("emails", [])
+    alias = payload.get("to_alias")
+    print(f"收到事件 {event}, 共 {payload.get('count', 0)} 封, 别名 {alias}")
+
+    for mail in emails:
+        print(f"  - {mail.get('subject')} from {mail.get('from')}")
+        print(f"    收件人: {mail.get('to')}")
+        print(f"    时间: {mail.get('date')}")
+        body = mail.get("body", "")
+        # 业务处理: 提取验证码、转发、入库等
+        extract_and_handle(body)
+
+    return jsonify({"ok": True}), 200
+
+def extract_and_handle(body: str):
+    """示例: 从邮件正文中提取 4-6 位验证码"""
+    import re
+    m = re.search(r"\\b(\\d{4,6})\\b", body)
+    if m:
+        code = m.group(1)
+        print(f"  提取到验证码: {code}")
+        # TODO: 转发到企业微信、写入数据库等
+
+if __name__ == "__main__":
+    # 生产环境建议 gunicorn + nginx 反代
+    app.run(host="0.0.0.0", port=5000)`;
+}
+
+// JS: 验签代码
+function jsVerifyCode() {
+  return `const crypto = require('crypto');
+
+function verifySignature(secret, body, signature) {
+  // HMAC-SHA256 后转 base64url (去掉 = 填充,与服务端一致)
+  const expected = crypto.createHmac('sha256', secret)
+    .update(body, 'utf8')
+    .digest('base64')
+    .replace(/\\+/g, '-')
+    .replace(/\\//g, '_')
+    .replace(/=+$/, '');
+  if (expected.length !== signature.length) return false;
+  // 等长比较防时序攻击
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+}
+
+// Express 示例: 注意需用 raw body 解析
+const express = require('express');
+const app = express();
+app.use('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+  const signature = req.headers['x-webhook-signature'] || '';
+  if (!verifySignature(WEBHOOK_SECRET, req.body.toString('utf8'), signature)) {
+    return res.status(401).send('签名校验失败');
+  }
+  const payload = JSON.parse(req.body.toString('utf8'));
+  console.log('收到事件', payload.event, '邮件数', payload.count);
+  payload.emails.forEach(m => console.log('-', m.subject, m.from));
+  res.send('ok');
+});
+app.listen(3000);`;
+}
+
+// 代码块语法高亮辅助函数(轻量级,仅做注释/字符串着色)
+function escPy(code) { return esc(code); }
+function escJs(code) { return esc(code); }
+
+/* ============================================================
+ * 5. 管理员 - 用户管理页
+ * ============================================================ */
+function viewUsersHtml() {
+  return `
+  <div class="page-title">用户管理</div>
+  <div class="page-desc">创建、修改密码或删除系统用户</div>
+  <div class="section">
+    <div class="card">
+      <div class="card-header" style="display:flex; justify-content:space-between; align-items:center">
+        <h3>用户列表</h3>
+        <button class="btn btn-sm" onclick="showCreateUserModal()">新建用户</button>
+      </div>
+      <div class="card-body">
+        <div id="usersList" class="table-wrap"><div class="loading"><span class="spinner"></span> 加载中...</div></div>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function initUsersPage() {
+  await loadUsers();
 }
 
 async function loadUsers() {
-  const data = await api('/api/admin/users');
-  const tbody = document.getElementById('usersTableBody');
-  if (!tbody) return;
-  if (data && data.code === 0) {
-    if (data.data.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-lighter)">暂无用户</td></tr>';
-      return;
-    }
-    tbody.innerHTML = data.data.map(u => {
-      const emails = (u.gmail_accounts || []).map(g => g.email).join('<br>') || '-';
-      const alias = u.alias && u.alias.full ? u.alias.full : '-';
-      return `
+  const box = document.getElementById('usersList');
+  if (!box) return;
+  try {
+    const list = await api('/api/admin/users');
+    box.innerHTML = `<table class="table">
+      <thead><tr><th>用户名</th><th>角色</th><th>API Key</th><th>邮箱数</th><th>别名</th><th>创建时间</th><th>操作</th></tr></thead>
+      <tbody>${list.map(u => `
         <tr>
-          <td>${escapeHtml(u.username)}</td>
-          <td>${u.is_admin ? '<span class="tag tag-blue">管理员</span>' : '<span class="tag tag-green">普通</span>'}</td>
-          <td style="font-size:12px">${emails}</td>
-          <td style="font-size:12px">${escapeHtml(alias)}</td>
-          <td><code style="font-size:11px">${u.api_key ? u.api_key.substring(0, 8) + '...' : '-'}</code></td>
-          <td style="font-size:12px">${u.created_at ? u.created_at.substring(0, 19).replace('T', ' ') : '-'}</td>
+          <td><strong>${esc(u.username)}</strong></td>
+          <td>${u.is_admin ? '<span class="badge badge-primary">管理员</span>' : '<span class="badge badge-gray">用户</span>'}</td>
+          <td class="mono" style="font-size:12px">${esc(u.api_key)}</td>
+          <td>${u.mail_accounts ? u.mail_accounts.length : 0}</td>
+          <td>${u.alias ? '<span class="badge badge-success">' + esc(u.alias.full) + '</span>' : '-'}</td>
+          <td>${fmtTime(u.created_at)}</td>
           <td>
-            <button class="btn-link" onclick="showEditUser('${u.id}')">编辑</button>
-            ${u.id !== 'admin' ? `<button class="btn-link" style="color:var(--danger)" onclick="deleteUser('${u.id}','${u.username}')">删除</button>` : ''}
+            <button class="btn btn-secondary btn-sm" onclick="showChangePwdModal('${esc(u.id)}','${esc(u.username)}')">改密</button>
+            ${u.username === 'admin' ? '' : `<button class="btn btn-danger btn-sm" onclick="deleteUser('${esc(u.id)}','${esc(u.username)}')">删除</button>`}
           </td>
-        </tr>
-      `;
-    }).join('');
+        </tr>`).join('')}</tbody>
+    </table>`;
+  } catch (err) {
+    box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
   }
 }
 
-function showCreateUser() {
-  showModal('添加用户', `
+function showCreateUserModal() {
+  showModal('新建用户', `
     <div class="form-group">
-      <label>用户名</label>
-      <input type="text" id="newUsername" placeholder="至少3个字符">
+      <label class="form-label">用户名 <span class="req">*</span></label>
+      <input type="text" id="newUsername" class="form-control" placeholder="至少 3 个字符">
     </div>
     <div class="form-group">
-      <label>密码</label>
-      <input type="text" id="newPassword" placeholder="至少6个字符">
+      <label class="form-label">密码 <span class="req">*</span></label>
+      <input type="password" id="newPassword" class="form-control" placeholder="至少 6 个字符">
     </div>
     <div class="form-group">
-      <label>角色</label>
-      <select id="newIsAdmin">
-        <option value="false">普通用户</option>
-        <option value="true">管理员</option>
-      </select>
-    </div>
-  `, `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn" onclick="createUser()">添加</button>`);
+      <label class="switch"><input type="checkbox" id="newIsAdmin"><span class="track"></span><span>设为管理员</span></label>
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn" onclick="createUser()">创建</button>`);
+  setTimeout(() => document.getElementById('newUsername').focus(), 50);
 }
 
 async function createUser() {
   const username = document.getElementById('newUsername').value.trim();
   const password = document.getElementById('newPassword').value;
-  const is_admin = document.getElementById('newIsAdmin').value === 'true';
-  if (!username || !password) { showToast('请填写完整', 'error'); return; }
-  const data = await api('/api/admin/users', {
-    method: 'POST',
-    body: JSON.stringify({ username, password, is_admin })
-  });
-  if (data && data.code === 0) {
+  const is_admin = document.getElementById('newIsAdmin').checked;
+  if (!username || username.length < 3) { toast('用户名至少 3 个字符', 'warning'); return; }
+  if (!password || password.length < 6) { toast('密码至少 6 个字符', 'warning'); return; }
+  try {
+    await api('/api/admin/users', { method: 'POST', body: { username, password, is_admin } });
+    toast('用户创建成功', 'success');
     closeModal();
-    showToast('添加成功');
     loadUsers();
-  } else {
-    showToast(data ? data.detail || '添加失败' : '网络错误', 'error');
-  }
+  } catch (err) { toast(err.message, 'error'); }
 }
 
-async function showEditUser(userId) {
-  const data = await api('/api/admin/users');
-  if (!data || data.code !== 0) return;
-  const u = data.data.find(x => x.id === userId);
-  if (!u) return;
-  showModal('编辑用户', `
+function showChangePwdModal(id, username) {
+  showModal('修改密码 - ' + username, `
     <div class="form-group">
-      <label>用户名</label>
-      <input type="text" value="${escapeHtml(u.username)}" disabled style="background:#f9fafb">
-    </div>
-    <div class="form-group">
-      <label>新密码</label>
-      <input type="text" id="editPassword" placeholder="留空不修改">
-    </div>
-    <div class="form-group">
-      <label>角色</label>
-      <select id="editIsAdmin">
-        <option value="false" ${!u.is_admin ? 'selected' : ''}>普通用户</option>
-        <option value="true" ${u.is_admin ? 'selected' : ''}>管理员</option>
-      </select>
-    </div>
-  `, `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn" onclick="editUser('${userId}')">保存</button>`);
+      <label class="form-label">新密码 <span class="req">*</span></label>
+      <input type="password" id="editPassword" class="form-control" placeholder="至少 6 个字符">
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn" onclick="changePassword('${esc(id)}')">保存</button>`);
+  setTimeout(() => document.getElementById('editPassword').focus(), 50);
 }
 
-async function editUser(userId) {
+async function changePassword(id) {
   const password = document.getElementById('editPassword').value;
-  const is_admin = document.getElementById('editIsAdmin').value === 'true';
-  const body = { is_admin };
-  if (password) body.password = password;
-  const data = await api(`/api/admin/users/${userId}`, {
-    method: 'PUT',
-    body: JSON.stringify(body)
-  });
-  if (data && data.code === 0) {
+  if (!password || password.length < 6) { toast('密码至少 6 个字符', 'warning'); return; }
+  try {
+    await api('/api/admin/users/' + id, { method: 'PUT', body: { password } });
+    toast('密码已修改', 'success');
     closeModal();
-    showToast('保存成功');
     loadUsers();
-  } else {
-    showToast(data ? data.detail || '保存失败' : '网络错误', 'error');
-  }
+  } catch (err) { toast(err.message, 'error'); }
 }
 
-async function deleteUser(userId, username) {
-  if (!confirm(`确定删除用户 ${username} 吗？`)) return;
-  const data = await api(`/api/admin/users/${userId}`, { method: 'DELETE' });
-  if (data && data.code === 0) {
-    showToast('删除成功');
-    loadUsers();
-  } else {
-    showToast(data ? data.detail || '删除失败' : '网络错误', 'error');
-  }
+async function deleteUser(id, username) {
+  confirmDialog(`确认删除用户 ${username}？此操作不可恢复`, async () => {
+    try {
+      await api('/api/admin/users/' + id, { method: 'DELETE' });
+      toast('用户已删除', 'success');
+      loadUsers();
+    } catch (err) { toast(err.message, 'error'); }
+  });
 }
 
-// ==================== Stats ====================
-function renderStats() {
+/* ============================================================
+ * 6. 管理员 - 系统设置页
+ * ============================================================ */
+function viewSettingsHtml() {
   return `
+  <div class="page-title">系统设置</div>
+  <div class="page-desc">管理系统级开关与查看运行统计</div>
+  <div class="grid-2">
     <div class="card">
-      <div class="card-header"><div class="card-title">使用统计</div></div>
-      <div class="stats-grid" id="statsGrid"><div class="stat-card"><div class="stat-label">加载中</div></div></div>
-    </div>
-    <div class="card">
-      <div class="card-header"><div class="card-title">详细记录</div></div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>时间</th><th>用户</th><th>别名</th><th>操作</th><th>详情</th></tr></thead>
-          <tbody id="statsTableBody"><tr><td colspan="5" style="text-align:center;color:var(--text-lighter)">加载中...</td></tr></tbody>
-        </table>
+      <div class="card-header"><h3>基础设置</h3></div>
+      <div class="card-body">
+        <div class="info-item">
+          <span class="label">允许注册</span>
+          <label class="switch">
+            <input type="checkbox" id="setAllowReg" onchange="saveSettings()">
+            <span class="track"></span>
+            <span id="setAllowRegText"></span>
+          </label>
+        </div>
+        <p class="form-hint">关闭后,注册接口将拒绝新用户注册</p>
       </div>
     </div>
-  `;
+    <div class="card">
+      <div class="card-header"><h3>系统统计</h3></div>
+      <div class="card-body">
+        <div class="grid-3" id="statsCards"><div class="loading"><span class="spinner"></span></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="section">
+    <div class="card">
+      <div class="card-header"><h3>调用日志 (最近 500 条)</h3></div>
+      <div class="card-body">
+        <div id="logsBox" class="table-wrap"><div class="loading"><span class="spinner"></span> 加载中...</div></div>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function initSettingsPage() {
+  // 读取注册开关
+  try {
+    const s = await api('/api/admin/settings');
+    document.getElementById('setAllowReg').checked = s.allow_registration;
+    document.getElementById('setAllowRegText').textContent = s.allow_registration ? '已开启' : '已关闭';
+  } catch (err) { toast(err.message, 'error'); }
+  await loadStats();
+}
+
+async function saveSettings() {
+  const allow_registration = document.getElementById('setAllowReg').checked;
+  try {
+    await api('/api/admin/settings', { method: 'PUT', body: { allow_registration } });
+    document.getElementById('setAllowRegText').textContent = allow_registration ? '已开启' : '已关闭';
+    toast('设置已保存', 'success');
+  } catch (err) { toast(err.message, 'error'); }
 }
 
 async function loadStats() {
-  const data = await api('/api/admin/stats');
-  if (!data || data.code !== 0) return;
-  const s = data.data.summary;
-  document.getElementById('statsGrid').innerHTML = `
-    <div class="stat-card"><div class="stat-label">总调用次数</div><div class="stat-value primary">${s.total_calls}</div></div>
-    <div class="stat-card"><div class="stat-label">用户数</div><div class="stat-value">${Object.keys(s.by_user || {}).length}</div></div>
-    <div class="stat-card"><div class="stat-label">别名数</div><div class="stat-value">${Object.keys(s.by_alias || {}).length}</div></div>
-    <div class="stat-card"><div class="stat-label">绑定主邮箱</div><div class="stat-value">${s.gmail_account_count || 0}</div></div>
-  `;
-  const tbody = document.getElementById('statsTableBody');
-  const logs = data.data.logs;
-  if (logs.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-lighter)">暂无记录</td></tr>';
-    return;
-  }
-  tbody.innerHTML = logs.map(l => `
-    <tr>
-      <td style="font-size:12px">${l.time_display || (l.timestamp ? l.timestamp.substring(0, 19).replace('T', ' ') : '-')}</td>
-      <td>${escapeHtml(l.username)}</td>
-      <td style="font-size:12px">${escapeHtml(l.alias || '-')}</td>
-      <td><span class="tag tag-gray">${escapeHtml(l.action)}</span></td>
-      <td style="font-size:12px">${escapeHtml(l.detail)}</td>
-    </tr>
-  `).join('');
-}
-
-// ==================== Settings ====================
-function renderSettings() {
-  return `
-    <div class="card">
-      <div class="card-header"><div class="card-title">系统设置</div></div>
-      <div class="form-group">
-        <label>允许注册</label>
-        <div style="display:flex;align-items:center;gap:8px">
-          <label class="toggle">
-            <input type="checkbox" id="setAllowReg">
-            <span class="toggle-slider"></span>
-          </label>
-          <span id="allowRegText" style="font-size:13px;color:var(--text-light)">加载中...</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title">用户管理</div>
-        <button class="btn btn-sm" onclick="showCreateUser()">+ 添加用户</button>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>用户名</th><th>角色</th><th>绑定邮箱</th><th>别名</th><th>API Key</th><th>创建时间</th><th>操作</th></tr></thead>
-          <tbody id="usersTableBody"><tr><td colspan="7" style="text-align:center;color:var(--text-lighter)">加载中...</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title">主邮箱管理</div>
-        <button class="btn btn-sm" onclick="loadAdminGmailAccounts()">刷新</button>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>所属用户</th><th>邮箱地址</th><th>公开</th><th>Token</th><th>创建时间</th><th>操作</th></tr></thead>
-          <tbody id="adminGmailTableBody"><tr><td colspan="6" style="text-align:center;color:var(--text-lighter)">加载中...</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-  `;
-}
-
-async function loadSettings() {
-  const data = await api('/api/admin/settings');
-  if (data && data.code === 0) {
-    const allowed = data.data.allow_registration;
-    document.getElementById('setAllowReg').checked = allowed;
-    document.getElementById('allowRegText').textContent = allowed ? '已开启' : '已关闭';
-    document.getElementById('setAllowReg').onchange = async (e) => {
-      const r = await api('/api/admin/settings', {
-        method: 'PUT',
-        body: JSON.stringify({ allow_registration: e.target.checked })
-      });
-      if (r && r.code === 0) {
-        document.getElementById('allowRegText').textContent = e.target.checked ? '已开启' : '已关闭';
-        showToast('已更新');
-      } else {
-        e.target.checked = !e.target.checked;
-        showToast('更新失败', 'error');
-      }
-    };
-  }
-  loadUsers();
-  loadAdminGmailAccounts();
-}
-
-async function loadAdminGmailAccounts() {
-  const data = await api('/api/admin/gmail_accounts');
-  const tbody = document.getElementById('adminGmailTableBody');
-  if (!tbody) return;
-  if (data && data.code === 0) {
-    if (data.data.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-lighter)">暂无主邮箱</td></tr>';
+  try {
+    const data = await api('/api/admin/stats');
+    const s = data.summary || {};
+    const userCount = Object.keys(s.by_user || {}).length;
+    const aliasCount = Object.keys(s.by_alias || {}).length;
+    document.getElementById('statsCards').innerHTML = `
+      <div class="stat-card"><div class="num">${s.total_calls || 0}</div><div class="lbl">总调用次数</div></div>
+      <div class="stat-card"><div class="num">${userCount}</div><div class="lbl">活跃用户数</div></div>
+      <div class="stat-card"><div class="num">${s.mail_account_count || 0}</div><div class="lbl">邮箱账号数</div></div>`;
+    const logs = data.logs || [];
+    const box = document.getElementById('logsBox');
+    if (!logs.length) {
+      box.innerHTML = '<div class="mail-empty">暂无日志</div>';
       return;
     }
-    tbody.innerHTML = data.data.map(g => `
-      <tr>
-        <td>${escapeHtml(g.owner_username)}</td>
-        <td style="font-size:12px">${escapeHtml(g.email)}</td>
-        <td>${g.is_public ? '<span class="tag tag-green">公开</span>' : '<span class="tag tag-gray">私有</span>'}</td>
-        <td><code style="font-size:11px">${g.token_masked || '****'}</code></td>
-        <td style="font-size:12px">${g.created_at ? g.created_at.substring(0, 19).replace('T', ' ') : '-'}</td>
-        <td>
-          <button class="btn-link" onclick="showEditAdminGmail('${g.owner_id}','${g.id}')">编辑</button>
-          <button class="btn-link" style="color:var(--danger)" onclick="deleteAdminGmail('${g.owner_id}','${g.id}','${g.email}')">删除</button>
-        </td>
-      </tr>
-    `).join('');
+    box.innerHTML = `<table class="table">
+      <thead><tr><th>时间</th><th>用户</th><th>目标</th><th>动作</th><th>详情</th></tr></thead>
+      <tbody>${logs.slice(0, 200).map(l => `
+        <tr>
+          <td>${fmtTime(l.created_at)}</td>
+          <td>${esc(l.username)}</td>
+          <td class="mono" style="font-size:12px">${esc(l.target || '-')}</td>
+          <td><span class="badge badge-gray">${esc(l.action)}</span></td>
+          <td>${esc(l.detail || '-')}</td>
+        </tr>`).join('')}</tbody>
+    </table>`;
+  } catch (err) {
+    toast(err.message, 'error');
   }
 }
 
-function showEditAdminGmail(ownerId, gaId) {
-  showModal('编辑主邮箱', `
-    <div class="form-group">
-      <label>邮箱地址</label>
-      <input type="text" id="adminGmailEmail" placeholder="邮箱地址">
-    </div>
-    <div class="form-group">
-      <label>应用密码 (留空不修改)</label>
-      <input type="text" id="adminGmailToken" placeholder="留空不修改">
-    </div>
-    <div class="form-group">
-      <label>是否公开</label>
-      <select id="adminGmailPublic">
-        <option value="false">私有</option>
-        <option value="true">公开</option>
-      </select>
-    </div>
-  `, `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn" onclick="editAdminGmail('${ownerId}','${gaId}')">保存</button>`);
-}
-
-async function editAdminGmail(ownerId, gaId) {
-  const email = document.getElementById('adminGmailEmail').value.trim();
-  const token = document.getElementById('adminGmailToken').value;
-  const is_public = document.getElementById('adminGmailPublic').value === 'true';
-  if (!email) { showToast('请填写邮箱地址', 'error'); return; }
-  const body = { email, is_public };
-  if (token) body.token = token;
-  const data = await api(`/api/admin/users/${ownerId}/gmail_accounts/${gaId}`, {
-    method: 'PUT',
-    body: JSON.stringify(body)
-  });
-  if (data && data.code === 0) {
-    closeModal();
-    showToast('保存成功');
-    loadAdminGmailAccounts();
-  } else {
-    showToast(data ? data.detail || '保存失败' : '网络错误', 'error');
-  }
-}
-
-async function deleteAdminGmail(ownerId, gaId, email) {
-  if (!confirm(`确定删除主邮箱 ${email} 吗？关联的别名也会被清除。`)) return;
-  const data = await api(`/api/admin/users/${ownerId}/gmail_accounts/${gaId}`, { method: 'DELETE' });
-  if (data && data.code === 0) {
-    showToast('删除成功');
-    loadAdminGmailAccounts();
-    loadUsers();
-  } else {
-    showToast(data ? data.detail || '删除失败' : '网络错误', 'error');
-  }
-}
-
-// ==================== API Docs ====================
-function renderApiDocs() {
-  const key = currentUser.api_key || '<your_api_key>';
-  const serverHost = window.location.host;
-  const baseUrl = `http://${serverHost}`;
-
-  const fetchCurl = `curl -X POST "${baseUrl}/api/email/fetch?key=${key}" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "sender": "noreply@example.com",
-    "subject": "验证码",
-    "keyword": "验证码",
-    "unseen": true,
-    "start_time": "2026-07-06T00:00:00",
-    "end_time": "2026-07-06T23:59:59",
-    "limit": 10
-  }'`;
-
-  const fetchPython = `import requests
-
-resp = requests.post(
-    "${baseUrl}/api/email/fetch",
-    params={"key": "${key}"},
-    json={
-        "unseen": True,
-        "limit": 5
-    }
-)
-
-print(resp.status_code)
-print(resp.text)
-data = resp.json()
-for email in data["data"]["emails"]:
-    print(email["subject"], email["body"])`;
-
-  const markReadCurl = `curl -X POST "${baseUrl}/api/email/mark_read?key=${key}" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "sender": "noreply@example.com"
-  }'`;
-
-  const markReadPython = `import requests
-
-resp = requests.post(
-    "${baseUrl}/api/email/mark_read",
-    params={"key": "${key}"},
-    json={
-        "sender": "noreply@example.com"
-    }
-)
-
-print(resp.status_code)
-print(resp.text)`;
-
-  return `
-    <div class="card">
-      <div class="card-header"><div class="card-title">API 接口文档</div></div>
-      <div class="form-hint" style="margin-bottom:16px">
-        API 调用使用 ?key= 查询参数进行鉴权，无需请求头。<br>
-        您的 API Key: <code>${key.substring(0, 8)}...${key.substring(24)}</code>
-        <button class="btn-link" onclick="copyText('${key}')">复制完整Key</button>
-      </div>
-
-      <h3 style="margin:16px 0 4px;font-size:15px">1. 获取邮件</h3>
-      <div style="font-size:13px;color:var(--text-light);margin-bottom:8px">
-        POST /api/email/fetch?key=YOUR_KEY — key 认证，body 中 to 必填(指定查询邮箱)，其余可选
-      </div>
-      <div class="code-toggle">
-        <button class="active" onclick="toggleCode(this,'fetchCurl')">curl</button>
-        <button onclick="toggleCode(this,'fetchPython')">Python</button>
-      </div>
-      <div id="fetchCurl" class="code-block">
-        <button class="copy-icon" onclick="copyCode(this)" title="复制">📋</button>
-        <div class="code-content">${escapeHtml(fetchCurl)}</div>
-      </div>
-      <div id="fetchPython" class="code-block" style="display:none">
-        <button class="copy-icon" onclick="copyCode(this)" title="复制">📋</button>
-        <div class="code-content">${escapeHtml(fetchPython)}</div>
-      </div>
-
-      <h3 style="margin:16px 0 4px;font-size:15px">传参标准</h3>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>参数</th><th>必填</th><th>类型</th><th>例子</th><th>说明</th></tr></thead>
-          <tbody>
-            <tr><td><code>key</code> <span class="tag tag-blue">query</span></td><td><span class="tag tag-red">是</span></td><td>string</td><td><code>"ce4821f6..."</code></td><td>32位API密钥，通过URL查询参数传递</td></tr>
-            <tr><td><code>sender</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"a@b.c"</code></td><td>发件人邮箱筛选</td></tr>
-            <tr><td><code>to</code></td><td><span class="tag tag-red">是</span></td><td>string</td><td><code>"you+alias@gmail.com"</code></td><td>必填。要查询的邮箱地址，系统据此反查主邮箱凭据</td></tr>
-            <tr><td><code>subject</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"验证码"</code></td><td>主题关键字</td></tr>
-            <tr><td><code>body</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"1234"</code></td><td>正文关键字</td></tr>
-            <tr><td><code>keyword</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"验证"</code></td><td>全文搜索（主题+正文+发件人+收件人）</td></tr>
-            <tr><td><code>unseen</code></td><td><span class="tag tag-gray">否</span></td><td>bool</td><td><code>true</code></td><td>true=仅未读, false=仅已读</td></tr>
-            <tr><td><code>start_time</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"2026-07-06T00:00:00"</code></td><td>开始时间，默认近1小时</td></tr>
-            <tr><td><code>end_time</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"2026-07-06T23:59:59"</code></td><td>结束时间，默认当前</td></tr>
-            <tr><td><code>limit</code></td><td><span class="tag tag-gray">否</span></td><td>int</td><td><code>50</code></td><td>返回数量，默认50</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <h3 style="margin:16px 0 8px;font-size:15px">返回格式</h3>
-      <div class="code-block">
-        <button class="copy-icon" onclick="copyCode(this)" title="复制">📋</button>
-        <div class="code-content">{
-  "code": 0,
-  "msg": "success",
-  "data": {
-    "total": 2,
-    "emails": [
-      {
-        "id": "&lt;message-id&gt;",
-        "from": "sender@example.com",
-        "to": "you+alias@gmail.com",
-        "subject": "验证码",
-        "date": "2026-07-06 10:23:11",
-        "body": "您的验证码是 123456",
-        "unread": true
-      }
-    ]
-  }
-}</div>
-      </div>
-
-      <h3 style="margin:16px 0 8px;font-size:15px">响应字段说明</h3>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
-          <tbody>
-            <tr><td><code>code</code></td><td>int</td><td>0=成功，1=失败</td></tr>
-            <tr><td><code>msg</code></td><td>string</td><td>状态描述</td></tr>
-            <tr><td><code>data.total</code></td><td>int</td><td>返回邮件总数</td></tr>
-            <tr><td><code>data.emails</code></td><td>array</td><td>邮件列表</td></tr>
-            <tr><td><code>data.emails[].id</code></td><td>string</td><td>邮件Message-ID</td></tr>
-            <tr><td><code>data.emails[].from</code></td><td>string</td><td>发件人地址</td></tr>
-            <tr><td><code>data.emails[].to</code></td><td>string</td><td>收件人地址</td></tr>
-            <tr><td><code>data.emails[].subject</code></td><td>string</td><td>邮件主题</td></tr>
-            <tr><td><code>data.emails[].date</code></td><td>string</td><td>接收时间(上海时区)</td></tr>
-            <tr><td><code>data.emails[].body</code></td><td>string</td><td>邮件正文(纯文本)</td></tr>
-            <tr><td><code>data.emails[].unread</code></td><td>bool</td><td>true=未读，false=已读</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3 style="margin:0 0 4px;font-size:15px">2. 标记已读</h3>
-      <div style="font-size:13px;color:var(--text-light);margin-bottom:8px">
-        POST /api/email/mark_read — 将匹配的邮件标记为已读
-      </div>
-      <div class="code-toggle">
-        <button class="active" onclick="toggleCode(this,'markReadCurl')">curl</button>
-        <button onclick="toggleCode(this,'markReadPython')">Python</button>
-      </div>
-      <div id="markReadCurl" class="code-block">
-        <button class="copy-icon" onclick="copyCode(this)" title="复制">📋</button>
-        <div class="code-content">${escapeHtml(markReadCurl)}</div>
-      </div>
-      <div id="markReadPython" class="code-block" style="display:none">
-        <button class="copy-icon" onclick="copyCode(this)" title="复制">📋</button>
-        <div class="code-content">${escapeHtml(markReadPython)}</div>
-      </div>
-
-      <h3 style="margin:16px 0 8px;font-size:15px">传参标准</h3>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>参数</th><th>必填</th><th>类型</th><th>例子</th><th>说明</th></tr></thead>
-          <tbody>
-            <tr><td><code>key</code> <span class="tag tag-blue">query</span></td><td><span class="tag tag-red">是</span></td><td>string</td><td><code>"ce4821f6..."</code></td><td>32位API密钥，通过URL查询参数传递</td></tr>
-            <tr><td><code>to</code></td><td><span class="tag tag-red">是</span></td><td>string</td><td><code>"you+alias@gmail.com"</code></td><td>必填。要操作的邮箱地址</td></tr>
-            <tr><td><code>sender</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"noreply@example.com"</code></td><td>按发件人筛选标记</td></tr>
-            <tr><td><code>subject</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"验证码"</code></td><td>按主题筛选标记</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <h3 style="margin:16px 0 8px;font-size:15px">返回格式</h3>
-      <div class="code-block">
-        <button class="copy-icon" onclick="copyCode(this)" title="复制">📋</button>
-        <div class="code-content">{
-  "code": 0,
-  "msg": "success",
-  "data": {
-    "marked": 3
-  }
-}</div>
-      </div>
-
-      <h3 style="margin:16px 0 8px;font-size:15px">响应字段说明</h3>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
-          <tbody>
-            <tr><td><code>code</code></td><td>int</td><td>0=成功，1=失败</td></tr>
-            <tr><td><code>msg</code></td><td>string</td><td>状态描述</td></tr>
-            <tr><td><code>data.marked</code></td><td>int</td><td>被标记为已读的邮件数量</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  `;
-}
-
-function toggleCode(btn, showId) {
-  const toggle = btn.parentElement;
-  toggle.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  // 找到同级的两个 code-block
-  const card = toggle.parentElement;
-  card.querySelectorAll('.code-block').forEach(b => b.style.display = 'none');
-  document.getElementById(showId).style.display = 'block';
-}
-
-// ==================== Init ====================
+/* ============================================================
+ * 启动入口
+ * ============================================================ */
 (async function init() {
-  if (sessionToken) {
-    const ok = await loadCurrentUser();
-    if (ok) {
+  // 检查注册开关
+  await checkRegistrationAllowed();
+  // 尝试恢复会话
+  const token = localStorage.getItem(LS_TOKEN);
+  const userJson = localStorage.getItem(LS_USER);
+  if (token && userJson) {
+    State.token = token;
+    try {
+      State.user = JSON.parse(userJson);
+    } catch { clearSession(); }
+    // 用 /api/auth/me 校验 token 是否仍有效
+    try {
+      const me = await api('/api/auth/me');
+      State.user = me;
+      localStorage.setItem(LS_USER, JSON.stringify(me));
       showAppView();
-      return;
+    } catch {
+      // token 失效,留在登录页
+      clearSession();
+      showLoginView();
     }
+  } else {
+    showLoginView();
   }
-  showLoginView();
 })();
 </script>
 </body>
