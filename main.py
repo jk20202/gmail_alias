@@ -104,6 +104,7 @@ class FetchRequest(BaseModel):
 
 
 class MarkReadRequest(BaseModel):
+    to: str
     sender: Optional[str] = None
     subject: Optional[str] = None
 
@@ -344,19 +345,33 @@ async def random_label(user=Depends(require_session)):
 
 # ==================== Email API (key-based) ====================
 
-def _resolve_gmail_creds(user, gmail_account_id=None):
-    """根据用户和可选的 gmail_account_id 解析出邮箱地址和 token"""
+def _resolve_gmail_creds(user, gmail_account_id=None, to_email=None):
+    """根据用户和可选的 gmail_account_id 或 to_email 解析出邮箱地址和 token"""
     user_id = user["id"]
-    is_admin = user.get("is_admin", False)
 
-    # 优先使用指定的 gmail_account_id
+    # 优先使用指定的 gmail_account_id (web 页面用)
     if gmail_account_id:
         ga = user_store.get_gmail_account_raw(user_id, gmail_account_id)
         if not ga:
             return None, None, "未找到指定的谷歌邮箱或无权使用"
         return ga["email"], ga["token"], None
 
-    # 所有用户(含管理员)：有别名时用别名关联的 gmail_account
+    # API 调用: 根据 to_email 反查主邮箱凭据
+    if to_email:
+        if "@" not in to_email:
+            return None, None, "to 邮箱格式错误"
+        prefix, domain = to_email.split("@", 1)
+        main_prefix = prefix.split("+", 1)[0]
+        main_email = f"{main_prefix}@{domain}"
+        # 在用户可用的邮箱(自己的+公开的)中查找主邮箱
+        for ga in user_store.list_available_gmail_accounts(user_id):
+            if ga["email"] == main_email:
+                raw = user_store.get_gmail_account_raw(user_id, ga["id"])
+                if raw:
+                    return raw["email"], raw["token"], None
+        return None, None, f"未找到 {main_email} 对应的谷歌邮箱或无权使用"
+
+    # 无 to_email 且无 gmail_account_id: 用别名关联的邮箱(web 默认场景)
     alias = user.get("alias")
     if alias:
         ga_id = alias.get("gmail_account_id") if isinstance(alias, dict) else None
@@ -365,31 +380,20 @@ def _resolve_gmail_creds(user, gmail_account_id=None):
             return None, None, "别名关联的谷歌邮箱不存在或已删除"
         return ga["email"], ga["token"], None
 
-    # 无别名：管理员用第一个绑定的邮箱，普通用户报错
-    if not is_admin:
-        return None, None, "未设置别名邮箱，请先创建别名"
-    accounts = user.get("gmail_accounts", [])
-    if not accounts:
-        return None, None, "未绑定谷歌邮箱"
-    ga = user_store.get_gmail_account_raw(user_id, accounts[0]["id"])
-    if not ga:
-        return None, None, "谷歌邮箱配置异常"
-    return ga["email"], ga["token"], None
+    return None, None, "未指定查询邮箱"
 
 
 @app.post("/api/email/fetch")
 async def api_fetch_emails(req: FetchRequest, user=Depends(require_api_key)):
-    email_addr, email_token, err = _resolve_gmail_creds(user)
+    # API 调用必须指定 to 查询邮箱，与页面别名查询互不干扰
+    if not req.to:
+        raise HTTPException(status_code=400, detail="API调用必须指定to查询邮箱")
+
+    email_addr, email_token, err = _resolve_gmail_creds(user, to_email=req.to)
     if err:
         raise HTTPException(status_code=400, detail=err)
 
-    to_filter = req.to
-    alias = user.get("alias")
-    if alias:
-        # 所有用户(含管理员)有别名时强制按别名过滤，防止越权
-        to_filter = alias.get("full", "") if isinstance(alias, dict) else ""
-    elif not user.get("is_admin") and not to_filter:
-        raise HTTPException(status_code=400, detail="未设置别名邮箱，请先创建别名")
+    to_filter = req.to  # 用 to 参数过滤，不再用 alias
 
     now = datetime.now(SHANGHAI_TZ)
     default_start = (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S")
@@ -440,17 +444,13 @@ async def api_fetch_emails(req: FetchRequest, user=Depends(require_api_key)):
 
 @app.post("/api/email/mark_read")
 async def api_mark_read(req: MarkReadRequest, user=Depends(require_api_key)):
-    email_addr, email_token, err = _resolve_gmail_creds(user)
+    email_addr, email_token, err = _resolve_gmail_creds(user, to_email=req.to)
     if err:
         raise HTTPException(status_code=400, detail=err)
 
     try:
         count = await mark_emails_read(email_addr, email_token, req.sender, req.subject)
-        alias_full = ""
-        alias = user.get("alias")
-        if alias and isinstance(alias, dict):
-            alias_full = alias.get("full", "")
-        usage_log.add(user["id"], user["username"], alias_full, "mark_read", f"标记{count}封已读")
+        usage_log.add(user["id"], user["username"], req.to, "mark_read", f"标记{count}封已读")
         return {"code": 0, "msg": "success", "data": {"marked": count}}
     except Exception as e:
         return JSONResponse(status_code=500, content={"code": 1, "msg": f"IMAP错误: {str(e)}", "data": None})

@@ -1450,7 +1450,7 @@ print(resp.text)`;
 
       <h3 style="margin:16px 0 4px;font-size:15px">1. 获取邮件</h3>
       <div style="font-size:13px;color:var(--text-light);margin-bottom:8px">
-        POST /api/email/fetch?key=YOUR_KEY — key 通过查询参数传递，其余为 body 可选参数
+        POST /api/email/fetch?key=YOUR_KEY — key 认证，body 中 to 必填(指定查询邮箱)，其余可选
       </div>
       <div class="code-toggle">
         <button class="active" onclick="toggleCode(this,'fetchCurl')">curl</button>
@@ -1472,7 +1472,7 @@ print(resp.text)`;
           <tbody>
             <tr><td><code>key</code> <span class="tag tag-blue">query</span></td><td><span class="tag tag-red">是</span></td><td>string</td><td><code>"ce4821f6..."</code></td><td>32位API密钥，通过URL查询参数传递</td></tr>
             <tr><td><code>sender</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"a@b.c"</code></td><td>发件人邮箱筛选</td></tr>
-            <tr><td><code>to</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"x+y@gmail.com"</code></td><td>收件人筛选（普通用户自动用别名）</td></tr>
+            <tr><td><code>to</code></td><td><span class="tag tag-red">是</span></td><td>string</td><td><code>"you+alias@gmail.com"</code></td><td>必填。要查询的邮箱地址，系统据此反查主邮箱凭据</td></tr>
             <tr><td><code>subject</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"验证码"</code></td><td>主题关键字</td></tr>
             <tr><td><code>body</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"1234"</code></td><td>正文关键字</td></tr>
             <tr><td><code>keyword</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"验证"</code></td><td>全文搜索（主题+正文+发件人+收件人）</td></tr>
@@ -1552,6 +1552,7 @@ print(resp.text)`;
           <thead><tr><th>参数</th><th>必填</th><th>类型</th><th>例子</th><th>说明</th></tr></thead>
           <tbody>
             <tr><td><code>key</code> <span class="tag tag-blue">query</span></td><td><span class="tag tag-red">是</span></td><td>string</td><td><code>"ce4821f6..."</code></td><td>32位API密钥，通过URL查询参数传递</td></tr>
+            <tr><td><code>to</code></td><td><span class="tag tag-red">是</span></td><td>string</td><td><code>"you+alias@gmail.com"</code></td><td>必填。要操作的邮箱地址</td></tr>
             <tr><td><code>sender</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"noreply@example.com"</code></td><td>按发件人筛选标记</td></tr>
             <tr><td><code>subject</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"验证码"</code></td><td>按主题筛选标记</td></tr>
           </tbody>
