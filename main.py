@@ -326,18 +326,18 @@ def _resolve_gmail_creds(user, gmail_account_id=None):
             return None, None, "未找到指定的谷歌邮箱或无权使用"
         return ga["email"], ga["token"], None
 
-    # 普通用户：用别名关联的 gmail_account
-    if not is_admin:
-        alias = user.get("alias")
-        if not alias:
-            return None, None, "未设置别名邮箱，请先创建别名"
+    # 所有用户(含管理员)：有别名时用别名关联的 gmail_account
+    alias = user.get("alias")
+    if alias:
         ga_id = alias.get("gmail_account_id") if isinstance(alias, dict) else None
         ga = user_store.get_gmail_account_raw(user_id, ga_id) if ga_id else None
         if not ga:
             return None, None, "别名关联的谷歌邮箱不存在或已删除"
         return ga["email"], ga["token"], None
 
-    # admin 未指定：用第一个绑定的邮箱
+    # 无别名：管理员用第一个绑定的邮箱，普通用户报错
+    if not is_admin:
+        return None, None, "未设置别名邮箱，请先创建别名"
     accounts = user.get("gmail_accounts", [])
     if not accounts:
         return None, None, "未绑定谷歌邮箱"
@@ -354,12 +354,12 @@ async def api_fetch_emails(req: FetchRequest, user=Depends(require_api_key)):
         raise HTTPException(status_code=400, detail=err)
 
     to_filter = req.to
-    if not user.get("is_admin"):
-        alias = user.get("alias")
-        if alias:
-            to_filter = alias.get("full", "") if isinstance(alias, dict) else ""
-        elif not to_filter:
-            raise HTTPException(status_code=400, detail="未设置别名邮箱，请先创建别名")
+    alias = user.get("alias")
+    if alias:
+        # 所有用户(含管理员)有别名时强制按别名过滤，防止越权
+        to_filter = alias.get("full", "") if isinstance(alias, dict) else ""
+    elif not user.get("is_admin") and not to_filter:
+        raise HTTPException(status_code=400, detail="未设置别名邮箱，请先创建别名")
 
     now = datetime.now(SHANGHAI_TZ)
     default_start = (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S")
@@ -437,12 +437,12 @@ async def web_fetch_emails(req: WebFetchRequest, user=Depends(require_session)):
         raise HTTPException(status_code=400, detail=err)
 
     to_filter = req.to
-    if not user.get("is_admin"):
-        alias = user.get("alias")
-        if alias:
-            to_filter = alias.get("full", "") if isinstance(alias, dict) else ""
-        elif not to_filter:
-            raise HTTPException(status_code=400, detail="未设置别名邮箱，请先创建别名")
+    alias = user.get("alias")
+    if alias:
+        # 所有用户(含管理员)有别名时强制按别名过滤，防止越权
+        to_filter = alias.get("full", "") if isinstance(alias, dict) else ""
+    elif not user.get("is_admin") and not to_filter:
+        raise HTTPException(status_code=400, detail="未设置别名邮箱，请先创建别名")
 
     now = datetime.now(SHANGHAI_TZ)
     default_start = (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S")

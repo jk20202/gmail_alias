@@ -332,6 +332,10 @@ async def fetch_emails(
         logger.exception(f"IMAP fetch error for {email_addr}")
         raise
 
+    # 确保 to 过滤精确生效(IMAP TO 搜索对 Gmail +alias 可能不精确)
+    if to:
+        to_lower = to.lower()
+        results = [e for e in results if to_lower in e.get("to", "").lower()]
     results = _filter_by_time(results, start_dt, end_dt)
     results = _filter_by_keyword(results, keyword)
     results.sort(key=lambda x: x.get("date_iso", ""), reverse=True)
