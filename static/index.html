@@ -229,21 +229,28 @@ tr:hover { background: #f9fafb; }
 
 /* Code block */
 .code-block {
-  background: #1e293b; color: #e2e8f0; border-radius: var(--radius-sm);
-  padding: 16px; overflow-x: auto; font-family: "Fira Code", "Consolas", monospace;
+  position: relative; background: #1e293b; color: #e2e8f0;
+  border-radius: var(--radius-sm); padding: 16px 44px 16px 16px;
+  overflow-x: auto; font-family: "Fira Code", "Consolas", "Courier New", monospace;
   font-size: 13px; line-height: 1.6; margin: 8px 0;
 }
-.code-block .comment { color: #64748b; }
-.code-block .string { color: #86efac; }
-.code-block .keyword { color: #c084fc; }
+.code-block .copy-icon {
+  position: absolute; top: 10px; right: 10px;
+  background: rgba(255,255,255,0.1); border: none; border-radius: 4px;
+  color: #e2e8f0; width: 28px; height: 28px; cursor: pointer;
+  font-size: 14px; display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s;
+}
+.code-block .copy-icon:hover { background: rgba(255,255,255,0.2); }
+.code-block .copy-icon.copied { background: var(--success); }
 
 /* API Key display */
 .api-key-box {
   display: flex; align-items: center; gap: 8px; padding: 10px 12px;
   background: #f9fafb; border: 1px solid var(--border); border-radius: var(--radius-sm);
-  font-family: monospace; font-size: 13px;
+  font-family: monospace; font-size: 13px; word-break: break-all;
 }
-.api-key-box .copy-btn { margin-left: auto; }
+.api-key-box .copy-btn { margin-left: auto; flex-shrink: 0; }
 
 /* Filter bar */
 .filter-bar {
@@ -271,6 +278,46 @@ tr:hover { background: #f9fafb; }
 /* Empty state */
 .empty-state { text-align: center; padding: 40px 20px; color: var(--text-lighter); }
 .empty-state .icon { font-size: 36px; margin-bottom: 12px; }
+
+/* Alias display */
+.alias-display {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 12px; background: var(--primary-light); color: var(--primary);
+  border-radius: var(--radius-sm); font-family: monospace; font-size: 13px;
+  font-weight: 500; word-break: break-all;
+}
+.alias-display .copy-icon-small {
+  background: none; border: none; color: var(--primary); cursor: pointer;
+  font-size: 14px; padding: 2px; opacity: 0.7;
+}
+.alias-display .copy-icon-small:hover { opacity: 1; }
+
+/* Code toggle buttons */
+.code-toggle { display: flex; gap: 4px; margin: 8px 0; }
+.code-toggle button {
+  padding: 4px 12px; border: 1px solid var(--border); background: #fff;
+  border-radius: var(--radius-sm); font-size: 12px; cursor: pointer; color: var(--text-light);
+}
+.code-toggle button.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+/* Searchable select */
+.search-select { position: relative; }
+.search-select-input {
+  width: 100%; padding: 9px 12px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); font-size: 14px; background: #fff;
+}
+.search-select-dropdown {
+  display: none; position: absolute; top: 100%; left: 0; right: 0;
+  background: #fff; border: 1px solid var(--border); border-top: none;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  max-height: 200px; overflow-y: auto; z-index: 50; box-shadow: var(--shadow-md);
+}
+.search-select-dropdown.show { display: block; }
+.search-select-option {
+  padding: 8px 12px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #f3f4f6;
+}
+.search-select-option:hover { background: var(--primary-light); }
+.search-select-option .opt-owner { font-size: 11px; color: var(--text-lighter); margin-left: 6px; }
 
 /* Responsive */
 @media (max-width: 768px) {
@@ -360,6 +407,8 @@ tr:hover { background: #f9fafb; }
 <script>
 let sessionToken = localStorage.getItem('sessionToken') || '';
 let currentUser = null;
+let availableGmailAccounts = [];
+let currentGmailAccountId = null;
 
 // ==================== API Helper ====================
 async function api(url, options = {}) {
@@ -371,7 +420,6 @@ async function api(url, options = {}) {
     if (resp.status === 401) {
       sessionToken = '';
       localStorage.removeItem('sessionToken');
-      // 仅当当前在应用界面时才切回登录页，避免登录页上的公开请求触发递归
       if (document.getElementById('appView').classList.contains('active')) {
         showLoginView();
       }
@@ -400,6 +448,30 @@ function showModal(title, bodyHtml, footerHtml) {
 
 function closeModal() {
   document.getElementById('modalOverlay').classList.remove('show');
+}
+
+function escapeHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function copyText(text, btnEl) {
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('已复制到剪贴板');
+    if (btnEl) {
+      const orig = btnEl.innerHTML;
+      btnEl.innerHTML = '✓';
+      btnEl.classList.add('copied');
+      setTimeout(() => { btnEl.innerHTML = orig; btnEl.classList.remove('copied'); }, 1500);
+    }
+  });
+}
+
+function copyCode(btnEl) {
+  const block = btnEl.closest('.code-block');
+  // 获取纯文本（去除 HTML 标签）
+  const text = block.querySelector('.code-content').innerText;
+  copyText(text, btnEl);
 }
 
 // ==================== Auth ====================
@@ -432,7 +504,6 @@ function showRegister() {
 }
 
 async function checkRegistrationAllowed() {
-  // 用裸 fetch，避免走 api() 的 401 处理器导致 showLoginView 递归
   try {
     const resp = await fetch('/api/admin/settings');
     const data = await resp.json();
@@ -509,7 +580,7 @@ function getTabs() {
   if (currentUser && currentUser.is_admin) {
     return [
       { id: 'emails', name: '邮件查询' },
-      { id: 'alias', name: '别名管理' },
+      { id: 'account', name: '个人中心' },
       { id: 'users', name: '用户管理' },
       { id: 'stats', name: '使用统计' },
       { id: 'settings', name: '系统设置' },
@@ -518,7 +589,7 @@ function getTabs() {
   }
   return [
     { id: 'emails', name: '邮件查询' },
-    { id: 'alias', name: '我的账户' },
+    { id: 'account', name: '个人中心' },
     { id: 'apidocs', name: 'API 文档' },
   ];
 }
@@ -539,31 +610,81 @@ function renderTabs() {
   }
 }
 
-function switchTab(tabId) {
+async function switchTab(tabId) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
   const content = document.getElementById('tabContent');
   const renderers = {
     emails: renderEmailQuery,
-    alias: renderAlias,
+    account: renderAccount,
     users: renderUsers,
     stats: renderStats,
     settings: renderSettings,
     apidocs: renderApiDocs,
   };
   if (renderers[tabId]) content.innerHTML = renderers[tabId]();
+  // Lazy load data
+  if (tabId === 'emails') await loadAvailableGmailAccounts();
+  if (tabId === 'users') loadUsers();
+  if (tabId === 'stats') loadStats();
+  if (tabId === 'settings') loadSettings();
 }
 
 // ==================== Email Query Tab ====================
+async function loadAvailableGmailAccounts() {
+  const data = await api('/api/gmail_accounts/available');
+  if (data && data.code === 0) {
+    availableGmailAccounts = data.data;
+    renderAliasGenerator();
+  }
+}
+
 function renderEmailQuery() {
   const now = new Date();
-  const todayStart = now.toISOString().split('T')[0] + 'T00:00:00';
-  const nowStr = now.toTimeString().slice(0, 8);
   const todayDate = now.toISOString().split('T')[0];
-
+  const nowStr = now.toTimeString().slice(0, 8);
   const isAdmin = currentUser.is_admin;
   const aliasHint = isAdmin ? '管理员可查看所有邮件，也可按收件人筛选' : '普通用户自动按别名筛选';
+  const alias = currentUser.alias;
+  const aliasFull = alias && alias.full ? alias.full : '';
 
   return `
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">别名邮箱生成</div>
+      </div>
+      <div id="aliasGenerator">
+        ${aliasFull ? `
+          <div style="margin-bottom:12px">
+            <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;">当前别名</label>
+            <div class="alias-display">
+              <span>${escapeHtml(aliasFull)}</span>
+              <button class="copy-icon-small" onclick="copyText('${aliasFull}', this)" title="复制">📋</button>
+            </div>
+          </div>
+        ` : '<div class="form-hint" style="margin-bottom:12px">尚未生成别名，生成后将自动用于邮件查询筛选</div>'}
+        <div class="filter-bar">
+          <div class="form-group">
+            <label>谷歌邮箱前缀</label>
+            <div class="search-select">
+              <input type="text" class="search-select-input" id="aliasGmailSelect"
+                placeholder="搜索或选择邮箱..." oninput="filterGmailOptions()" onfocus="showGmailDropdown()">
+              <div class="search-select-dropdown" id="aliasGmailDropdown"></div>
+            </div>
+            <input type="hidden" id="aliasGmailId">
+          </div>
+          <div class="form-group">
+            <label>别名标签</label>
+            <div style="display:flex;gap:6px">
+              <input type="text" id="aliasLabel" placeholder="自定义标签" style="flex:1">
+              <button class="btn btn-secondary" onclick="randomAliasLabel()" title="随机生成">🎲</button>
+            </div>
+          </div>
+          <div class="form-group" style="display:flex;align-items:end">
+            <button class="btn" onclick="generateAlias()" style="width:100%">生成别名</button>
+          </div>
+        </div>
+      </div>
+    </div>
     <div class="card">
       <div class="card-header">
         <div class="card-title">邮件查询</div>
@@ -612,11 +733,94 @@ function renderEmailQuery() {
         <button class="btn" onclick="fetchEmails()">查询邮件</button>
         <button class="btn btn-secondary" onclick="clearFilters()">重置</button>
       </div>
-      <div id="emailResults">
-        <div class="empty-state"><div class="icon">📧</div><div>点击「查询邮件」开始搜索</div></div>
-      </div>
+      <div id="emailResults"></div>
     </div>
   `;
+}
+
+function renderAliasGenerator() {
+  // 仅更新下拉选项，不重建整个区域
+  const dropdown = document.getElementById('aliasGmailDropdown');
+  if (!dropdown) return;
+  if (availableGmailAccounts.length === 0) {
+    dropdown.innerHTML = '<div class="search-select-option" style="color:var(--text-lighter)">暂无可用邮箱，请先在个人中心绑定</div>';
+    return;
+  }
+  dropdown.innerHTML = availableGmailAccounts.map(ga => `
+    <div class="search-select-option" onclick="selectGmailAccount('${ga.id}','${escapeHtml(ga.email)}')">
+      ${escapeHtml(ga.email)}
+      <span class="opt-owner">${ga.is_own ? '本人' : '公开·' + escapeHtml(ga.owner)}</span>
+    </div>
+  `).join('');
+}
+
+function showGmailDropdown() {
+  document.getElementById('aliasGmailDropdown').classList.add('show');
+}
+
+function filterGmailOptions() {
+  const kw = document.getElementById('aliasGmailSelect').value.toLowerCase();
+  const dropdown = document.getElementById('aliasGmailDropdown');
+  const filtered = availableGmailAccounts.filter(g => g.email.toLowerCase().includes(kw));
+  if (filtered.length === 0) {
+    dropdown.innerHTML = '<div class="search-select-option" style="color:var(--text-lighter)">无匹配邮箱</div>';
+  } else {
+    dropdown.innerHTML = filtered.map(ga => `
+      <div class="search-select-option" onclick="selectGmailAccount('${ga.id}','${escapeHtml(ga.email)}')">
+        ${escapeHtml(ga.email)}
+        <span class="opt-owner">${ga.is_own ? '本人' : '公开·' + escapeHtml(ga.owner)}</span>
+      </div>
+    `).join('');
+  }
+  document.getElementById('aliasGmailId').value = '';
+  dropdown.classList.add('show');
+}
+
+function selectGmailAccount(id, email) {
+  document.getElementById('aliasGmailSelect').value = email;
+  document.getElementById('aliasGmailId').value = id;
+  document.getElementById('aliasGmailDropdown').classList.remove('show');
+}
+
+document.addEventListener('click', (e) => {
+  const ss = e.target.closest('.search-select');
+  if (!ss) {
+    document.querySelectorAll('.search-select-dropdown').forEach(d => d.classList.remove('show'));
+  }
+});
+
+async function randomAliasLabel() {
+  const data = await api('/api/account/alias/random_label');
+  if (data && data.code === 0) {
+    document.getElementById('aliasLabel').value = data.data.label;
+  }
+}
+
+async function generateAlias() {
+  const gmailId = document.getElementById('aliasGmailId').value;
+  const label = document.getElementById('aliasLabel').value.trim();
+  if (!gmailId) { showToast('请选择谷歌邮箱', 'error'); return; }
+  if (!label) { showToast('请填写别名标签', 'error'); return; }
+  const data = await api('/api/account/alias', {
+    method: 'POST',
+    body: JSON.stringify({ gmail_account_id: gmailId, label })
+  });
+  if (data && data.code === 0) {
+    currentUser = data.data;
+    showToast('别名生成成功');
+    renderAliasGenerator();
+    // 刷新当前别名显示
+    const aliasDiv = document.querySelector('#aliasGenerator .alias-display');
+    if (aliasDiv) {
+      const full = currentUser.alias.full;
+      aliasDiv.innerHTML = `<span>${escapeHtml(full)}</span><button class="copy-icon-small" onclick="copyText('${full}', this)" title="复制">📋</button>`;
+    } else {
+      // 之前没有别名，重新渲染整个生成器
+      switchTab('emails');
+    }
+  } else {
+    showToast(data ? data.detail || '生成失败' : '网络错误', 'error');
+  }
 }
 
 function clearFilters() {
@@ -624,24 +828,29 @@ function clearFilters() {
   document.getElementById('filterSubject').value = '';
   document.getElementById('filterKeyword').value = '';
   document.getElementById('filterUnseen').value = '';
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('filterStart').value = today + 'T00:00:00';
+  document.getElementById('filterEnd').value = today + 'T' + new Date().toTimeString().slice(0,8);
   document.getElementById('filterLimit').value = '50';
-  if (document.getElementById('filterTo')) document.getElementById('filterTo').value = '';
+  const fto = document.getElementById('filterTo');
+  if (fto) fto.value = '';
 }
 
 async function fetchEmails() {
+  document.getElementById('emailResults').innerHTML = '<div class="empty-state">查询中...</div>';
   const body = {
     sender: document.getElementById('filterSender').value.trim() || null,
     subject: document.getElementById('filterSubject').value.trim() || null,
     keyword: document.getElementById('filterKeyword').value.trim() || null,
     unseen: document.getElementById('filterUnseen').value === '' ? null : document.getElementById('filterUnseen').value === 'true',
-    start_time: document.getElementById('filterStart').value ? document.getElementById('filterStart').value.replace(' ', 'T') : null,
-    end_time: document.getElementById('filterEnd').value ? document.getElementById('filterEnd').value.replace(' ', 'T') : null,
+    start_time: document.getElementById('filterStart').value,
+    end_time: document.getElementById('filterEnd').value,
     limit: parseInt(document.getElementById('filterLimit').value) || 50,
   };
-  if (document.getElementById('filterTo')) {
-    body.to = document.getElementById('filterTo').value.trim() || null;
+  if (currentUser.is_admin) {
+    const fto = document.getElementById('filterTo');
+    if (fto) body.to = fto.value.trim() || null;
   }
-  document.getElementById('emailResults').innerHTML = '<div class="empty-state">查询中...</div>';
   const data = await api('/api/web/email/fetch', {
     method: 'POST',
     body: JSON.stringify(body)
@@ -656,10 +865,10 @@ async function fetchEmails() {
 function renderEmailResults(data) {
   const el = document.getElementById('emailResults');
   if (!data.emails || data.emails.length === 0) {
-    el.innerHTML = '<div class="empty-state"><div class="icon">📭</div><div>没有找到邮件</div></div>';
+    el.innerHTML = '<div class="empty-state"><div class="icon">📭</div><div>暂无邮件</div></div>';
     return;
   }
-  el.innerHTML = `<div style="margin-bottom:8px;font-size:13px;color:var(--text-light)">共 ${data.total} 封邮件</div>` +
+  el.innerHTML = `<div style="margin-bottom:8px;font-size:12px;color:var(--text-light)">共 ${data.total} 封邮件</div>` +
     data.emails.map((e, i) => `
       <div class="email-item ${e.unread ? 'unread' : ''}" onclick="toggleEmailDetail(${i})">
         <div class="email-header">
@@ -670,9 +879,6 @@ function renderEmailResults(data) {
         <div class="email-preview">${escapeHtml(e.body.substring(0, 100))}</div>
         <div class="email-detail" id="emailDetail${i}">
           <div style="margin-bottom:8px"><strong>收件人:</strong> ${escapeHtml(e.to)}</div>
-          <div style="margin-bottom:8px"><strong>发件人:</strong> ${escapeHtml(e.from)}</div>
-          <div style="margin-bottom:8px"><strong>主题:</strong> ${escapeHtml(e.subject)}</div>
-          <div style="margin-bottom:8px"><strong>时间:</strong> ${e.date}</div>
           <pre>${escapeHtml(e.body)}</pre>
         </div>
       </div>
@@ -683,41 +889,11 @@ function toggleEmailDetail(i) {
   document.getElementById('emailDetail' + i).classList.toggle('show');
 }
 
-function escapeHtml(str) {
-  if (!str) return '';
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-// ==================== Alias / Account Tab ====================
-function renderAlias() {
+// ==================== Account / Personal Center ====================
+function renderAccount() {
   const u = currentUser;
-  const isAdmin = u.is_admin;
-  const title = isAdmin ? '别名管理' : '我的账户';
+  const accounts = u.gmail_accounts || [];
   return `
-    <div class="card">
-      <div class="card-header"><div class="card-title">${title}</div></div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Gmail 邮箱地址</label>
-          <input type="text" id="gmailEmail" value="${u.gmail_email || ''}" placeholder="your@gmail.com">
-        </div>
-        <div class="form-group">
-          <label>Gmail 应用密码</label>
-          <input type="text" id="gmailToken" placeholder="${u.gmail_token_masked || '留空不修改'}">
-          <div class="form-hint">在 Google 账户设置 > 安全 > 应用专用密码 中生成</div>
-        </div>
-      </div>
-      <button class="btn" onclick="saveGmailConfig()">保存邮箱配置</button>
-    </div>
-    <div class="card">
-      <div class="card-header"><div class="card-title">别名邮箱</div></div>
-      <div class="form-group">
-        <label>当前别名</label>
-        <input type="text" id="aliasInput" value="${u.alias || ''}" placeholder="your+tag@gmail.com">
-        <div class="form-hint">同时只能存在一个别名，设置新的会替换旧的。格式: 主邮箱+标签@gmail.com</div>
-      </div>
-      <button class="btn" onclick="saveAlias()">保存别名</button>
-    </div>
     <div class="card">
       <div class="card-header"><div class="card-title">API 密钥</div></div>
       <div class="api-key-box">
@@ -729,34 +905,142 @@ function renderAlias() {
       </div>
       <div class="form-hint" style="margin-top:8px">API Key 用于调用 /api/email/fetch 接口，不过期但可更新</div>
     </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">谷歌邮箱绑定</div>
+        <button class="btn btn-sm" onclick="showAddGmail()">+ 添加绑定</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>邮箱地址</th><th>公开</th><th>应用密码</th><th>创建时间</th><th>操作</th></tr></thead>
+          <tbody>
+            ${accounts.length === 0 ? '<tr><td colspan="5" style="text-align:center;color:var(--text-lighter)">暂未绑定谷歌邮箱</td></tr>' :
+              accounts.map(ga => `
+                <tr>
+                  <td>${escapeHtml(ga.email)}</td>
+                  <td>${ga.is_public ? '<span class="tag tag-green">公开</span>' : '<span class="tag tag-gray">私有</span>'}</td>
+                  <td><code style="font-size:11px">${ga.token_masked || '****'}</code></td>
+                  <td style="font-size:12px">${ga.created_at ? ga.created_at.substring(0, 19).replace('T', ' ') : '-'}</td>
+                  <td>
+                    <button class="btn-link" onclick="showEditGmail('${ga.id}')">编辑</button>
+                    <button class="btn-link" style="color:var(--danger)" onclick="deleteGmail('${ga.id}','${escapeHtml(ga.email)}')">删除</button>
+                  </td>
+                </tr>
+              `).join('')
+            }
+          </tbody>
+        </table>
+      </div>
+      <div class="form-hint" style="margin-top:12px">公开后，其他用户可使用该邮箱前缀生成别名（系统会用您的凭据拉取对应别名的邮件）</div>
+    </div>
   `;
 }
 
-async function saveGmailConfig() {
-  const email = document.getElementById('gmailEmail').value.trim();
-  const token = document.getElementById('gmailToken').value.trim();
-  if (!email) { showToast('请输入邮箱地址', 'error'); return; }
-  const body = { gmail_email: email };
-  if (token) body.gmail_token = token;
-  const data = await api('/api/account', { method: 'PUT', body: JSON.stringify(body) });
+function showAddGmail() {
+  showModal('添加谷歌邮箱绑定', `
+    <div class="form-group">
+      <label>邮箱地址</label>
+      <input type="text" id="newGmailEmail" placeholder="your@gmail.com">
+    </div>
+    <div class="form-group">
+      <label>应用密码</label>
+      <input type="text" id="newGmailToken" placeholder="16位应用密码">
+      <div class="form-hint">在 Google 账户 > 安全 > 应用专用密码 中生成</div>
+    </div>
+    <div class="form-group">
+      <label>是否公开给其他用户</label>
+      <div style="display:flex;align-items:center;gap:8px">
+        <label class="toggle">
+          <input type="checkbox" id="newGmailPublic">
+          <span class="toggle-slider"></span>
+        </label>
+        <span id="newGmailPublicText" style="font-size:13px;color:var(--text-light)">私有</span>
+      </div>
+    </div>
+  `, `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn" onclick="addGmail()">添加</button>`);
+  document.getElementById('newGmailPublic').onchange = (e) => {
+    document.getElementById('newGmailPublicText').textContent = e.target.checked ? '公开' : '私有';
+  };
+}
+
+async function addGmail() {
+  const email = document.getElementById('newGmailEmail').value.trim();
+  const token = document.getElementById('newGmailToken').value.trim();
+  const is_public = document.getElementById('newGmailPublic').checked;
+  if (!email || !token) { showToast('请填写完整', 'error'); return; }
+  if (!email.includes('@')) { showToast('邮箱格式错误', 'error'); return; }
+  const data = await api('/api/account/gmail_accounts', {
+    method: 'POST',
+    body: JSON.stringify({ email, token, is_public })
+  });
   if (data && data.code === 0) {
     currentUser = data.data;
+    closeModal();
+    showToast('添加成功');
+    switchTab('account');
+  } else {
+    showToast(data ? data.detail || '添加失败' : '网络错误', 'error');
+  }
+}
+
+async function showEditGmail(gaId) {
+  const ga = (currentUser.gmail_accounts || []).find(g => g.id === gaId);
+  if (!ga) return;
+  showModal('编辑谷歌邮箱', `
+    <div class="form-group">
+      <label>邮箱地址</label>
+      <input type="text" id="editGmailEmail" value="${escapeHtml(ga.email)}">
+    </div>
+    <div class="form-group">
+      <label>应用密码</label>
+      <input type="text" id="editGmailToken" placeholder="留空不修改">
+      <div class="form-hint">当前: ${ga.token_masked || '****'}</div>
+    </div>
+    <div class="form-group">
+      <label>是否公开</label>
+      <div style="display:flex;align-items:center;gap:8px">
+        <label class="toggle">
+          <input type="checkbox" id="editGmailPublic" ${ga.is_public ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+        <span id="editGmailPublicText" style="font-size:13px;color:var(--text-light)">${ga.is_public ? '公开' : '私有'}</span>
+      </div>
+    </div>
+  `, `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn" onclick="editGmail('${gaId}')">保存</button>`);
+  document.getElementById('editGmailPublic').onchange = (e) => {
+    document.getElementById('editGmailPublicText').textContent = e.target.checked ? '公开' : '私有';
+  };
+}
+
+async function editGmail(gaId) {
+  const email = document.getElementById('editGmailEmail').value.trim();
+  const tokenVal = document.getElementById('editGmailToken').value.trim();
+  const is_public = document.getElementById('editGmailPublic').checked;
+  const body = { email, is_public };
+  if (tokenVal) body.token = tokenVal;
+  const data = await api(`/api/account/gmail_accounts/${gaId}`, {
+    method: 'PUT',
+    body: JSON.stringify(body)
+  });
+  if (data && data.code === 0) {
+    currentUser = data.data;
+    closeModal();
     showToast('保存成功');
-    switchTab('alias');
+    switchTab('account');
   } else {
     showToast(data ? data.detail || '保存失败' : '网络错误', 'error');
   }
 }
 
-async function saveAlias() {
-  const alias = document.getElementById('aliasInput').value.trim();
-  if (!alias) { showToast('别名不能为空', 'error'); return; }
-  const data = await api('/api/account/alias', { method: 'POST', body: JSON.stringify({ alias }) });
+async function deleteGmail(gaId, email) {
+  if (!confirm(`确定删除 ${email} 的绑定吗？`)) return;
+  const data = await api(`/api/account/gmail_accounts/${gaId}`, { method: 'DELETE' });
   if (data && data.code === 0) {
     currentUser = data.data;
-    showToast('别名保存成功');
+    showToast('删除成功');
+    switchTab('account');
   } else {
-    showToast(data ? data.detail || '保存失败' : '网络错误', 'error');
+    showToast(data ? data.detail || '删除失败' : '网络错误', 'error');
   }
 }
 
@@ -766,14 +1050,10 @@ async function regenApiKey() {
   if (data && data.code === 0) {
     currentUser = data.data;
     showToast('API Key 已更新');
-    switchTab('alias');
+    switchTab('account');
   } else {
     showToast(data ? data.detail || '更新失败' : '网络错误', 'error');
   }
-}
-
-function copyText(text) {
-  navigator.clipboard.writeText(text).then(() => showToast('已复制到剪贴板'));
 }
 
 // ==================== Users Management (Admin) ====================
@@ -786,7 +1066,7 @@ function renderUsers() {
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>用户名</th><th>角色</th><th>Gmail</th><th>别名</th><th>API Key</th><th>创建时间</th><th>操作</th></tr></thead>
+          <thead><tr><th>用户名</th><th>角色</th><th>绑定邮箱</th><th>别名</th><th>API Key</th><th>创建时间</th><th>操作</th></tr></thead>
           <tbody id="usersTableBody"><tr><td colspan="7" style="text-align:center;color:var(--text-lighter)">加载中...</td></tr></tbody>
         </table>
       </div>
@@ -803,52 +1083,62 @@ async function loadUsers() {
       tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-lighter)">暂无用户</td></tr>';
       return;
     }
-    tbody.innerHTML = data.data.map(u => `
-      <tr>
-        <td>${escapeHtml(u.username)}</td>
-        <td>${u.is_admin ? '<span class="tag tag-blue">管理员</span>' : '<span class="tag tag-green">普通</span>'}</td>
-        <td>${escapeHtml(u.gmail_email || '-')}</td>
-        <td>${escapeHtml(u.alias || '-')}</td>
-        <td><code style="font-size:11px">${u.api_key ? u.api_key.substring(0, 8) + '...' : '-'}</code></td>
-        <td style="font-size:12px">${u.created_at ? u.created_at.substring(0, 19).replace('T', ' ') : '-'}</td>
-        <td>
-          <button class="btn-link" onclick="showEditUser('${u.id}')">编辑</button>
-          ${u.id !== 'admin' ? `<button class="btn-link" style="color:var(--danger)" onclick="deleteUser('${u.id}','${u.username}')">删除</button>` : ''}
-        </td>
-      </tr>
-    `).join('');
+    tbody.innerHTML = data.data.map(u => {
+      const emails = (u.gmail_accounts || []).map(g => g.email).join('<br>') || '-';
+      const alias = u.alias && u.alias.full ? u.alias.full : '-';
+      return `
+        <tr>
+          <td>${escapeHtml(u.username)}</td>
+          <td>${u.is_admin ? '<span class="tag tag-blue">管理员</span>' : '<span class="tag tag-green">普通</span>'}</td>
+          <td style="font-size:12px">${emails}</td>
+          <td style="font-size:12px">${escapeHtml(alias)}</td>
+          <td><code style="font-size:11px">${u.api_key ? u.api_key.substring(0, 8) + '...' : '-'}</code></td>
+          <td style="font-size:12px">${u.created_at ? u.created_at.substring(0, 19).replace('T', ' ') : '-'}</td>
+          <td>
+            <button class="btn-link" onclick="showEditUser('${u.id}')">编辑</button>
+            ${u.id !== 'admin' ? `<button class="btn-link" style="color:var(--danger)" onclick="deleteUser('${u.id}','${u.username}')">删除</button>` : ''}
+          </td>
+        </tr>
+      `;
+    }).join('');
   }
 }
 
 function showCreateUser() {
   showModal('添加用户', `
-    <div class="form-group"><label>用户名</label><input type="text" id="newUsername" placeholder="至少3个字符"></div>
-    <div class="form-group"><label>密码</label><input type="text" id="newPassword" placeholder="至少6个字符"></div>
-    <div class="form-group"><label>角色</label><select id="newIsAdmin"><option value="false">普通用户</option><option value="true">管理员</option></select></div>
-    <div class="form-group"><label>Gmail 邮箱(可选)</label><input type="text" id="newGmailEmail" placeholder="user@gmail.com"></div>
-    <div class="form-group"><label>Gmail 应用密码(可选)</label><input type="text" id="newGmailToken" placeholder="应用专用密码"></div>
-  `, `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn" onclick="createUser()">创建</button>`);
+    <div class="form-group">
+      <label>用户名</label>
+      <input type="text" id="newUsername" placeholder="至少3个字符">
+    </div>
+    <div class="form-group">
+      <label>密码</label>
+      <input type="text" id="newPassword" placeholder="至少6个字符">
+    </div>
+    <div class="form-group">
+      <label>角色</label>
+      <select id="newIsAdmin">
+        <option value="false">普通用户</option>
+        <option value="true">管理员</option>
+      </select>
+    </div>
+  `, `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn" onclick="createUser()">添加</button>`);
 }
 
 async function createUser() {
   const username = document.getElementById('newUsername').value.trim();
   const password = document.getElementById('newPassword').value;
+  const is_admin = document.getElementById('newIsAdmin').value === 'true';
   if (!username || !password) { showToast('请填写完整', 'error'); return; }
   const data = await api('/api/admin/users', {
     method: 'POST',
-    body: JSON.stringify({
-      username, password,
-      is_admin: document.getElementById('newIsAdmin').value === 'true',
-      gmail_email: document.getElementById('newGmailEmail').value.trim(),
-      gmail_token: document.getElementById('newGmailToken').value.trim(),
-    })
+    body: JSON.stringify({ username, password, is_admin })
   });
   if (data && data.code === 0) {
     closeModal();
-    showToast('用户创建成功');
+    showToast('添加成功');
     loadUsers();
   } else {
-    showToast(data ? data.detail || '创建失败' : '网络错误', 'error');
+    showToast(data ? data.detail || '添加失败' : '网络错误', 'error');
   }
 }
 
@@ -857,24 +1147,34 @@ async function showEditUser(userId) {
   if (!data || data.code !== 0) return;
   const u = data.data.find(x => x.id === userId);
   if (!u) return;
-  showModal('编辑用户 - ' + u.username, `
-    <div class="form-group"><label>新密码(留空不修改)</label><input type="text" id="editPassword" placeholder="留空不修改"></div>
-    <div class="form-group"><label>角色</label><select id="editIsAdmin"><option value="false" ${!u.is_admin ? 'selected' : ''}>普通用户</option><option value="true" ${u.is_admin ? 'selected' : ''}>管理员</option></select></div>
-    <div class="form-group"><label>Gmail 邮箱</label><input type="text" id="editGmailEmail" value="${u.gmail_email || ''}"></div>
-    <div class="form-group"><label>Gmail 应用密码(留空不修改)</label><input type="text" id="editGmailToken" placeholder="${u.gmail_token_masked || '留空不修改'}"></div>
+  showModal('编辑用户', `
+    <div class="form-group">
+      <label>用户名</label>
+      <input type="text" value="${escapeHtml(u.username)}" disabled style="background:#f9fafb">
+    </div>
+    <div class="form-group">
+      <label>新密码</label>
+      <input type="text" id="editPassword" placeholder="留空不修改">
+    </div>
+    <div class="form-group">
+      <label>角色</label>
+      <select id="editIsAdmin">
+        <option value="false" ${!u.is_admin ? 'selected' : ''}>普通用户</option>
+        <option value="true" ${u.is_admin ? 'selected' : ''}>管理员</option>
+      </select>
+    </div>
   `, `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn" onclick="editUser('${userId}')">保存</button>`);
 }
 
 async function editUser(userId) {
-  const body = {
-    is_admin: document.getElementById('editIsAdmin').value === 'true',
-    gmail_email: document.getElementById('editGmailEmail').value.trim(),
-  };
-  const pwd = document.getElementById('editPassword').value;
-  if (pwd) body.password = pwd;
-  const token = document.getElementById('editGmailToken').value.trim();
-  if (token) body.gmail_token = token;
-  const data = await api('/api/admin/users/' + userId, { method: 'PUT', body: JSON.stringify(body) });
+  const password = document.getElementById('editPassword').value;
+  const is_admin = document.getElementById('editIsAdmin').value === 'true';
+  const body = { is_admin };
+  if (password) body.password = password;
+  const data = await api(`/api/admin/users/${userId}`, {
+    method: 'PUT',
+    body: JSON.stringify(body)
+  });
   if (data && data.code === 0) {
     closeModal();
     showToast('保存成功');
@@ -885,134 +1185,111 @@ async function editUser(userId) {
 }
 
 async function deleteUser(userId, username) {
-  if (!confirm('确定删除用户 "' + username + '" 吗？')) return;
-  const data = await api('/api/admin/users/' + userId, { method: 'DELETE' });
+  if (!confirm(`确定删除用户 ${username} 吗？`)) return;
+  const data = await api(`/api/admin/users/${userId}`, { method: 'DELETE' });
   if (data && data.code === 0) {
-    showToast('已删除');
+    showToast('删除成功');
     loadUsers();
   } else {
     showToast(data ? data.detail || '删除失败' : '网络错误', 'error');
   }
 }
 
-// ==================== Stats (Admin) ====================
+// ==================== Stats ====================
 function renderStats() {
   return `
-    <div id="statsContainer">
-      <div class="empty-state">加载中...</div>
+    <div class="card">
+      <div class="card-header"><div class="card-title">使用统计</div></div>
+      <div class="stats-grid" id="statsGrid"><div class="stat-card"><div class="stat-label">加载中</div></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title">详细记录</div></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>时间</th><th>用户</th><th>别名</th><th>操作</th><th>详情</th></tr></thead>
+          <tbody id="statsTableBody"><tr><td colspan="5" style="text-align:center;color:var(--text-lighter)">加载中...</td></tr></tbody>
+        </table>
+      </div>
     </div>
   `;
 }
 
 async function loadStats() {
   const data = await api('/api/admin/stats');
-  const el = document.getElementById('statsContainer');
-  if (!el) return;
-  if (data && data.code === 0) {
-    const s = data.data.summary;
-    const logs = data.data.logs;
-    let userStatsHtml = '';
-    for (const [user, count] of Object.entries(s.by_user)) {
-      userStatsHtml += `<tr><td>${escapeHtml(user)}</td><td>${count}</td></tr>`;
-    }
-    let aliasStatsHtml = '';
-    for (const [alias, count] of Object.entries(s.by_alias)) {
-      aliasStatsHtml += `<tr><td>${escapeHtml(alias)}</td><td>${count}</td></tr>`;
-    }
-    let logsHtml = '';
-    if (logs.length === 0) {
-      logsHtml = '<tr><td colspan="5" style="text-align:center;color:var(--text-lighter)">暂无记录</td></tr>';
-    } else {
-      logsHtml = logs.slice(0, 100).map(l => `
-        <tr>
-          <td>${escapeHtml(l.username)}</td>
-          <td>${escapeHtml(l.alias || '-')}</td>
-          <td>${escapeHtml(l.action)}</td>
-          <td>${escapeHtml(l.detail || '-')}</td>
-          <td style="font-size:12px">${l.timestamp ? l.timestamp.substring(0, 19).replace('T', ' ') : '-'}</td>
-        </tr>
-      `).join('');
-    }
-    el.innerHTML = `
-      <div class="stats-grid">
-        <div class="stat-card"><div class="stat-label">总调用次数</div><div class="stat-value primary">${s.total_calls}</div></div>
-        <div class="stat-card"><div class="stat-label">活跃用户数</div><div class="stat-value">${Object.keys(s.by_user).length}</div></div>
-        <div class="stat-card"><div class="stat-label">别名使用数</div><div class="stat-value">${Object.keys(s.by_alias).length}</div></div>
-      </div>
-      <div class="card">
-        <div class="card-header"><div class="card-title">按用户统计</div></div>
-        <div class="table-wrap"><table><thead><tr><th>用户名</th><th>调用次数</th></tr></thead><tbody>${userStatsHtml || '<tr><td colspan="2" style="text-align:center">暂无数据</td></tr>'}</tbody></table></div>
-      </div>
-      <div class="card">
-        <div class="card-header"><div class="card-title">按别名统计</div></div>
-        <div class="table-wrap"><table><thead><tr><th>别名邮箱</th><th>调用次数</th></tr></thead><tbody>${aliasStatsHtml || '<tr><td colspan="2" style="text-align:center">暂无数据</td></tr>'}</tbody></table></div>
-      </div>
-      <div class="card">
-        <div class="card-header"><div class="card-title">调用日志 (近30天，最多显示100条)</div></div>
-        <div class="table-wrap"><table><thead><tr><th>用户</th><th>别名</th><th>操作</th><th>详情</th><th>时间</th></tr></thead><tbody>${logsHtml}</tbody></table></div>
-      </div>
-    `;
+  if (!data || data.code !== 0) return;
+  const s = data.data.summary;
+  document.getElementById('statsGrid').innerHTML = `
+    <div class="stat-card"><div class="stat-label">总调用次数</div><div class="stat-value primary">${s.total_calls}</div></div>
+    <div class="stat-card"><div class="stat-label">用户数</div><div class="stat-value">${Object.keys(s.by_user || {}).length}</div></div>
+    <div class="stat-card"><div class="stat-label">别名数</div><div class="stat-value">${Object.keys(s.by_alias || {}).length}</div></div>
+  `;
+  const tbody = document.getElementById('statsTableBody');
+  const logs = data.data.logs;
+  if (logs.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-lighter)">暂无记录</td></tr>';
+    return;
   }
+  tbody.innerHTML = logs.map(l => `
+    <tr>
+      <td style="font-size:12px">${l.time ? l.time.substring(0, 19).replace('T', ' ') : '-'}</td>
+      <td>${escapeHtml(l.username)}</td>
+      <td style="font-size:12px">${escapeHtml(l.alias || '-')}</td>
+      <td><span class="tag tag-gray">${escapeHtml(l.action)}</span></td>
+      <td style="font-size:12px">${escapeHtml(l.detail)}</td>
+    </tr>
+  `).join('');
 }
 
-// ==================== Settings (Admin) ====================
+// ==================== Settings ====================
 function renderSettings() {
   return `
     <div class="card">
       <div class="card-header"><div class="card-title">系统设置</div></div>
-      <div id="settingsContent"><div class="empty-state">加载中...</div></div>
+      <div class="form-group">
+        <label>允许注册</label>
+        <div style="display:flex;align-items:center;gap:8px">
+          <label class="toggle">
+            <input type="checkbox" id="setAllowReg">
+            <span class="toggle-slider"></span>
+          </label>
+          <span id="allowRegText" style="font-size:13px;color:var(--text-light)">加载中...</span>
+        </div>
+      </div>
     </div>
   `;
 }
 
 async function loadSettings() {
   const data = await api('/api/admin/settings');
-  const el = document.getElementById('settingsContent');
-  if (!el) return;
   if (data && data.code === 0) {
     const allowed = data.data.allow_registration;
-    el.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0">
-        <div>
-          <div style="font-weight:500">允许注册</div>
-          <div class="form-hint">关闭后新用户无法通过注册页面创建账户</div>
-        </div>
-        <label class="toggle">
-          <input type="checkbox" id="regToggle" ${allowed ? 'checked' : ''} onchange="toggleRegistration()">
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-    `;
-  }
-}
-
-async function toggleRegistration() {
-  const val = document.getElementById('regToggle').checked;
-  const data = await api('/api/admin/settings', { method: 'PUT', body: JSON.stringify({ allow_registration: val }) });
-  if (data && data.code === 0) {
-    showToast(val ? '已开启注册' : '已关闭注册');
-  } else {
-    showToast('更新失败', 'error');
-    loadSettings();
+    document.getElementById('setAllowReg').checked = allowed;
+    document.getElementById('allowRegText').textContent = allowed ? '已开启' : '已关闭';
+    document.getElementById('setAllowReg').onchange = async (e) => {
+      const r = await api('/api/admin/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ allow_registration: e.target.checked })
+      });
+      if (r && r.code === 0) {
+        document.getElementById('allowRegText').textContent = e.target.checked ? '已开启' : '已关闭';
+        showToast('已更新');
+      } else {
+        e.target.checked = !e.target.checked;
+        showToast('更新失败', 'error');
+      }
+    };
   }
 }
 
 // ==================== API Docs ====================
 function renderApiDocs() {
   const key = currentUser.api_key || '<your_api_key>';
-  return `
-    <div class="card">
-      <div class="card-header"><div class="card-title">API 接口文档</div></div>
-      <div class="form-hint" style="margin-bottom:16px">API 调用使用 key 参数进行鉴权，无需请求头。您的 API Key: <code>${key.substring(0, 8)}...${key.substring(24)}</code></div>
+  const serverHost = window.location.host;
+  const baseUrl = `http://${serverHost}`;
 
-      <h3 style="margin:16px 0 8px;font-size:15px">1. 获取邮件</h3>
-      <div class="code-block"><span class="comment"># POST /api/email/fetch</span>
-<span class="comment"># 参数: key (必填), 其余可选</span>
-
-curl -X POST <span class="string">"http://your-server:8000/api/email/fetch"</span> \\
-  -H <span class="string">"Content-Type: application/json"</span> \\
-  -d <span class="string">'{
-    "key": "${key}",
+  const fetchCurl = `curl -X POST "${baseUrl}/api/email/fetch?key=${key}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
     "sender": "noreply@example.com",
     "subject": "验证码",
     "keyword": "验证码",
@@ -1020,91 +1297,167 @@ curl -X POST <span class="string">"http://your-server:8000/api/email/fetch"</spa
     "start_time": "2026-07-06T00:00:00",
     "end_time": "2026-07-06T23:59:59",
     "limit": 10
-  }'</span></div>
+  }'`;
 
-      <h3 style="margin:16px 0 8px;font-size:15px">2. 标记已读</h3>
-      <div class="code-block"><span class="comment"># POST /api/email/mark_read</span>
+  const fetchPython = `import requests
 
-curl -X POST <span class="string">"http://your-server:8000/api/email/mark_read"</span> \\
-  -H <span class="string">"Content-Type: application/json"</span> \\
-  -d <span class="string">'{
-    "key": "${key}",
-    "sender": "noreply@example.com"
-  }'</span></div>
+resp = requests.post(
+    "${baseUrl}/api/email/fetch",
+    params={"key": "${key}"},
+    json={
+        "unseen": True,
+        "limit": 5
+    }
+)
 
-      <h3 style="margin:16px 0 8px;font-size:15px">3. Python 调用示例</h3>
-      <div class="code-block"><span class="keyword">import</span> requests
-
-resp = requests.post(<span class="string">"http://your-server:8000/api/email/fetch"</span>, json={
-    <span class="string">"key"</span>: <span class="string">"${key}"</span>,
-    <span class="string">"unseen"</span>: <span class="keyword">True</span>,
-    <span class="string">"limit"</span>: 5
-})
+print(resp.status_code)
+print(resp.text)
 data = resp.json()
-<span class="keyword">for</span> email <span class="keyword">in</span> data[<span class="string">"data"</span>][<span class="string">"emails"</span>]:
-    print(email[<span class="string">"subject"</span>], email[<span class="string">"body"</span>])</div>
+for email in data["data"]["emails"]:
+    print(email["subject"], email["body"])`;
 
-      <h3 style="margin:16px 0 8px;font-size:15px">参数说明</h3>
+  const markReadCurl = `curl -X POST "${baseUrl}/api/email/mark_read?key=${key}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "sender": "noreply@example.com"
+  }'`;
+
+  const markReadPython = `import requests
+
+resp = requests.post(
+    "${baseUrl}/api/email/mark_read",
+    params={"key": "${key}"},
+    json={
+        "sender": "noreply@example.com"
+    }
+)
+
+print(resp.status_code)
+print(resp.text)`;
+
+  return `
+    <div class="card">
+      <div class="card-header"><div class="card-title">API 接口文档</div></div>
+      <div class="form-hint" style="margin-bottom:16px">
+        API 调用使用 ?key= 查询参数进行鉴权，无需请求头。<br>
+        您的 API Key: <code>${key.substring(0, 8)}...${key.substring(24)}</code>
+        <button class="btn-link" onclick="copyText('${key}')">复制完整Key</button>
+      </div>
+
+      <h3 style="margin:16px 0 4px;font-size:15px">1. 获取邮件</h3>
+      <div style="font-size:13px;color:var(--text-light);margin-bottom:8px">
+        POST /api/email/fetch?key=YOUR_KEY — key 通过查询参数传递，其余为 body 可选参数
+      </div>
+      <div class="code-toggle">
+        <button class="active" onclick="toggleCode(this,'fetchCurl')">curl</button>
+        <button onclick="toggleCode(this,'fetchPython')">Python</button>
+      </div>
+      <div id="fetchCurl" class="code-block">
+        <button class="copy-icon" onclick="copyCode(this)" title="复制">📋</button>
+        <div class="code-content">${escapeHtml(fetchCurl)}</div>
+      </div>
+      <div id="fetchPython" class="code-block" style="display:none">
+        <button class="copy-icon" onclick="copyCode(this)" title="复制">📋</button>
+        <div class="code-content">${escapeHtml(fetchPython)}</div>
+      </div>
+
+      <h3 style="margin:16px 0 4px;font-size:15px">传参标准</h3>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>参数</th><th>类型</th><th>必填</th><th>说明</th></tr></thead>
+          <thead><tr><th>参数</th><th>必填</th><th>类型</th><th>例子</th><th>说明</th></tr></thead>
           <tbody>
-            <tr><td><code>key</code></td><td>string</td><td>是</td><td>32位API密钥</td></tr>
-            <tr><td><code>sender</code></td><td>string</td><td>否</td><td>发件人邮箱筛选</td></tr>
-            <tr><td><code>to</code></td><td>string</td><td>否</td><td>收件人筛选(普通用户自动用别名)</td></tr>
-            <tr><td><code>subject</code></td><td>string</td><td>否</td><td>主题关键字</td></tr>
-            <tr><td><code>body</code></td><td>string</td><td>否</td><td>正文关键字</td></tr>
-            <tr><td><code>keyword</code></td><td>string</td><td>否</td><td>全文搜索(主题+正文+发件人+收件人)</td></tr>
-            <tr><td><code>unseen</code></td><td>bool</td><td>否</td><td>true=仅未读, false=仅已读</td></tr>
-            <tr><td><code>start_time</code></td><td>string</td><td>否</td><td>开始时间 (YYYY-MM-DDTHH:MM:SS)，默认近1小时</td></tr>
-            <tr><td><code>end_time</code></td><td>string</td><td>否</td><td>结束时间，默认当前</td></tr>
-            <tr><td><code>limit</code></td><td>int</td><td>否</td><td>返回数量，默认50</td></tr>
+            <tr><td><code>key</code> <span class="tag tag-blue">query</span></td><td><span class="tag tag-red">是</span></td><td>string</td><td><code>"ce4821f6..."</code></td><td>32位API密钥，通过URL查询参数传递</td></tr>
+            <tr><td><code>sender</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"a@b.c"</code></td><td>发件人邮箱筛选</td></tr>
+            <tr><td><code>to</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"x+y@gmail.com"</code></td><td>收件人筛选（普通用户自动用别名）</td></tr>
+            <tr><td><code>subject</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"验证码"</code></td><td>主题关键字</td></tr>
+            <tr><td><code>body</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"1234"</code></td><td>正文关键字</td></tr>
+            <tr><td><code>keyword</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"验证"</code></td><td>全文搜索（主题+正文+发件人+收件人）</td></tr>
+            <tr><td><code>unseen</code></td><td><span class="tag tag-gray">否</span></td><td>bool</td><td><code>true</code></td><td>true=仅未读, false=仅已读</td></tr>
+            <tr><td><code>start_time</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"2026-07-06T00:00:00"</code></td><td>开始时间，默认近1小时</td></tr>
+            <tr><td><code>end_time</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"2026-07-06T23:59:59"</code></td><td>结束时间，默认当前</td></tr>
+            <tr><td><code>limit</code></td><td><span class="tag tag-gray">否</span></td><td>int</td><td><code>50</code></td><td>返回数量，默认50</td></tr>
           </tbody>
         </table>
       </div>
 
       <h3 style="margin:16px 0 8px;font-size:15px">返回格式</h3>
-      <div class="code-block">{
-  <span class="string">"code"</span>: 0,
-  <span class="string">"msg"</span>: <span class="string">"success"</span>,
-  <span class="string">"data"</span>: {
-    <span class="string">"total"</span>: 2,
-    <span class="string">"emails"</span>: [
+      <div class="code-block">
+        <button class="copy-icon" onclick="copyCode(this)" title="复制">📋</button>
+        <div class="code-content">{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "total": 2,
+    "emails": [
       {
-        <span class="string">"id"</span>: <span class="string">"&lt;message-id&gt;"</span>,
-        <span class="string">"from"</span>: <span class="string">"sender@example.com"</span>,
-        <span class="string">"to"</span>: <span class="string">"you+alias@gmail.com"</span>,
-        <span class="string">"subject"</span>: <span class="string">"验证码"</span>,
-        <span class="string">"date"</span>: <span class="string">"2026-07-06 10:23:11"</span>,
-        <span class="string">"body"</span>: <span class="string">"您的验证码是 123456"</span>,
-        <span class="string">"unread"</span>: <span class="keyword">true</span>
+        "id": "&lt;message-id&gt;",
+        "from": "sender@example.com",
+        "to": "you+alias@gmail.com",
+        "subject": "验证码",
+        "date": "2026-07-06 10:23:11",
+        "body": "您的验证码是 123456",
+        "unread": true
       }
     ]
   }
 }</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin:0 0 4px;font-size:15px">2. 标记已读</h3>
+      <div style="font-size:13px;color:var(--text-light);margin-bottom:8px">
+        POST /api/email/mark_read — 将匹配的邮件标记为已读
+      </div>
+      <div class="code-toggle">
+        <button class="active" onclick="toggleCode(this,'markReadCurl')">curl</button>
+        <button onclick="toggleCode(this,'markReadPython')">Python</button>
+      </div>
+      <div id="markReadCurl" class="code-block">
+        <button class="copy-icon" onclick="copyCode(this)" title="复制">📋</button>
+        <div class="code-content">${escapeHtml(markReadCurl)}</div>
+      </div>
+      <div id="markReadPython" class="code-block" style="display:none">
+        <button class="copy-icon" onclick="copyCode(this)" title="复制">📋</button>
+        <div class="code-content">${escapeHtml(markReadPython)}</div>
+      </div>
+
+      <h3 style="margin:16px 0 8px;font-size:15px">传参标准</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>参数</th><th>必填</th><th>类型</th><th>例子</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>key</code> <span class="tag tag-blue">query</span></td><td><span class="tag tag-red">是</span></td><td>string</td><td><code>"ce4821f6..."</code></td><td>32位API密钥，通过URL查询参数传递</td></tr>
+            <tr><td><code>sender</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"noreply@example.com"</code></td><td>按发件人筛选标记</td></tr>
+            <tr><td><code>subject</code></td><td><span class="tag tag-gray">否</span></td><td>string</td><td><code>"验证码"</code></td><td>按主题筛选标记</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 style="margin:16px 0 8px;font-size:15px">返回格式</h3>
+      <div class="code-block">
+        <button class="copy-icon" onclick="copyCode(this)" title="复制">📋</button>
+        <div class="code-content">{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "marked": 3
+  }
+}</div>
+      </div>
     </div>
   `;
 }
 
-// ==================== Tab switch with lazy load ====================
-const originalSwitchTab = switchTab;
-switchTab = async function(tabId) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
-  const content = document.getElementById('tabContent');
-  const renderers = {
-    emails: renderEmailQuery,
-    alias: renderAlias,
-    users: renderUsers,
-    stats: renderStats,
-    settings: renderSettings,
-    apidocs: renderApiDocs,
-  };
-  if (renderers[tabId]) content.innerHTML = renderers[tabId]();
-  // Lazy load data
-  if (tabId === 'users') loadUsers();
-  if (tabId === 'stats') loadStats();
-  if (tabId === 'settings') loadSettings();
-};
+function toggleCode(btn, showId) {
+  const toggle = btn.parentElement;
+  toggle.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  // 找到同级的两个 code-block
+  const card = toggle.parentElement;
+  card.querySelectorAll('.code-block').forEach(b => b.style.display = 'none');
+  document.getElementById(showId).style.display = 'block';
+}
 
 // ==================== Init ====================
 (async function init() {

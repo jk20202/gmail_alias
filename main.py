@@ -14,7 +14,7 @@ from usage_log import UsageLog
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
-app = FastAPI(title="Gmail Alias Email API", version="3.0")
+app = FastAPI(title="Gmail Alias Email API", version="3.1")
 user_store = UserStore()
 usage_log = UsageLog()
 
@@ -63,24 +63,28 @@ class AdminUserCreate(BaseModel):
     username: str
     password: str
     is_admin: bool = False
-    gmail_email: str = ""
-    gmail_token: str = ""
 
 
 class AdminUserUpdate(BaseModel):
     password: Optional[str] = None
     is_admin: Optional[bool] = None
-    gmail_email: Optional[str] = None
-    gmail_token: Optional[str] = None
 
 
-class AccountUpdate(BaseModel):
-    gmail_email: Optional[str] = None
-    gmail_token: Optional[str] = None
+class GmailAccountCreate(BaseModel):
+    email: str
+    token: str
+    is_public: bool = False
+
+
+class GmailAccountUpdate(BaseModel):
+    email: Optional[str] = None
+    token: Optional[str] = None
+    is_public: Optional[bool] = None
 
 
 class AliasRequest(BaseModel):
-    alias: str
+    gmail_account_id: str
+    label: str
 
 
 class SettingsUpdate(BaseModel):
@@ -88,7 +92,6 @@ class SettingsUpdate(BaseModel):
 
 
 class FetchRequest(BaseModel):
-    key: str
     to: Optional[str] = None
     sender: Optional[str] = None
     subject: Optional[str] = None
@@ -101,9 +104,21 @@ class FetchRequest(BaseModel):
 
 
 class MarkReadRequest(BaseModel):
-    key: str
     sender: Optional[str] = None
     subject: Optional[str] = None
+
+
+class WebFetchRequest(BaseModel):
+    to: Optional[str] = None
+    sender: Optional[str] = None
+    subject: Optional[str] = None
+    body: Optional[str] = None
+    keyword: Optional[str] = None
+    unseen: Optional[bool] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    limit: int = 50
+    gmail_account_id: Optional[str] = None
 
 
 # ==================== Pages ====================
@@ -168,15 +183,13 @@ async def admin_create_user(req: AdminUserCreate, admin=Depends(require_admin)):
     user = user_store.create_user(req.username, req.password, req.is_admin)
     if not user:
         raise HTTPException(status_code=409, detail="用户名已存在")
-    if req.gmail_email or req.gmail_token:
-        user = user_store.update_user(user["id"], gmail_email=req.gmail_email, gmail_token=req.gmail_token)
     usage_log.add(admin["id"], admin["username"], "", "create_user", f"创建了用户 {req.username}")
     return {"code": 0, "msg": "success", "data": user}
 
 
 @app.put("/api/admin/users/{user_id}")
 async def admin_update_user(user_id: str, req: AdminUserUpdate, admin=Depends(require_admin)):
-    user = user_store.update_user(user_id, req.password, req.is_admin, req.gmail_email, req.gmail_token)
+    user = user_store.update_user(user_id, req.password, req.is_admin)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
     usage_log.add(admin["id"], admin["username"], "", "update_user", f"更新了用户 {user['username']}")
@@ -225,28 +238,6 @@ async def get_account(user=Depends(require_session)):
     return {"code": 0, "msg": "success", "data": user}
 
 
-@app.put("/api/account")
-async def update_account(req: AccountUpdate, user=Depends(require_session)):
-    updated = user_store.update_user(user["id"], gmail_email=req.gmail_email, gmail_token=req.gmail_token)
-    if not updated:
-        raise HTTPException(status_code=404, detail="用户不存在")
-    return {"code": 0, "msg": "success", "data": updated}
-
-
-@app.post("/api/account/alias")
-async def set_alias(req: AliasRequest, user=Depends(require_session)):
-    alias = req.alias.strip()
-    if not alias:
-        raise HTTPException(status_code=400, detail="别名不能为空")
-    if "@" not in alias:
-        raise HTTPException(status_code=400, detail="别名格式错误，需包含@")
-    updated = user_store.set_alias(user["id"], alias)
-    if not updated:
-        raise HTTPException(status_code=404, detail="用户不存在")
-    usage_log.add(user["id"], user["username"], alias, "set_alias", f"设置了别名 {alias}")
-    return {"code": 0, "msg": "success", "data": updated}
-
-
 @app.post("/api/account/api_key")
 async def regenerate_api_key(user=Depends(require_session)):
     updated = user_store.regenerate_api_key(user["id"])
@@ -256,21 +247,117 @@ async def regenerate_api_key(user=Depends(require_session)):
     return {"code": 0, "msg": "success", "data": updated}
 
 
+# ==================== Gmail Accounts ====================
+
+@app.get("/api/account/gmail_accounts")
+async def list_gmail_accounts(user=Depends(require_session)):
+    return {"code": 0, "msg": "success", "data": user_store.list_gmail_accounts(user["id"])}
+
+
+@app.post("/api/account/gmail_accounts")
+async def add_gmail_account(req: GmailAccountCreate, user=Depends(require_session)):
+    if "@" not in req.email:
+        raise HTTPException(status_code=400, detail="邮箱格式错误")
+    if len(req.token) < 8:
+        raise HTTPException(status_code=400, detail="应用密码长度不足")
+    updated = user_store.add_gmail_account(user["id"], req.email, req.token, req.is_public)
+    if not updated:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    usage_log.add(user["id"], user["username"], "", "add_gmail", f"绑定了邮箱 {req.email}")
+    return {"code": 0, "msg": "success", "data": updated}
+
+
+@app.put("/api/account/gmail_accounts/{ga_id}")
+async def update_gmail_account(ga_id: str, req: GmailAccountUpdate, user=Depends(require_session)):
+    updated = user_store.update_gmail_account(user["id"], ga_id, req.email, req.token, req.is_public)
+    if not updated:
+        raise HTTPException(status_code=404, detail="邮箱账号不存在")
+    usage_log.add(user["id"], user["username"], "", "update_gmail", f"更新了邮箱配置 {ga_id}")
+    return {"code": 0, "msg": "success", "data": updated}
+
+
+@app.delete("/api/account/gmail_accounts/{ga_id}")
+async def delete_gmail_account(ga_id: str, user=Depends(require_session)):
+    updated = user_store.delete_gmail_account(user["id"], ga_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail="邮箱账号不存在")
+    usage_log.add(user["id"], user["username"], "", "delete_gmail", f"删除了邮箱配置 {ga_id}")
+    return {"code": 0, "msg": "success", "data": updated}
+
+
+@app.get("/api/gmail_accounts/available")
+async def list_available_gmail_accounts(user=Depends(require_session)):
+    """获取可用谷歌邮箱列表(自己的全部+别人公开的)，不含 token"""
+    return {"code": 0, "msg": "success", "data": user_store.list_available_gmail_accounts(user["id"])}
+
+
+# ==================== Alias ====================
+
+@app.post("/api/account/alias")
+async def set_alias(req: AliasRequest, user=Depends(require_session)):
+    label = req.label.strip()
+    if not label:
+        raise HTTPException(status_code=400, detail="别名标签不能为空")
+    updated, err = user_store.set_alias(user["id"], req.gmail_account_id, label)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    if not updated:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    usage_log.add(user["id"], user["username"], updated.get("alias", {}).get("full", "") if updated.get("alias") else "", "set_alias", f"设置了别名")
+    return {"code": 0, "msg": "success", "data": updated}
+
+
+@app.get("/api/account/alias/random_label")
+async def random_label(user=Depends(require_session)):
+    return {"code": 0, "msg": "success", "data": {"label": user_store.gen_random_label()}}
+
+
 # ==================== Email API (key-based) ====================
+
+def _resolve_gmail_creds(user, gmail_account_id=None):
+    """根据用户和可选的 gmail_account_id 解析出邮箱地址和 token"""
+    user_id = user["id"]
+    is_admin = user.get("is_admin", False)
+
+    # 优先使用指定的 gmail_account_id
+    if gmail_account_id:
+        ga = user_store.get_gmail_account_raw(user_id, gmail_account_id)
+        if not ga:
+            return None, None, "未找到指定的谷歌邮箱或无权使用"
+        return ga["email"], ga["token"], None
+
+    # 普通用户：用别名关联的 gmail_account
+    if not is_admin:
+        alias = user.get("alias")
+        if not alias:
+            return None, None, "未设置别名邮箱，请先创建别名"
+        ga_id = alias.get("gmail_account_id") if isinstance(alias, dict) else None
+        ga = user_store.get_gmail_account_raw(user_id, ga_id) if ga_id else None
+        if not ga:
+            return None, None, "别名关联的谷歌邮箱不存在或已删除"
+        return ga["email"], ga["token"], None
+
+    # admin 未指定：用第一个绑定的邮箱
+    accounts = user.get("gmail_accounts", [])
+    if not accounts:
+        return None, None, "未绑定谷歌邮箱"
+    ga = user_store.get_gmail_account_raw(user_id, accounts[0]["id"])
+    if not ga:
+        return None, None, "谷歌邮箱配置异常"
+    return ga["email"], ga["token"], None
+
 
 @app.post("/api/email/fetch")
 async def api_fetch_emails(req: FetchRequest, user=Depends(require_api_key)):
-    email_addr = user.get("gmail_email", "")
-    email_token = user.get("gmail_token", "")
-    if not email_addr or not email_token:
-        raise HTTPException(status_code=400, detail="未配置Gmail邮箱，请先在后台设置")
+    email_addr, email_token, err = _resolve_gmail_creds(user)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
 
-    # 普通用户强制使用别名过滤，管理员不过滤
     to_filter = req.to
     if not user.get("is_admin"):
-        alias = user.get("alias", "")
+        alias = user.get("alias")
         if alias:
-            to_filter = alias
+            to_filter = alias.get("full", "") if isinstance(alias, dict) else ""
         elif not to_filter:
             raise HTTPException(status_code=400, detail="未设置别名邮箱，请先创建别名")
 
@@ -323,14 +410,17 @@ async def api_fetch_emails(req: FetchRequest, user=Depends(require_api_key)):
 
 @app.post("/api/email/mark_read")
 async def api_mark_read(req: MarkReadRequest, user=Depends(require_api_key)):
-    email_addr = user.get("gmail_email", "")
-    email_token = user.get("gmail_token", "")
-    if not email_addr or not email_token:
-        raise HTTPException(status_code=400, detail="未配置Gmail邮箱")
+    email_addr, email_token, err = _resolve_gmail_creds(user)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
 
     try:
         count = await mark_emails_read(email_addr, email_token, req.sender, req.subject)
-        usage_log.add(user["id"], user["username"], user.get("alias", ""), "mark_read", f"标记{count}封已读")
+        alias_full = ""
+        alias = user.get("alias")
+        if alias and isinstance(alias, dict):
+            alias_full = alias.get("full", "")
+        usage_log.add(user["id"], user["username"], alias_full, "mark_read", f"标记{count}封已读")
         return {"code": 0, "msg": "success", "data": {"marked": count}}
     except Exception as e:
         return JSONResponse(status_code=500, content={"code": 1, "msg": f"IMAP错误: {str(e)}", "data": None})
@@ -338,33 +428,19 @@ async def api_mark_read(req: MarkReadRequest, user=Depends(require_api_key)):
 
 # ==================== Web Email Query (session-based) ====================
 
-class WebFetchRequest(BaseModel):
-    to: Optional[str] = None
-    sender: Optional[str] = None
-    subject: Optional[str] = None
-    body: Optional[str] = None
-    keyword: Optional[str] = None
-    unseen: Optional[bool] = None
-    start_time: Optional[str] = None
-    end_time: Optional[str] = None
-    limit: int = 50
-
-
 @app.post("/api/web/email/fetch")
 async def web_fetch_emails(req: WebFetchRequest, user=Depends(require_session)):
-    email_addr = user.get("gmail_email", "")
-    email_token = user.get("gmail_token", "")
-    if not email_addr or not email_token:
-        raise HTTPException(status_code=400, detail="未配置Gmail邮箱，请先在账户设置中配置")
-
     raw_user = user_store.get_user_raw(user["id"])
-    email_token = raw_user.get("gmail_token", "")
+
+    email_addr, email_token, err = _resolve_gmail_creds(raw_user, req.gmail_account_id)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
 
     to_filter = req.to
     if not user.get("is_admin"):
-        alias = user.get("alias", "")
+        alias = user.get("alias")
         if alias:
-            to_filter = alias
+            to_filter = alias.get("full", "") if isinstance(alias, dict) else ""
         elif not to_filter:
             raise HTTPException(status_code=400, detail="未设置别名邮箱，请先创建别名")
 
