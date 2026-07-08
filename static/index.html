@@ -234,6 +234,7 @@ tr:hover { background: #f9fafb; }
   overflow-x: auto; font-family: "Fira Code", "Consolas", "Courier New", monospace;
   font-size: 13px; line-height: 1.6; margin: 8px 0;
 }
+.code-block .code-content { white-space: pre; }
 .code-block .copy-icon {
   position: absolute; top: 10px; right: 10px;
   background: rgba(255,255,255,0.1); border: none; border-radius: 4px;
@@ -581,7 +582,6 @@ function getTabs() {
     return [
       { id: 'emails', name: '邮件查询' },
       { id: 'account', name: '个人中心' },
-      { id: 'users', name: '用户管理' },
       { id: 'stats', name: '使用统计' },
       { id: 'settings', name: '系统设置' },
       { id: 'apidocs', name: 'API 文档' },
@@ -616,7 +616,6 @@ async function switchTab(tabId) {
   const renderers = {
     emails: renderEmailQuery,
     account: renderAccount,
-    users: renderUsers,
     stats: renderStats,
     settings: renderSettings,
     apidocs: renderApiDocs,
@@ -624,7 +623,6 @@ async function switchTab(tabId) {
   if (renderers[tabId]) content.innerHTML = renderers[tabId]();
   // Lazy load data
   if (tabId === 'emails') await loadAvailableGmailAccounts();
-  if (tabId === 'users') loadUsers();
   if (tabId === 'stats') loadStats();
   if (tabId === 'settings') loadSettings();
 }
@@ -1222,6 +1220,7 @@ async function loadStats() {
     <div class="stat-card"><div class="stat-label">总调用次数</div><div class="stat-value primary">${s.total_calls}</div></div>
     <div class="stat-card"><div class="stat-label">用户数</div><div class="stat-value">${Object.keys(s.by_user || {}).length}</div></div>
     <div class="stat-card"><div class="stat-label">别名数</div><div class="stat-value">${Object.keys(s.by_alias || {}).length}</div></div>
+    <div class="stat-card"><div class="stat-label">绑定主邮箱</div><div class="stat-value">${s.gmail_account_count || 0}</div></div>
   `;
   const tbody = document.getElementById('statsTableBody');
   const logs = data.data.logs;
@@ -1231,7 +1230,7 @@ async function loadStats() {
   }
   tbody.innerHTML = logs.map(l => `
     <tr>
-      <td style="font-size:12px">${l.time ? l.time.substring(0, 19).replace('T', ' ') : '-'}</td>
+      <td style="font-size:12px">${l.time_display || (l.timestamp ? l.timestamp.substring(0, 19).replace('T', ' ') : '-')}</td>
       <td>${escapeHtml(l.username)}</td>
       <td style="font-size:12px">${escapeHtml(l.alias || '-')}</td>
       <td><span class="tag tag-gray">${escapeHtml(l.action)}</span></td>
@@ -1256,6 +1255,32 @@ function renderSettings() {
         </div>
       </div>
     </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">用户管理</div>
+        <button class="btn btn-sm" onclick="showCreateUser()">+ 添加用户</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>用户名</th><th>角色</th><th>绑定邮箱</th><th>别名</th><th>API Key</th><th>创建时间</th><th>操作</th></tr></thead>
+          <tbody id="usersTableBody"><tr><td colspan="7" style="text-align:center;color:var(--text-lighter)">加载中...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">主邮箱管理</div>
+        <button class="btn btn-sm" onclick="loadAdminGmailAccounts()">刷新</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>所属用户</th><th>邮箱地址</th><th>公开</th><th>Token</th><th>创建时间</th><th>操作</th></tr></thead>
+          <tbody id="adminGmailTableBody"><tr><td colspan="6" style="text-align:center;color:var(--text-lighter)">加载中...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
   `;
 }
 
@@ -1278,6 +1303,85 @@ async function loadSettings() {
         showToast('更新失败', 'error');
       }
     };
+  }
+  loadUsers();
+  loadAdminGmailAccounts();
+}
+
+async function loadAdminGmailAccounts() {
+  const data = await api('/api/admin/gmail_accounts');
+  const tbody = document.getElementById('adminGmailTableBody');
+  if (!tbody) return;
+  if (data && data.code === 0) {
+    if (data.data.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-lighter)">暂无主邮箱</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.data.map(g => `
+      <tr>
+        <td>${escapeHtml(g.owner_username)}</td>
+        <td style="font-size:12px">${escapeHtml(g.email)}</td>
+        <td>${g.is_public ? '<span class="tag tag-green">公开</span>' : '<span class="tag tag-gray">私有</span>'}</td>
+        <td><code style="font-size:11px">${g.token_masked || '****'}</code></td>
+        <td style="font-size:12px">${g.created_at ? g.created_at.substring(0, 19).replace('T', ' ') : '-'}</td>
+        <td>
+          <button class="btn-link" onclick="showEditAdminGmail('${g.owner_id}','${g.id}')">编辑</button>
+          <button class="btn-link" style="color:var(--danger)" onclick="deleteAdminGmail('${g.owner_id}','${g.id}','${g.email}')">删除</button>
+        </td>
+      </tr>
+    `).join('');
+  }
+}
+
+function showEditAdminGmail(ownerId, gaId) {
+  showModal('编辑主邮箱', `
+    <div class="form-group">
+      <label>邮箱地址</label>
+      <input type="text" id="adminGmailEmail" placeholder="邮箱地址">
+    </div>
+    <div class="form-group">
+      <label>应用密码 (留空不修改)</label>
+      <input type="text" id="adminGmailToken" placeholder="留空不修改">
+    </div>
+    <div class="form-group">
+      <label>是否公开</label>
+      <select id="adminGmailPublic">
+        <option value="false">私有</option>
+        <option value="true">公开</option>
+      </select>
+    </div>
+  `, `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn" onclick="editAdminGmail('${ownerId}','${gaId}')">保存</button>`);
+}
+
+async function editAdminGmail(ownerId, gaId) {
+  const email = document.getElementById('adminGmailEmail').value.trim();
+  const token = document.getElementById('adminGmailToken').value;
+  const is_public = document.getElementById('adminGmailPublic').value === 'true';
+  if (!email) { showToast('请填写邮箱地址', 'error'); return; }
+  const body = { email, is_public };
+  if (token) body.token = token;
+  const data = await api(`/api/admin/users/${ownerId}/gmail_accounts/${gaId}`, {
+    method: 'PUT',
+    body: JSON.stringify(body)
+  });
+  if (data && data.code === 0) {
+    closeModal();
+    showToast('保存成功');
+    loadAdminGmailAccounts();
+  } else {
+    showToast(data ? data.detail || '保存失败' : '网络错误', 'error');
+  }
+}
+
+async function deleteAdminGmail(ownerId, gaId, email) {
+  if (!confirm(`确定删除主邮箱 ${email} 吗？关联的别名也会被清除。`)) return;
+  const data = await api(`/api/admin/users/${ownerId}/gmail_accounts/${gaId}`, { method: 'DELETE' });
+  if (data && data.code === 0) {
+    showToast('删除成功');
+    loadAdminGmailAccounts();
+    loadUsers();
+  } else {
+    showToast(data ? data.detail || '删除失败' : '网络错误', 'error');
   }
 }
 
@@ -1402,6 +1506,26 @@ print(resp.text)`;
   }
 }</div>
       </div>
+
+      <h3 style="margin:16px 0 8px;font-size:15px">响应字段说明</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>code</code></td><td>int</td><td>0=成功，1=失败</td></tr>
+            <tr><td><code>msg</code></td><td>string</td><td>状态描述</td></tr>
+            <tr><td><code>data.total</code></td><td>int</td><td>返回邮件总数</td></tr>
+            <tr><td><code>data.emails</code></td><td>array</td><td>邮件列表</td></tr>
+            <tr><td><code>data.emails[].id</code></td><td>string</td><td>邮件Message-ID</td></tr>
+            <tr><td><code>data.emails[].from</code></td><td>string</td><td>发件人地址</td></tr>
+            <tr><td><code>data.emails[].to</code></td><td>string</td><td>收件人地址</td></tr>
+            <tr><td><code>data.emails[].subject</code></td><td>string</td><td>邮件主题</td></tr>
+            <tr><td><code>data.emails[].date</code></td><td>string</td><td>接收时间(上海时区)</td></tr>
+            <tr><td><code>data.emails[].body</code></td><td>string</td><td>邮件正文(纯文本)</td></tr>
+            <tr><td><code>data.emails[].unread</code></td><td>bool</td><td>true=未读，false=已读</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <div class="card">
@@ -1444,6 +1568,18 @@ print(resp.text)`;
     "marked": 3
   }
 }</div>
+      </div>
+
+      <h3 style="margin:16px 0 8px;font-size:15px">响应字段说明</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>code</code></td><td>int</td><td>0=成功，1=失败</td></tr>
+            <tr><td><code>msg</code></td><td>string</td><td>状态描述</td></tr>
+            <tr><td><code>data.marked</code></td><td>int</td><td>被标记为已读的邮件数量</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
   `;

@@ -330,6 +330,59 @@ class UserStore:
                         })
             return result
 
+    def admin_list_all_gmail_accounts(self):
+        """管理员: 列出所有用户的主邮箱(含 owner 信息)，token 脱敏"""
+        with self._lock:
+            data = self._load_users()
+            result = []
+            for u in data["users"]:
+                for ga in u.get("gmail_accounts", []):
+                    result.append({
+                        "id": ga["id"],
+                        "email": ga["email"],
+                        "is_public": ga.get("is_public", False),
+                        "created_at": ga.get("created_at", ""),
+                        "token_masked": (ga.get("token", "")[:4] + "****" + ga.get("token", "")[-4:]) if len(ga.get("token", "")) > 8 else "****",
+                        "owner_id": u["id"],
+                        "owner_username": u["username"],
+                    })
+            return result
+
+    def admin_update_gmail_account(self, user_id, ga_id, email=None, token=None, is_public=None):
+        """管理员: 修改任意用户的主邮箱"""
+        with self._lock:
+            data = self._load_users()
+            for u in data["users"]:
+                if u["id"] != user_id:
+                    continue
+                for ga in u.get("gmail_accounts", []):
+                    if ga["id"] == ga_id:
+                        if email is not None:
+                            ga["email"] = email
+                        if token is not None:
+                            ga["token"] = token
+                        if is_public is not None:
+                            ga["is_public"] = is_public
+                        self._save_users(data)
+                        return self._safe_user(u)
+        return None
+
+    def admin_delete_gmail_account(self, user_id, ga_id):
+        """管理员: 删除任意用户的主邮箱"""
+        with self._lock:
+            data = self._load_users()
+            for u in data["users"]:
+                if u["id"] != user_id:
+                    continue
+                before = len(u.get("gmail_accounts", []))
+                u["gmail_accounts"] = [ga for ga in u.get("gmail_accounts", []) if ga["id"] != ga_id]
+                if u.get("alias") and u["alias"].get("gmail_account_id") == ga_id:
+                    u["alias"] = None
+                if len(u["gmail_accounts"]) < before:
+                    self._save_users(data)
+                    return self._safe_user(u)
+        return None
+
     def get_gmail_account_raw(self, user_id, ga_id):
         """获取原始邮箱账号(含 token)，用于查询时获取凭据"""
         with self._lock:

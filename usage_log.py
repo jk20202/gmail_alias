@@ -2,6 +2,8 @@ import json
 import os
 import threading
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -37,14 +39,19 @@ class UsageLog:
                 "alias": alias,
                 "action": action,
                 "detail": detail,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(SHANGHAI_TZ).isoformat(),
             }
             data["logs"].append(entry)
-            cutoff = datetime.now() - timedelta(days=RETENTION_DAYS)
-            data["logs"] = [
-                l for l in data["logs"]
-                if datetime.fromisoformat(l["timestamp"]) > cutoff
-            ]
+            cutoff = datetime.now(SHANGHAI_TZ) - timedelta(days=RETENTION_DAYS)
+            def _parse_ts(ts):
+                try:
+                    dt = datetime.fromisoformat(ts)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=SHANGHAI_TZ)
+                    return dt
+                except Exception:
+                    return cutoff
+            data["logs"] = [l for l in data["logs"] if _parse_ts(l["timestamp"]) > cutoff]
             self._save(data)
             return entry
 
@@ -57,7 +64,15 @@ class UsageLog:
             if action:
                 logs = [l for l in logs if l["action"] == action]
             logs = sorted(logs, key=lambda x: x["timestamp"], reverse=True)
-            return logs[:limit]
+            logs = logs[:limit]
+            for l in logs:
+                ts = l.get("timestamp", "")
+                try:
+                    dt = datetime.fromisoformat(ts)
+                    l["time_display"] = dt.strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    l["time_display"] = ts
+            return logs
 
     def stats_summary(self):
         with self._lock:
@@ -70,6 +85,13 @@ class UsageLog:
                 by_user[u] = by_user.get(u, 0) + 1
                 a = l["alias"] or "(无别名)"
                 by_alias[a] = by_alias.get(a, 0) + 1
+            for l in logs:
+                ts = l.get("timestamp", "")
+                try:
+                    dt = datetime.fromisoformat(ts)
+                    l["time_display"] = dt.strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    l["time_display"] = ts
             return {
                 "total_calls": len(logs),
                 "by_user": by_user,

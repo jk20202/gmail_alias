@@ -212,7 +212,7 @@ async def admin_stats(admin=Depends(require_admin)):
     return {
         "code": 0, "msg": "success",
         "data": {
-            "summary": usage_log.stats_summary(),
+            "summary": {**usage_log.stats_summary(), "gmail_account_count": sum(len(u.get("gmail_accounts", [])) for u in user_store.list_users())},
             "logs": usage_log.list(limit=500),
         }
     }
@@ -229,6 +229,36 @@ async def admin_update_settings(req: SettingsUpdate, admin=Depends(require_admin
 async def get_settings():
     # 公开接口：仅返回注册开关布尔值，供登录页判断是否展示注册入口
     return {"code": 0, "msg": "success", "data": {"allow_registration": user_store.get_registration_allowed()}}
+
+
+@app.get("/api/admin/gmail_accounts")
+async def admin_list_all_gmail_accounts(admin=Depends(require_admin)):
+    """管理员: 列出所有用户绑定的主邮箱"""
+    return {"code": 0, "msg": "success", "data": user_store.admin_list_all_gmail_accounts()}
+
+
+@app.put("/api/admin/users/{user_id}/gmail_accounts/{ga_id}")
+async def admin_update_gmail_account(user_id: str, ga_id: str, req: GmailAccountUpdate, admin=Depends(require_admin)):
+    """管理员: 修改任意用户的主邮箱"""
+    if req.email is not None and "@" not in req.email:
+        raise HTTPException(status_code=400, detail="邮箱格式错误")
+    if req.token is not None and len(req.token) < 8:
+        raise HTTPException(status_code=400, detail="应用密码长度不足")
+    updated = user_store.admin_update_gmail_account(user_id, ga_id, req.email, req.token, req.is_public)
+    if not updated:
+        raise HTTPException(status_code=404, detail="邮箱账号不存在")
+    usage_log.add(admin["id"], admin["username"], "", "admin_update_gmail", f"管理员修改了用户 {user_id} 的邮箱 {ga_id}")
+    return {"code": 0, "msg": "success", "data": updated}
+
+
+@app.delete("/api/admin/users/{user_id}/gmail_accounts/{ga_id}")
+async def admin_delete_gmail_account(user_id: str, ga_id: str, admin=Depends(require_admin)):
+    """管理员: 删除任意用户的主邮箱"""
+    updated = user_store.admin_delete_gmail_account(user_id, ga_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail="邮箱账号不存在")
+    usage_log.add(admin["id"], admin["username"], "", "admin_delete_gmail", f"管理员删除了用户 {user_id} 的邮箱 {ga_id}")
+    return {"code": 0, "msg": "success", "data": updated}
 
 
 # ==================== Account Self-Service ====================
