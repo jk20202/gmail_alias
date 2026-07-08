@@ -12,12 +12,12 @@ binding = "ASSETS"
 [[d1_databases]]
 binding = "DB"
 database_name = "mail_alias"
-database_id = "REPLACE_WITH_YOUR_D1_ID"
+database_id = "f7b79fd7-055d-4ab7-9151-7f3cbe153a49"
 
 # KV(会话/OAuth state 缓存)
 [[kv_namespaces]]
 binding = "KV"
-id = "REPLACE_WITH_YOUR_KV_ID"
+id = "351359d5a2614b28b273465a29bdfd2d"
 
 # 变量(可在 wrangler secret 中覆盖,或在此明文填入测试值)
 [vars]
