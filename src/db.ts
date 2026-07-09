@@ -438,6 +438,12 @@ export async function deleteWebhook(env: Env, id: string, userId: string): Promi
   return r.meta.changes > 0;
 }
 
+// 删除某用户的全部 webhook (用于"每用户仅一个 webhook"约束 + 换别名时清理)
+export async function deleteWebhooksByUser(env: Env, userId: string): Promise<number> {
+  const r = await env.DB.prepare('DELETE FROM webhooks WHERE user_id = ?').bind(userId).run();
+  return r.meta.changes || 0;
+}
+
 // 按邮箱账号查所有活跃订阅(系统推送时用)
 export async function getWebhooksForAccount(env: Env, mailAccountId: string): Promise<Webhook[]> {
   const { results } = await env.DB.prepare(

@@ -281,6 +281,11 @@ pre.code .num { color: #fcd34d; }
 .apikey-row { display: flex; gap: 8px; align-items: center; }
 .apikey-row .mono { flex: 1; word-break: break-all; }
 
+/* 复制图标按钮 (别名地址后) */
+.copy-icon-btn { background: none; border: none; cursor: pointer; padding: 4px; color: var(--text-light);
+  display: inline-flex; align-items: center; border-radius: 4px; vertical-align: middle; }
+.copy-icon-btn:hover { color: var(--primary); background: var(--bg-hover, #f1f5f9); }
+
 /* 账户页已绑定邮箱列表行 */
 .account-mail-row {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
@@ -758,7 +763,7 @@ function refreshCurrentAlias() {
   const el = document.getElementById('currentAlias');
   if (!el) return;
   if (a) {
-    el.innerHTML = `当前别名：<span class="mono">${esc(a.full)}</span> <span class="badge badge-success">已设置</span> (更新于 ${fmtTime(a.updated_at)})`;
+    el.innerHTML = `当前别名：<span class="mono">${esc(a.full)}</span> <button class="copy-icon-btn" title="复制别名地址" onclick="copyText('${esc(a.full)}')"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button> <span class="badge badge-success">已设置</span> (更新于 ${fmtTime(a.updated_at)})`;
     // 回填到表单
     const sel = document.getElementById('aliasAccount');
     if (sel && a.mail_account_id) sel.value = a.mail_account_id;
@@ -910,9 +915,17 @@ function viewAccountHtml() {
         ${u.alias ? `
         <div class="info-item" style="flex-direction:column; align-items:stretch">
           <span class="label" style="margin-bottom:6px">当前别名</span>
-          <div class="apikey-box"><span class="mono" style="flex:1">${esc(u.alias.full)}</span></div>
+          <div class="apikey-box"><span class="mono" style="flex:1">${esc(u.alias.full)}</span><button class="copy-icon-btn" title="复制别名地址" onclick="copyText('${esc(u.alias.full)}')"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button></div>
           <div class="form-hint">标签: ${esc(u.alias.label)} · 更新于 ${fmtTime(u.alias.updated_at)}</div>
         </div>` : ''}
+        <div class="info-item" style="flex-direction:column; align-items:stretch">
+          <span class="label" style="margin-bottom:6px">API Key <span class="form-hint" style="font-weight:normal">编程调用接口的密钥,重新生成后旧密钥立即失效</span></span>
+          <div class="apikey-row">
+            <span class="mono" id="apiKeyText">${esc(u.api_key)}</span>
+            <button class="btn btn-secondary btn-sm" onclick="copyText('${esc(u.api_key)}')">复制</button>
+            <button class="btn btn-danger btn-sm" onclick="regenApiKey()">重新生成</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -935,18 +948,6 @@ function viewAccountHtml() {
         </div>
         <div style="margin-top:8px">
           <button class="btn" onclick="changeMyPassword()">保存修改</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-header"><h3>API Key</h3></div>
-      <div class="card-body">
-        <p class="form-hint" style="margin-bottom:12px">编程调用接口时使用的密钥,重新生成后旧密钥立即失效</p>
-        <div class="apikey-row">
-          <span class="mono" id="apiKeyText">${esc(u.api_key)}</span>
-          <button class="btn btn-secondary btn-sm" onclick="copyText('${esc(u.api_key)}')">复制</button>
-          <button class="btn btn-danger btn-sm" onclick="regenApiKey()">重新生成</button>
         </div>
       </div>
     </div>
@@ -1218,16 +1219,43 @@ function viewWebhookHtml() {
 
 async function initWebhookPage() {
   try {
+    // 监听邮箱:自己拥有的邮箱(可监听全部) + 公开邮箱(仅限自己的别名)
     const list = await api('/api/account/mail_accounts/available');
     const sel = document.getElementById('whAccount');
     if (!list || !list.length) {
       sel.innerHTML = '<option value="">无可用邮箱</option>';
     } else {
-      sel.innerHTML = list.map(a =>
-        `<option value="${esc(a.id)}">${esc(a.email)} (${a.provider})</option>`).join('');
+      sel.innerHTML = list.map(a => {
+        const own = a.is_own;
+        // 自己的邮箱:可监听整箱;别人的公开邮箱:仅限自己的别名
+        const tag = own ? '可监听整箱' : '仅限我的别名';
+        return `<option value="${esc(a.id)}" data-own="${own ? 1 : 0}">${esc(a.email)} (${esc(a.provider)} · ${tag})</option>`;
+      }).join('');
     }
+    onWhAccountChange();
+    sel.onchange = onWhAccountChange;
   } catch (err) { toast(err.message, 'error'); }
   loadWebhooks();
+}
+
+// 选中监听邮箱后:若是别人的公开邮箱,自动锁定 target_alias 为自己的别名(且禁用编辑)
+function onWhAccountChange() {
+  const sel = document.getElementById('whAccount');
+  const aliasInput = document.getElementById('whAlias');
+  if (!sel || !aliasInput) return;
+  const opt = sel.options[sel.selectedIndex];
+  const isOwn = opt && opt.dataset.own === '1';
+  const aliasFull = State.user && State.user.alias ? State.user.alias.full : '';
+  if (isOwn) {
+    // 自己的邮箱:别名可选
+    aliasInput.disabled = false;
+    aliasInput.placeholder = '仅推送命中此别名的邮件,留空表示全部';
+  } else {
+    // 别人的公开邮箱:强制锁定为自己的别名
+    aliasInput.value = aliasFull;
+    aliasInput.disabled = true;
+    aliasInput.placeholder = '已锁定为你的别名';
+  }
 }
 
 async function loadWebhooks() {
@@ -1281,7 +1309,9 @@ async function createWebhook() {
   try {
     await api('/api/webhooks', { method: 'POST', body });
     toast('订阅创建成功', 'success');
-    ['whUrl', 'whAlias', 'whSecret'].forEach(id => document.getElementById(id).value = '');
+    // 每用户仅一个 webhook,旧的已被后端清除,刷新列表;别名框按邮箱类型重置
+    ['whUrl', 'whSecret'].forEach(id => document.getElementById(id).value = '');
+    onWhAccountChange();
     loadWebhooks();
   } catch (err) { toast(err.message, 'error'); }
 }

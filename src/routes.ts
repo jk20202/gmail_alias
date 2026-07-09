@@ -377,6 +377,8 @@ export async function accountSetAlias(ctx: Ctx): Promise<Response> {
   if (err) return fail(err);
   if (!alias) return fail('用户不存在', 404);
   await db.addLog(ctx.env, user.id, user.username, alias.full, 'set_alias', '设置了别名');
+  // 别名变更后,旧 webhook 的 target_alias 已失效,自动清除该用户全部 webhook
+  await db.deleteWebhooksByUser(ctx.env, user.id);
   const updated = await db.getUserById(ctx.env, user.id);
   return ok(updated);
 }
@@ -498,11 +500,21 @@ export async function webhookCreate(ctx: Ctx): Promise<Response> {
   if (!url) return fail('请填写回调 URL');
   if (!/^https?:\/\//.test(url)) return fail('URL 必须以 http(s):// 开头');
   if (!events) return fail('请选择订阅事件');
-  // 越权防护:校验邮箱账号归属
+  // 越权防护 + 权限逻辑:
+  //  - 自己拥有的邮箱:可监听整个邮箱(target_alias 可选)
+  //  - 公开但非自己的邮箱:仅当 target_alias 等于自己设置的别名 full 时允许(别人只能订阅自己的别名)
   const account = await db.getMailAccountRaw(ctx.env, user.id, mail_account_id);
   if (!account) return fail('无权操作该邮箱', 403);
+  const isOwner = account.user_id === user.id;
+  if (!isOwner) {
+    // 非所有者:必须指定别名,且别名必须是当前用户已设置的别名
+    if (!target_alias) return fail('订阅他人公开邮箱时必须指定自己的别名');
+    if (!user.alias || user.alias.full !== target_alias) return fail('目标别名必须是您已设置的别名', 403);
+  }
   // SSRF 防护:拒绝内网/元数据地址
   if (isPrivateOrUnsafeUrl(url)) return fail('不允许的回调地址');
+  // 单 webhook 约束:每用户仅保留一个订阅,创建前清除旧的(换别名时也会自动清)
+  await db.deleteWebhooksByUser(ctx.env, user.id);
   const id = await db.createWebhook(ctx.env, user.id, mail_account_id, target_alias || null, url, secret || null, events);
   await db.addLog(ctx.env, user.id, user.username, '', 'create_webhook', `创建了 Webhook ${url}`);
   return ok({ id });
@@ -537,7 +549,8 @@ export async function webhookDelete(ctx: Ctx): Promise<Response> {
 
 export async function webhookTest(ctx: Ctx): Promise<Response> {
   const user = await requireSession(ctx);
-  const id = ctx.url.pathname.split('/').pop()!;
+  // 路径 /api/webhooks/:id/test, id 为倒数第二段(不能 pop,会拿到 'test')
+  const id = ctx.url.pathname.split('/').slice(-2, -1)[0];
   const list = await db.listWebhooks(ctx.env, user.id);
   const wh = list.find(w => w.id === id);
   if (!wh) return fail('Webhook 不存在', 404);
