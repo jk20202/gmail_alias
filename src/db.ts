@@ -341,6 +341,29 @@ export async function listLogs(env: Env, limit = 500): Promise<LogRow[]> {
   return results || [];
 }
 
+// 分页查询日志(每页 100 条,支持跳转)
+export async function listLogsPaged(env: Env, page: number, pageSize = 100): Promise<{ logs: LogRow[]; total: number; page: number; page_size: number; total_pages: number }> {
+  const offset = Math.max(0, (page - 1) * pageSize);
+  const countRow = await env.DB.prepare('SELECT COUNT(*) as cnt FROM usage_logs').first<{ cnt: number }>();
+  const total = countRow?.cnt || 0;
+  const { results } = await env.DB.prepare(
+    'SELECT * FROM usage_logs ORDER BY created_at DESC LIMIT ? OFFSET ?'
+  ).bind(pageSize, offset).all<LogRow>();
+  return {
+    logs: results || [],
+    total,
+    page,
+    page_size: pageSize,
+    total_pages: Math.max(1, Math.ceil(total / pageSize)),
+  };
+}
+
+// 直接更新密码 hash (用户自助修改密码时调用)
+export async function updateUserPassword(env: Env, userId: string, passwordHash: string): Promise<void> {
+  await env.DB.prepare('UPDATE users SET password = ? WHERE id = ?')
+    .bind(passwordHash, userId).run();
+}
+
 export async function statsSummary(env: Env): Promise<{ total_calls: number; by_user: Record<string, number>; by_alias: Record<string, number> }> {
   const logs = await listLogs(env, 10000);
   const byUser: Record<string, number> = {};

@@ -1,0 +1,49 @@
+name: Deploy to Cloudflare
+
+# 当 cloudflare 分支有 push 时自动触发部署
+on:
+  push:
+    branches: [cloudflare]
+    paths:
+      - 'src/**'
+      - 'static/**'
+      - 'schema.sql'
+      - 'wrangler.toml'
+      - 'package.json'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:  # 支持手动触发
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Build & Deploy Worker
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Wrangler
+        run: npm install -g wrangler@3
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Type Check
+        run: npx tsc --noEmit
+
+      - name: Deploy Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx wrangler deploy
+
+      - name: Notify
+        if: always()
+        run: |
+          echo "Deploy status: ${{ job.status }}"
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "Worker deployed to https://mail-alias.jkjk857857.workers.dev"
+          fi

@@ -262,6 +262,60 @@ pre.code .num { color: #fcd34d; }
 
 .hidden { display: none !important; }
 
+/* 卡片纵向堆叠(账户页用) */
+.card-stack { display: flex; flex-direction: column; gap: 16px; }
+
+/* 骰子/图标按钮(随机生成别名用) */
+.dice-btn {
+  width: 38px; height: 38px; flex: 0 0 38px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: #f1f5f9; cursor: pointer; transition: background .15s, border-color .15s;
+}
+.dice-btn:hover { background: #e2e8f0; border-color: var(--text-lighter); }
+.dice-btn:active { transform: translateY(1px); }
+.dice-btn svg { width: 18px; height: 18px; display: block; }
+.dice-btn path { fill: var(--text); }
+
+/* 账户页 API Key 行 */
+.apikey-row { display: flex; gap: 8px; align-items: center; }
+.apikey-row .mono { flex: 1; word-break: break-all; }
+
+/* 账户页已绑定邮箱列表行 */
+.account-mail-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 0; border-bottom: 1px dashed var(--border);
+}
+.account-mail-row:last-child { border-bottom: none; }
+.account-mail-row .email-text { flex: 1; min-width: 160px; word-break: break-all; }
+
+/* API 文档代码块切换 tab */
+.code-tabs { position: relative; margin: 12px 0; }
+.tab-bar { display: inline-flex; gap: 4px; margin-bottom: -1px; position: relative; z-index: 1; }
+.tab-bar .tab {
+  padding: 5px 14px; font-size: 12px; font-weight: 500; cursor: pointer;
+  border: 1px solid var(--border); border-bottom: none; border-radius: 6px 6px 0 0;
+  background: #f1f5f9; color: var(--text); transition: background .15s, color .15s;
+}
+.tab-bar .tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+.code-pane { margin-top: 0; }
+.code-pane .code-block-wrap { margin: 0; }
+.code-pane .code-block { border-radius: 0 8px 8px 8px; }
+
+/* 分页控件 */
+.pagination {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  flex-wrap: wrap; margin-top: 16px; padding-top: 16px;
+  border-top: 1px solid var(--border); font-size: 13px; color: var(--text-light);
+}
+.pagination .btn { padding: 4px 12px; font-size: 12px; }
+.pagination .page-info { min-width: 160px; text-align: center; }
+.pagination input[type=number] {
+  width: 64px; padding: 4px 6px; text-align: center;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px;
+}
+.pagination input[type=number]:focus { outline: none; border-color: var(--primary); }
+
 /* 响应式 */
 @media (max-width: 768px) {
   .app-header-inner { flex-wrap: wrap; height: auto; padding: 10px 16px; gap: 8px; }
@@ -272,6 +326,7 @@ pre.code .num { color: #fcd34d; }
   .login-card { padding: 28px 24px; }
   .form-row { flex-direction: column; }
   .form-row > .form-group { min-width: 0; }
+  .apikey-row { flex-direction: column; align-items: stretch; }
 }
 </style>
 </head>
@@ -594,13 +649,17 @@ function viewMailHtml() {
         <div class="form-row">
           <div class="form-group" style="flex:2">
             <label class="form-label">选择邮箱</label>
-            <select id="aliasAccount" class="form-control"><option value="">加载中...</option></select>
+            <select id="aliasAccount" class="form-control" style="height:38px;box-sizing:border-box"><option value="">加载中...</option></select>
           </div>
           <div class="form-group" style="flex:2">
             <label class="form-label">别名标签</label>
             <div style="display:flex;gap:8px">
-              <input type="text" id="aliasLabel" class="form-control" placeholder="如 newsletter">
-              <button class="btn btn-secondary" onclick="genRandomLabel()">随机生成</button>
+              <input type="text" id="aliasLabel" class="form-control" placeholder="如 newsletter" style="height:38px;box-sizing:border-box">
+              <button class="dice-btn" title="随机生成" onclick="genRandomLabel()" aria-label="随机生成">
+                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zM8 17a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm0-7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm4 3.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM16 17a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm0-7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/>
+                </svg>
+              </button>
             </div>
           </div>
           <div class="form-group" style="flex:1; display:flex; align-items:flex-end">
@@ -828,8 +887,8 @@ function viewAccountHtml() {
   const u = State.user;
   return `
   <div class="page-title">我的账户</div>
-  <div class="page-desc">管理个人信息、API Key 与 OAuth 邮箱绑定</div>
-  <div class="grid-2">
+  <div class="page-desc">管理个人信息、API Key、OAuth 邮箱绑定与登录密码</div>
+  <div class="card-stack">
     <div class="card">
       <div class="card-header"><h3>基本信息</h3></div>
       <div class="card-body">
@@ -845,14 +904,6 @@ function viewAccountHtml() {
           <span class="label">创建时间</span>
           <span class="value">${fmtTime(u.created_at)}</span>
         </div>
-        <div class="info-item" style="flex-direction:column; align-items:stretch">
-          <span class="label" style="margin-bottom:6px">API Key</span>
-          <div class="apikey-box">
-            <span class="mono" id="apiKeyText" style="flex:1">${esc(u.api_key)}</span>
-            <button class="btn btn-secondary btn-sm" onclick="copyText('${esc(u.api_key)}')">复制</button>
-          </div>
-          <button class="btn btn-danger btn-sm" style="margin-top:8px" onclick="regenApiKey()">重新生成 API Key</button>
-        </div>
         ${u.alias ? `
         <div class="info-item" style="flex-direction:column; align-items:stretch">
           <span class="label" style="margin-bottom:6px">当前别名</span>
@@ -861,6 +912,19 @@ function viewAccountHtml() {
         </div>` : ''}
       </div>
     </div>
+
+    <div class="card">
+      <div class="card-header"><h3>API Key</h3></div>
+      <div class="card-body">
+        <p class="form-hint" style="margin-bottom:12px">编程调用接口时使用的密钥,重新生成后旧密钥立即失效</p>
+        <div class="apikey-row">
+          <span class="mono" id="apiKeyText">${esc(u.api_key)}</span>
+          <button class="btn btn-secondary btn-sm" onclick="copyText('${esc(u.api_key)}')">复制</button>
+          <button class="btn btn-danger btn-sm" onclick="regenApiKey()">重新生成</button>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <div class="card-header"><h3>OAuth 邮箱绑定</h3></div>
       <div class="card-body">
@@ -871,6 +935,29 @@ function viewAccountHtml() {
         </div>
         <h4 style="font-size:13px; color:var(--text-light); margin-bottom:8px">已绑定的邮箱</h4>
         <div id="myAccounts"><div class="loading"><span class="spinner"></span> 加载中...</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h3>修改密码</h3></div>
+      <div class="card-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">原密码 <span class="req">*</span></label>
+            <input type="password" id="oldPassword" class="form-control" placeholder="请输入当前密码">
+          </div>
+          <div class="form-group">
+            <label class="form-label">新密码 <span class="req">*</span></label>
+            <input type="password" id="newPassword" class="form-control" placeholder="至少 6 个字符">
+          </div>
+          <div class="form-group">
+            <label class="form-label">确认新密码 <span class="req">*</span></label>
+            <input type="password" id="confirmPassword" class="form-control" placeholder="再次输入新密码">
+          </div>
+        </div>
+        <div style="margin-top:8px">
+          <button class="btn" onclick="changeMyPassword()">保存修改</button>
+        </div>
       </div>
     </div>
   </div>`;
@@ -891,14 +978,11 @@ async function loadMyAccounts() {
       return;
     }
     box.innerHTML = list.map(a => `
-      <div class="mail-item" style="margin-bottom:8px">
-        <div class="mail-head" style="cursor:default">
-          <span class="badge ${a.provider === 'gmail' ? 'badge-primary' : 'badge-warning'}">${esc(a.provider)}</span>
-          <span class="from">${esc(a.email)}</span>
-          ${a.is_public ? '<span class="badge badge-gray">公开</span>' : ''}
-          <span style="margin-left:auto"></span>
-          <button class="btn btn-danger btn-sm" onclick="deleteAccount('${esc(a.id)}','${esc(a.email)}')">删除</button>
-        </div>
+      <div class="account-mail-row">
+        <span class="badge ${a.provider === 'gmail' ? 'badge-primary' : 'badge-warning'}">${esc(a.provider)}</span>
+        <span class="email-text">${esc(a.email)}</span>
+        ${a.is_public ? '<span class="badge badge-gray">公开</span>' : ''}
+        <button class="btn btn-danger btn-sm" onclick="deleteAccount('${esc(a.id)}','${esc(a.email)}')">删除</button>
       </div>`).join('');
   } catch (err) {
     box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
@@ -916,6 +1000,27 @@ async function regenApiKey() {
       toast('API Key 已重新生成', 'success');
     } catch (err) { toast(err.message, 'error'); }
   });
+}
+
+// 用户自助修改密码
+async function changeMyPassword() {
+  const oldPassword = document.getElementById('oldPassword').value;
+  const newPassword = document.getElementById('newPassword').value;
+  const confirmPassword = document.getElementById('confirmPassword').value;
+  // 前端校验: 原密码非空、新密码长度≥6、两次输入一致
+  if (!oldPassword) { toast('请输入原密码', 'warning'); return; }
+  if (!newPassword || newPassword.length < 6) { toast('新密码至少 6 个字符', 'warning'); return; }
+  if (newPassword !== confirmPassword) { toast('两次输入的新密码不一致', 'warning'); return; }
+  try {
+    await api('/api/auth/change_password', {
+      method: 'POST',
+      body: { old_password: oldPassword, new_password: newPassword }
+    });
+    toast('密码修改成功', 'success');
+    document.getElementById('oldPassword').value = '';
+    document.getElementById('newPassword').value = '';
+    document.getElementById('confirmPassword').value = '';
+  } catch (err) { toast(err.message, 'error'); }
 }
 
 // 删除邮箱
@@ -1130,6 +1235,27 @@ function codeBlock(code) {
   <button class="copy-btn" onclick="copyCode(this, ${attr})">复制</button>
   <pre class="code-block"><code>${esc(code)}</code></pre>
 </div>`;
+}
+
+// 代码块切换 tab 容器: curl / Python 两段代码各自带复制按钮, 默认显示 curl
+function codeTabs(curlCode, pythonCode) {
+  return `<div class="code-tabs">
+  <div class="tab-bar">
+    <button class="tab active" onclick="switchCodeTab(this, 'curl')">curl</button>
+    <button class="tab" onclick="switchCodeTab(this, 'python')">Python</button>
+  </div>
+  <div class="code-pane curl">${codeBlock(curlCode)}</div>
+  <div class="code-pane python" style="display:none">${codeBlock(pythonCode)}</div>
+</div>`;
+}
+
+// 切换 curl / Python 代码块显隐
+function switchCodeTab(btn, type) {
+  const wrap = btn.closest('.code-tabs');
+  wrap.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  wrap.querySelectorAll('.code-pane').forEach(p => p.style.display = 'none');
+  wrap.querySelector('.code-pane.' + type).style.display = 'block';
 }
 
 // 端点标题组件: 方法标签 + 路径 + 简短描述
@@ -1377,10 +1503,8 @@ if __name__ == "__main__":
       ['end_time', 'string', '否', '结束时间 ISO 8601'],
       ['limit', 'number', '否', '返回数量,默认 50,上限 100'],
     ])}
-    <h5>curl 示例</h5>
-    ${codeBlock(curlFetch)}
-    <h5>Python 示例</h5>
-    ${codeBlock(pyFetch)}
+    <h5>请求示例(curl / Python)</h5>
+    ${codeTabs(curlFetch, pyFetch)}
     <h5>响应示例</h5>
     ${codeBlock(respFetch)}
   </div>
@@ -1394,10 +1518,8 @@ if __name__ == "__main__":
       ['sender', 'string', '否', '按发件人筛选,限定标记范围'],
       ['subject', 'string', '否', '按主题筛选,限定标记范围'],
     ])}
-    <h5>curl 示例</h5>
-    ${codeBlock(curlMarkRead)}
-    <h5>Python 示例</h5>
-    ${codeBlock(pyMarkRead)}
+    <h5>请求示例(curl / Python)</h5>
+    ${codeTabs(curlMarkRead, pyMarkRead)}
     <h5>响应示例</h5>
     ${codeBlock(respMarkRead)}
   </div>
@@ -1410,10 +1532,8 @@ if __name__ == "__main__":
       ['key', 'string', '是', 'API Key(URL 查询参数)'],
       ['account_id', 'string', '是', '邮箱账号 ID(在「我的账户」页可查看)'],
     ])}
-    <h5>curl 示例</h5>
-    ${codeBlock(curlPoll)}
-    <h5>Python 示例</h5>
-    ${codeBlock(pyPoll)}
+    <h5>请求示例(curl / Python)</h5>
+    ${codeTabs(curlPoll, pyPoll)}
     <h5>响应示例</h5>
     ${codeBlock(respPoll)}
   </div>
@@ -1599,7 +1719,7 @@ function viewSettingsHtml() {
   </div>
   <div class="section">
     <div class="card">
-      <div class="card-header"><h3>调用日志 (最近 500 条)</h3></div>
+      <div class="card-header"><h3>调用日志</h3></div>
       <div class="card-body">
         <div id="logsBox" class="table-wrap"><div class="loading"><span class="spinner"></span> 加载中...</div></div>
       </div>
@@ -1615,6 +1735,8 @@ async function initSettingsPage() {
     document.getElementById('setAllowRegText').textContent = s.allow_registration ? '已开启' : '已关闭';
   } catch (err) { toast(err.message, 'error'); }
   await loadStats();
+  // 日志改分页加载, 默认拉取第 1 页
+  await loadLogs(1);
 }
 
 async function saveSettings() {
@@ -1636,26 +1758,64 @@ async function loadStats() {
       <div class="stat-card"><div class="num">${s.total_calls || 0}</div><div class="lbl">总调用次数</div></div>
       <div class="stat-card"><div class="num">${userCount}</div><div class="lbl">活跃用户数</div></div>
       <div class="stat-card"><div class="num">${s.mail_account_count || 0}</div><div class="lbl">邮箱账号数</div></div>`;
-    const logs = data.logs || [];
-    const box = document.getElementById('logsBox');
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+// 分页加载调用日志, 仅刷新日志表格区域, 不动整页
+async function loadLogs(page) {
+  page = Math.max(1, parseInt(page, 10) || 1);
+  const box = document.getElementById('logsBox');
+  if (!box) return;
+  box.innerHTML = '<div class="loading"><span class="spinner"></span> 加载中...</div>';
+  try {
+    const data = await api('/api/admin/logs?page=' + page);
+    const logs = (data && data.logs) || [];
+    const total = (data && data.total) || 0;
+    const totalPages = (data && data.total_pages) || 1;
+    const currentPage = (data && data.page) || page;
+    // 缓存当前页与总页数, 供跳转按钮校验
+    State.logPage = currentPage;
+    State.logTotalPages = totalPages;
     if (!logs.length) {
       box.innerHTML = '<div class="mail-empty">暂无日志</div>';
       return;
     }
-    box.innerHTML = `<table class="table">
-      <thead><tr><th>时间</th><th>用户</th><th>目标</th><th>动作</th><th>详情</th></tr></thead>
-      <tbody>${logs.slice(0, 200).map(l => `
+    const rows = logs.map(l => `
         <tr>
           <td>${fmtTime(l.created_at)}</td>
           <td>${esc(l.username)}</td>
           <td class="mono" style="font-size:12px">${esc(l.target || '-')}</td>
           <td><span class="badge badge-gray">${esc(l.action)}</span></td>
           <td>${esc(l.detail || '-')}</td>
-        </tr>`).join('')}</tbody>
-    </table>`;
+        </tr>`).join('');
+    box.innerHTML = `<table class="table">
+      <thead><tr><th>时间</th><th>用户</th><th>目标</th><th>动作</th><th>详情</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="pagination">
+      <button class="btn btn-sm" onclick="loadLogs(1)">首页</button>
+      <button class="btn btn-sm" onclick="loadLogs(${currentPage - 1})" ${currentPage <= 1 ? 'disabled' : ''}>上一页</button>
+      <span class="page-info">第 ${currentPage} / ${totalPages} 页 (共 ${total} 条)</span>
+      <button class="btn btn-sm" onclick="loadLogs(${currentPage + 1})" ${currentPage >= totalPages ? 'disabled' : ''}>下一页</button>
+      <input type="number" min="1" max="${totalPages}" value="${currentPage}" id="logPageInput">
+      <button class="btn btn-sm" onclick="jumpLogPage()">跳转</button>
+    </div>`;
   } catch (err) {
-    toast(err.message, 'error');
+    box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
   }
+}
+
+// 跳转到指定页码日志
+function jumpLogPage() {
+  const input = document.getElementById('logPageInput');
+  if (!input) return;
+  let page = parseInt(input.value, 10);
+  if (!page || page < 1) { toast('请输入有效页码', 'warning'); return; }
+  const max = State.logTotalPages || 1;
+  if (page > max) { toast('页码超出范围, 最大 ' + max + ' 页', 'warning'); return; }
+  loadLogs(page);
 }
 
 /* ============================================================

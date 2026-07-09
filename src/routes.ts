@@ -114,6 +114,22 @@ export async function authLogout(ctx: Ctx): Promise<Response> {
   return ok(null);
 }
 
+// 用户自助修改密码
+export async function accountChangePassword(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const { old_password, new_password } = ctx.body;
+  if (!old_password || !new_password) return fail('请填写原密码和新密码');
+  if (new_password.length < 6) return fail('新密码至少 6 个字符');
+  const raw = await db.getUserByUsername(ctx.env, user.username);
+  if (!raw) return fail('用户不存在', 404);
+  const oldHash = await sha256(old_password);
+  if (raw.password !== oldHash) return fail('原密码错误', 401);
+  const newHash = await sha256(new_password);
+  await db.updateUserPassword(ctx.env, user.id, newHash);
+  await db.addLog(ctx.env, user.id, user.username, '', 'change_password', '修改了密码');
+  return ok(null);
+}
+
 export async function authMe(ctx: Ctx): Promise<Response> {
   const user = await requireSession(ctx);
   return ok(user);
@@ -160,12 +176,19 @@ export async function adminDeleteUser(ctx: Ctx): Promise<Response> {
 
 export async function adminStats(ctx: Ctx): Promise<Response> {
   await requireAdmin(ctx);
-  const [summary, logs, accounts] = await Promise.all([
+  const [summary, accounts] = await Promise.all([
     db.statsSummary(ctx.env),
-    db.listLogs(ctx.env, 500),
     db.adminListAllAccounts(ctx.env),
   ]);
-  return ok({ summary: { ...summary, mail_account_count: accounts.length }, logs });
+  return ok({ summary: { ...summary, mail_account_count: accounts.length } });
+}
+
+// 分页查询日志 (每页 100 条)
+export async function adminLogs(ctx: Ctx): Promise<Response> {
+  await requireAdmin(ctx);
+  const page = parseInt(ctx.url.searchParams.get('page') || '1', 10);
+  const result = await db.listLogsPaged(ctx.env, page, 100);
+  return ok(result);
 }
 
 export async function adminUpdateSettings(ctx: Ctx): Promise<Response> {

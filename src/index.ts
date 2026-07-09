@@ -39,6 +39,7 @@ const ROUTE_TABLE: RouteEntry[] = [
   buildRoute('POST', '/api/auth/login',         routes.authLogin),
   buildRoute('POST', '/api/auth/register',      routes.authRegister),
   buildRoute('POST', '/api/auth/logout',        routes.authLogout),
+  buildRoute('POST', '/api/auth/change_password', routes.accountChangePassword),
   buildRoute('GET',  '/api/auth/me',            routes.authMe),
   // Admin - users
   buildRoute('GET',  '/api/admin/users',        routes.adminListUsers),
@@ -47,6 +48,7 @@ const ROUTE_TABLE: RouteEntry[] = [
   buildRoute('DELETE', '/api/admin/users/:id',  routes.adminDeleteUser),
   // Admin - 其他
   buildRoute('GET',  '/api/admin/stats',        routes.adminStats),
+  buildRoute('GET',  '/api/admin/logs',         routes.adminLogs),
   buildRoute('GET',  '/api/admin/settings',     routes.adminGetSettings),
   buildRoute('PUT',  '/api/admin/settings',     routes.adminUpdateSettings),
   buildRoute('GET',  '/api/admin/mail_accounts',     routes.adminListAllAccounts),
