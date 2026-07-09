@@ -81,19 +81,28 @@ export async function pollAndPush(env: Env, accountId: string): Promise<{ pushed
 }
 
 // ============ 发起一次推送 ============
+// 识别飞书/钉钉/企业微信等平台 URL,自动转换为对应的消息卡片格式
+// 其他 URL 保持原始 JSON 载荷推送
 export async function deliver(env: Env, webhook: Webhook, payload: WebhookPayload): Promise<boolean> {
-  const body = JSON.stringify(payload);
+  const platform = detectPlatform(webhook.url);
+  // body 和 headers 根据平台动态生成
+  const { body, contentType } = platform === 'feishu'
+    ? buildFeishuPayload(payload)
+    : platform === 'dingtalk'
+    ? buildDingtalkPayload(payload)
+    : { body: JSON.stringify(payload), contentType: 'application/json' };
+
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    'Content-Type': contentType,
     'User-Agent': 'MailAlias-Webhook/1.0',
   };
-  // 签名: HMAC-SHA256(body) base64url
-  if (webhook.secret) {
+  // 签名: HMAC-SHA256(body) base64url (飞书平台不使用此签名,仅对原始JSON接收方有效)
+  if (webhook.secret && platform === 'generic') {
     headers['X-Webhook-Signature'] = await hmacSha256(webhook.secret, body);
   }
-  // 5 秒超时
+  // 8 秒超时 (第三方平台可能稍慢)
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5000);
+  const timeout = setTimeout(() => controller.abort(), 8000);
   let success = false;
   let status = 0;
   let responseText = '';
@@ -109,6 +118,59 @@ export async function deliver(env: Env, webhook: Webhook, payload: WebhookPayloa
   }
   await logWebhookDelivery(env, webhook.id, body, status, responseText, success);
   return success;
+}
+
+// 识别推送平台类型 (根据 URL 域名)
+function detectPlatform(url: string): 'feishu' | 'dingtalk' | 'generic' {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (host === 'open.feishu.cn' || host.endsWith('.feishu.cn')) return 'feishu';
+    if (host === 'oapi.dingtalk.com') return 'dingtalk';
+    return 'generic';
+  } catch { return 'generic'; }
+}
+
+// 构建飞书群机器人消息 (text 类型,飞书机器人 API 要求 msg_type + content)
+function buildFeishuPayload(p: WebhookPayload): { body: string; contentType: string } {
+  const lines: string[] = [];
+  const eventLabel = p.event === 'test' ? '🔧 测试推送' : p.event === 'new_mail' ? '📬 新邮件' : '📬 邮件通知';
+  lines.push(eventLabel);
+  lines.push(`主邮箱: ${p.email || '(未指定)'}`);
+  if (p.to_alias) lines.push(`别名: ${p.to_alias}`);
+  lines.push(`数量: ${p.count}`);
+  if (p.emails && p.emails.length) {
+    lines.push('---');
+    for (const m of p.emails.slice(0, 10)) {
+      lines.push(`【${m.subject || '(无主题)'}】`);
+      lines.push(`发件人: ${m.from}`);
+      if (m.body) lines.push(`正文: ${m.body.slice(0, 150)}`);
+    }
+    if (p.emails.length > 10) lines.push(`... 还有 ${p.emails.length - 10} 封`);
+  }
+  const feishuBody = JSON.stringify({
+    msg_type: 'text',
+    content: { text: lines.join('\n') },
+  });
+  return { body: feishuBody, contentType: 'application/json' };
+}
+
+// 构建钉钉机器人消息 (text 类型,钉钉要求 text + content)
+function buildDingtalkPayload(p: WebhookPayload): { body: string; contentType: string } {
+  const lines: string[] = [];
+  lines.push(p.event === 'test' ? '测试推送' : '新邮件通知');
+  lines.push(`主邮箱: ${p.email || '(未指定)'}`);
+  if (p.to_alias) lines.push(`别名: ${p.to_alias}`);
+  lines.push(`数量: ${p.count}`);
+  if (p.emails && p.emails.length) {
+    for (const m of p.emails.slice(0, 5)) {
+      lines.push(`【${m.subject || '(无主题)'}】来自 ${m.from}`);
+    }
+  }
+  const dingBody = JSON.stringify({
+    msgtype: 'text',
+    text: { content: lines.join('\n') },
+  });
+  return { body: dingBody, contentType: 'application/json' };
 }
 
 // ============ 发送测试推送 ============

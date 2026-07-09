@@ -1188,7 +1188,7 @@ function viewWebhookHtml() {
         </div>
         <div class="form-group">
           <label class="form-label">回调 URL <span class="req">*</span></label>
-          <input type="text" id="whUrl" class="form-control" placeholder="https://your-server.com/webhook">
+          <input type="text" id="whUrl" class="form-control" placeholder="直接填飞书机器人地址 https://open.feishu.cn/open-apis/bot/v2/hook/xxx">
         </div>
         <div class="form-group">
           <label class="form-label">订阅事件 <span class="req">*</span></label>
@@ -1608,98 +1608,147 @@ if __name__ == "__main__":
     .copy-btn.copied { background: #16a34a; border-color: #16a34a; }
     .code-block { background: #1e293b; color: #e2e8f0; padding: 16px; padding-top: 40px; border-radius: 8px; overflow-x: auto; font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; line-height: 1.6; }
     .code-block code { background: none; padding: 0; font: inherit; color: inherit; }
+    /* API 文档左右布局 */
+    .doc-layout { display: flex; gap: 20px; align-items: flex-start; }
+    .doc-nav { width: 220px; flex-shrink: 0; position: sticky; top: 16px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 6px; max-height: calc(100vh - 100px); overflow-y: auto; }
+    .doc-nav-item { display: block; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--text-light); transition: all 0.15s; margin-bottom: 2px; text-decoration: none; }
+    .doc-nav-item:hover { background: var(--bg-hover, #f1f5f9); color: var(--text); }
+    .doc-nav-item.active { background: var(--primary); color: #fff; font-weight: 500; }
+    .doc-nav-item .method-tag { font-size: 10px; padding: 1px 5px; border-radius: 3px; margin-right: 5px; font-family: monospace; }
+    .doc-content { flex: 1; min-width: 0; }
+    .doc-panel { display: none; }
+    .doc-panel.active { display: block; animation: fadeIn 0.2s; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @media (max-width: 768px) { .doc-layout { flex-direction: column; } .doc-nav { width: 100%; position: static; max-height: none; } }
   </style>
   <div class="page-title">API 接入文档</div>
   <div class="page-desc">本页面面向开发者,介绍如何通过 API Key 调用邮件查询接口与 Webhook 推送。所有接口统一返回 <code class="mono">{ code, msg, data }</code>,<code class="mono">code=0</code> 表示成功。</div>
 
-  <div class="doc-section">
-    <h4>鉴权方式</h4>
-    <div class="card card-body">
-      <p style="margin-bottom:0"><strong>API Key 认证</strong> — 编程调用时在 URL 上携带查询参数 <code class="mono">?key=&lt;your_api_key&gt;</code>。当前账号的 API Key 可在「我的账户」页重新生成。</p>
+  <div class="doc-layout">
+    <nav class="doc-nav" id="docNav">
+      <a class="doc-nav-item active" onclick="switchDocPanel('auth')">鉴权方式</a>
+      <a class="doc-nav-item" onclick="switchDocPanel('fetch')"><span class="method-tag" style="background:#0ea5e9;color:#fff">POST</span>查询邮件</a>
+      <a class="doc-nav-item" onclick="switchDocPanel('markread')"><span class="method-tag" style="background:#0ea5e9;color:#fff">POST</span>标记已读</a>
+      <a class="doc-nav-item" onclick="switchDocPanel('poll')"><span class="method-tag" style="background:#16a34a;color:#fff">GET</span>触发推送</a>
+      <a class="doc-nav-item" onclick="switchDocPanel('payload')">推送载荷</a>
+      <a class="doc-nav-item" onclick="switchDocPanel('fields')">emails 字段</a>
+    </nav>
+    <div class="doc-content">
+
+    <div class="doc-panel active" id="panel-auth">
+      <div class="doc-section">
+        <h4>鉴权方式</h4>
+        <div class="card card-body">
+          <p style="margin-bottom:0"><strong>API Key 认证</strong> — 编程调用时在 URL 上携带查询参数 <code class="mono">?key=&lt;your_api_key&gt;</code>。当前账号的 API Key 可在「我的账户」页重新生成。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="doc-panel" id="panel-fetch">
+      <div class="doc-section">
+        <h4>查询邮件</h4>
+        ${endpointHeader('POST', '/api/email/fetch?key=YOUR_API_KEY', '按收件地址(含别名)查询邮件,支持多维筛选与全文搜索')}
+        <h5>请求参数</h5>
+        ${paramTable([
+          ['to', 'string', '是', '查询邮箱地址(含别名,如 user+site@gmail.com)'],
+          ['sender', 'string', '否', '按发件人邮箱筛选'],
+          ['subject', 'string', '否', '按主题关键字筛选'],
+          ['keyword', 'string', '否', '全文搜索(自动匹配 from/to/subject/body)'],
+          ['unseen', 'boolean', '否', 'true=仅未读邮件'],
+          ['start_time', 'string', '否', '开始时间 ISO 8601'],
+          ['end_time', 'string', '否', '结束时间 ISO 8601'],
+          ['limit', 'number', '否', '返回数量,默认 50,上限 100'],
+        ])}
+        <h5>请求示例(curl / Python)</h5>
+        ${codeTabs(curlFetch, pyFetch)}
+        <h5>响应示例</h5>
+        ${codeBlock(respFetch)}
+      </div>
+    </div>
+
+    <div class="doc-panel" id="panel-markread">
+      <div class="doc-section">
+        <h4>标记邮件已读</h4>
+        ${endpointHeader('POST', '/api/email/mark_read?key=YOUR_API_KEY', '把符合条件的邮件标记为已读')}
+        <h5>请求参数</h5>
+        ${paramTable([
+          ['to', 'string', '是', '查询邮箱地址(含别名)'],
+          ['sender', 'string', '否', '按发件人筛选,限定标记范围'],
+          ['subject', 'string', '否', '按主题筛选,限定标记范围'],
+        ])}
+        <h5>请求示例(curl / Python)</h5>
+        ${codeTabs(curlMarkRead, pyMarkRead)}
+        <h5>响应示例</h5>
+        ${codeBlock(respMarkRead)}
+      </div>
+    </div>
+
+    <div class="doc-panel" id="panel-poll">
+      <div class="doc-section">
+        <h4>触发 Webhook 推送</h4>
+        ${endpointHeader('GET', '/api/webhook/poll?key=YOUR_API_KEY&account_id=ACCOUNT_ID', '主动触发一次轮询:系统会拉取该邮箱最近 10 分钟邮件并推送到订阅的回调 URL')}
+        <h5>请求参数</h5>
+        ${paramTable([
+          ['key', 'string', '是', 'API Key(URL 查询参数)'],
+          ['account_id', 'string', '是', '邮箱账号 ID(在「我的账户」页可查看)'],
+        ])}
+        <h5>请求示例(curl / Python)</h5>
+        ${codeTabs(curlPoll, pyPoll)}
+        <h5>响应示例</h5>
+        ${codeBlock(respPoll)}
+      </div>
+    </div>
+
+    <div class="doc-panel" id="panel-payload">
+      <div class="doc-section">
+        <h4>Webhook 推送载荷说明</h4>
+        <p class="form-hint" style="margin-bottom:12px">系统支持两种推送模式:<br>① <strong>直接推送飞书/钉钉</strong>:回调 URL 填飞书机器人地址(<code class="mono">https://open.feishu.cn/open-apis/bot/v2/hook/xxx</code>),系统自动按飞书消息格式推送,无需中转服务。<br>② <strong>原始 JSON 推送</strong>:回调 URL 填其他地址时,以 POST application/json 推送完整邮件数据。</p>
+        <h5>载荷字段(原始 JSON 模式)</h5>
+        ${fieldTable([
+          ['event', 'string', '事件类型: new_mail / unread / test'],
+          ['delivered_at', 'string', '推送时间 ISO 8601'],
+          ['mail_account_id', 'string', '邮箱账号 ID'],
+          ['email', 'string', '主邮箱地址'],
+          ['to_alias', 'string?', '命中的别名(未指定时不存在)'],
+          ['count', 'number', '本次推送邮件数量'],
+          ['emails', 'array', '邮件数组(字段同查询接口返回)'],
+        ])}
+        <h5>接收 Webhook 推送的 Python 示例(Flask + 飞书推送)</h5>
+        ${codeBlock(pyFlask)}
+      </div>
+    </div>
+
+    <div class="doc-panel" id="panel-fields">
+      <div class="doc-section">
+        <h4>邮件对象 emails[] 字段说明</h4>
+        ${fieldTable([
+          ['id', 'string', '邮件唯一 ID'],
+          ['from', 'string', '发件人'],
+          ['to', 'string', '收件人(别名地址)'],
+          ['subject', 'string', '主题'],
+          ['date', 'string', '显示用时间 YYYY-MM-DD HH:MM:SS'],
+          ['date_iso', 'string', 'ISO 8601 时间'],
+          ['body', 'string', '纯文本正文'],
+          ['html', 'string', 'HTML 正文'],
+          ['unread', 'boolean', '是否未读'],
+          ['provider', 'string', '邮箱提供方 gmail/outlook'],
+        ])}
+      </div>
+    </div>
+
     </div>
   </div>
-
-  <div class="doc-section">
-    <h4>A. 查询邮件</h4>
-    ${endpointHeader('POST', '/api/email/fetch?key=YOUR_API_KEY', '按收件地址(含别名)查询邮件,支持多维筛选与全文搜索')}
-    <h5>请求参数</h5>
-    ${paramTable([
-      ['to', 'string', '是', '查询邮箱地址(含别名,如 user+site@gmail.com)'],
-      ['sender', 'string', '否', '按发件人邮箱筛选'],
-      ['subject', 'string', '否', '按主题关键字筛选'],
-      ['keyword', 'string', '否', '全文搜索(自动匹配 from/to/subject/body)'],
-      ['unseen', 'boolean', '否', 'true=仅未读邮件'],
-      ['start_time', 'string', '否', '开始时间 ISO 8601'],
-      ['end_time', 'string', '否', '结束时间 ISO 8601'],
-      ['limit', 'number', '否', '返回数量,默认 50,上限 100'],
-    ])}
-    <h5>请求示例(curl / Python)</h5>
-    ${codeTabs(curlFetch, pyFetch)}
-    <h5>响应示例</h5>
-    ${codeBlock(respFetch)}
-  </div>
-
-  <div class="doc-section">
-    <h4>B. 标记邮件已读</h4>
-    ${endpointHeader('POST', '/api/email/mark_read?key=YOUR_API_KEY', '把符合条件的邮件标记为已读')}
-    <h5>请求参数</h5>
-    ${paramTable([
-      ['to', 'string', '是', '查询邮箱地址(含别名)'],
-      ['sender', 'string', '否', '按发件人筛选,限定标记范围'],
-      ['subject', 'string', '否', '按主题筛选,限定标记范围'],
-    ])}
-    <h5>请求示例(curl / Python)</h5>
-    ${codeTabs(curlMarkRead, pyMarkRead)}
-    <h5>响应示例</h5>
-    ${codeBlock(respMarkRead)}
-  </div>
-
-  <div class="doc-section">
-    <h4>C. 触发 Webhook 推送</h4>
-    ${endpointHeader('GET', '/api/webhook/poll?key=YOUR_API_KEY&account_id=ACCOUNT_ID', '主动触发一次轮询:系统会拉取该邮箱最近 10 分钟邮件并推送到订阅的回调 URL')}
-    <h5>请求参数</h5>
-    ${paramTable([
-      ['key', 'string', '是', 'API Key(URL 查询参数)'],
-      ['account_id', 'string', '是', '邮箱账号 ID(在「我的账户」页可查看)'],
-    ])}
-    <h5>请求示例(curl / Python)</h5>
-    ${codeTabs(curlPoll, pyPoll)}
-    <h5>响应示例</h5>
-    ${codeBlock(respPoll)}
-  </div>
-
-  <div class="doc-section">
-    <h4>D. Webhook 推送载荷说明</h4>
-    <p class="form-hint" style="margin-bottom:12px">当邮箱收到新邮件时,系统会以 <strong>POST</strong> 方式向你订阅时填写的回调 URL 推送 JSON 数据,Content-Type 为 <code class="mono">application/json</code>。</p>
-    <h5>载荷字段</h5>
-    ${fieldTable([
-      ['event', 'string', '事件类型: new_mail / unread / test'],
-      ['delivered_at', 'string', '推送时间 ISO 8601'],
-      ['mail_account_id', 'string', '邮箱账号 ID'],
-      ['email', 'string', '主邮箱地址'],
-      ['to_alias', 'string?', '命中的别名(未指定时不存在)'],
-      ['count', 'number', '本次推送邮件数量'],
-      ['emails', 'array', '邮件数组(字段同查询接口返回)'],
-    ])}
-    <h5>接收 Webhook 推送的 Python 示例(Flask + 飞书推送)</h5>
-    ${codeBlock(pyFlask)}
-  </div>
-
-  <div class="doc-section">
-    <h4>邮件对象 emails[] 字段说明</h4>
-    ${fieldTable([
-      ['id', 'string', '邮件唯一 ID'],
-      ['from', 'string', '发件人'],
-      ['to', 'string', '收件人(别名地址)'],
-      ['subject', 'string', '主题'],
-      ['date', 'string', '显示用时间 YYYY-MM-DD HH:MM:SS'],
-      ['date_iso', 'string', 'ISO 8601 时间'],
-      ['body', 'string', '纯文本正文'],
-      ['html', 'string', 'HTML 正文'],
-      ['unread', 'boolean', '是否未读'],
-      ['provider', 'string', '邮箱提供方 gmail/outlook'],
-    ])}
-  </div>`;
+  <script>
+    // API 文档左侧导航切换:点击接口名,右侧显示对应面板
+    function switchDocPanel(name) {
+      document.querySelectorAll('.doc-nav-item').forEach(a => a.classList.remove('active'));
+      document.querySelectorAll('.doc-panel').forEach(p => p.classList.remove('active'));
+      const navItem = Array.from(document.querySelectorAll('.doc-nav-item')).find(a => a.getAttribute('onclick').includes(name));
+      if (navItem) navItem.classList.add('active');
+      const panel = document.getElementById('panel-' + name);
+      if (panel) panel.classList.add('active');
+    }
+  </script>`;
 }
 
 // 代码块语法高亮辅助函数(轻量级,仅做注释/字符串着色)

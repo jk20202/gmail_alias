@@ -521,10 +521,21 @@ export async function webhookCreate(ctx: Ctx): Promise<Response> {
 }
 
 // SSRF 防护:拦截内网 IP 和云元数据地址
+// 放行常见第三方推送平台域名(飞书/钉钉/企业微信/Slack/Discord 等),便于直接推送
 function isPrivateOrUnsafeUrl(url: string): boolean {
   try {
     const u = new URL(url);
     const host = u.hostname.toLowerCase();
+    // 白名单:允许的第三方推送平台
+    const PUSH_WHITELIST = [
+      'open.feishu.cn',           // 飞书机器人
+      'oapi.dingtalk.com',        // 钉钉机器人
+      'qyapi.weixin.qq.com',      // 企业微信机器人
+      'hooks.slack.com',          // Slack
+      'discord.com',              // Discord
+      'discordapp.com',
+    ];
+    if (PUSH_WHITELIST.some(d => host === d || host.endsWith('.' + d))) return false;
     // 拒绝 localhost 和私有 IP 段
     if (host === 'localhost' || host === '0.0.0.0') return true;
     if (/^127\./.test(host)) return true;
