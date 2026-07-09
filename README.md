@@ -94,12 +94,25 @@
 >
 > 仅当需要改用自注册应用时，才用 `wrangler secret put MS_CLIENT_ID` 覆盖默认的 client_id。
 
-### 2. 创建 Cloudflare 资源
+### 2. 创建 Cloudflare 账号与 API Token
+
+1. 访问 https://dash.cloudflare.com/ 注册账号（免费）
+2. 进入「Workers 和 Pages」→ 首次使用会要求设置子域名（如 `your-name.workers.dev`）
+3. 创建 API Token（用于命令行部署）：
+   - 访问 https://dash.cloudflare.com/profile/api-tokens
+   - 点击「创建令牌」→ 选择模板「编辑 Cloudflare Workers」
+   - 复制生成的 Token（只显示一次，妥善保存）
+
+### 3. 创建 Cloudflare 资源
 
 ```bash
 # 安装 Wrangler CLI
 npm install -g wrangler
+
+# 方式一: 浏览器授权登录
 wrangler login
+# 方式二: 用 API Token (CI/非交互环境推荐)
+# export CLOUDFLARE_API_TOKEN="你的token"
 
 # 克隆 cloudflare 分支
 git checkout cloudflare
@@ -107,44 +120,81 @@ npm install
 
 # 创建 D1 数据库
 wrangler d1 create mail_alias
-# 复制返回的 database_id 到 wrangler.toml
+# 命令会输出 database_id,复制它
 
 # 创建 KV 命名空间
-wrangler kv:namespace create KV
-# 复制返回的 id 到 wrangler.toml
+wrangler kv namespace create KV
+# 命令会输出 namespace id,复制它
 
-# 初始化数据库 schema
+# 初始化数据库 schema (远程生产库)
 wrangler d1 execute mail_alias --remote --file=./schema.sql
-# 本地开发也初始化一份:
+# 本地开发也初始化一份(可选):
 wrangler d1 execute mail_alias --local --file=./schema.sql
 ```
 
-### 3. 配置 wrangler.toml
+### 4. 配置 wrangler.toml
 
-编辑 `wrangler.toml`，替换：
-- `database_id` 为 D1 返回的 ID
-- KV 的 `id` 为 KV 命名空间 ID
+编辑 `wrangler.toml`，替换以下内容：
 
-### 4. 注入 Secrets
+```toml
+# D1 数据库 ID (第3步创建时输出)
+database_id = "上一步复制的 database_id"
+
+# KV 命名空间 ID (第3步创建时输出)
+[[kv_namespaces]]
+binding = "KV"
+id = "上一步复制的 KV namespace id"
+
+# 管理员账号 (首次部署时初始化用,务必改成自己的强密码!)
+# 部署成功后立即登录并在「我的账户」修改密码
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "你的强密码"   # ← 务必修改,切勿保留默认值
+```
+
+> ⚠️ **安全提示**：`ADMIN_PASSWORD` 是首次部署时初始化管理员账号用的，部署后请立即登录系统在「我的账户」修改密码。如果后续要重置密码，可直接在 D1 数据库更新 users 表的 password 字段（SHA256 哈希值）。
+
+### 5. 注入 Secrets（敏感配置）
+
+Secrets 不会写入代码或 wrangler.toml，单独加密存储，更安全：
 
 ```bash
+# Gmail OAuth (必填,用于 Gmail 授权)
 wrangler secret put GOOGLE_CLIENT_ID
 wrangler secret put GOOGLE_CLIENT_SECRET
-# 微软默认走 Thunderbird 公共客户端,以下两项可选(仅自注册应用时需要):
-# wrangler secret put MS_CLIENT_ID
-# wrangler secret put MS_CLIENT_SECRET   # 已废弃,公共客户端不使用
-wrangler secret put JWT_SECRET              # 随便输个长字符串
-wrangler secret put ENCRYPT_KEY             # 32 字节 hex:openssl rand -hex 32
-wrangler secret put BASE_URL                # https://你的-worker.workers.dev
+
+# 微软授权无需任何配置 (Device Code Flow,内置公共客户端)
+
+# 系统密钥
+wrangler secret put JWT_SECRET              # 随便输个长字符串(用于Session签名)
+wrangler secret put ENCRYPT_KEY             # 32字节hex,用于加密refresh_token
+                                            # 生成命令: openssl rand -hex 32
+wrangler secret put BASE_URL                # 你的 Worker 地址,如 https://mail-alias.your-name.workers.dev
 ```
 
-### 5. 部署
+### 6. 部署到 Cloudflare
 
 ```bash
+# 部署到生产环境
 wrangler deploy
+
+# 部署成功后会输出:
+#   https://mail-alias.your-name.workers.dev
 ```
 
-部署后访问 `https://你的-worker.workers.dev`，使用 [wrangler.toml](wrangler.toml) 中 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 配置的账户登录。**首次登录后立即在「我的账户」修改密码。**
+### 7. 验证与首次配置
+
+1. 访问部署输出的 URL
+2. 用第4步设置的管理员账号密码登录
+3. **立即进入「我的账户」修改密码**（不要长期使用初始密码）
+4. 进入「我的账户」→「OAuth 邮箱绑定」绑定 Gmail / Outlook
+5. 在「系统设置」（管理员可见）关闭注册功能（默认关闭）
+
+### 通过 GitHub Actions 自动部署（可选）
+
+如果想 push 代码自动部署，在仓库 Settings → Secrets → Actions 添加：
+- `CLOUDFLARE_API_TOKEN`：第2步生成的 API Token
+
+push 到 `cloudflare` 分支后会自动触发部署。
 
 ## 别名邮箱规则
 

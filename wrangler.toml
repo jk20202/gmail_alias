@@ -32,6 +32,7 @@ id = "351359d5a2614b28b273465a29bdfd2d"
 # ENCRYPT_KEY = "32字节hex,用于加密refresh_token"
 # BASE_URL = "https://your-worker.workers.dev"
 
-# 默认管理员(首次部署后请改密码)
+# 默认管理员(首次部署时初始化用,部署后请立即在「我的账户」修改密码)
+# 请将下方密码改为自己的强密码,切勿使用示例值
 ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "admin123_"
+ADMIN_PASSWORD = "请修改为你的强密码"

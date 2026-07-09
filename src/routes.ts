@@ -85,13 +85,13 @@ export async function health(ctx: Ctx): Promise<Response> {
 // ============ Auth ============
 export async function authLogin(ctx: Ctx): Promise<Response> {
   const { username, password } = ctx.body;
-  if (!username || !password) return fail('用户名和密码必填');
+  if (!username || !password) return fail('账户不存在,或是密码不匹配', 401);
   const raw = await db.getUserByUsername(ctx.env, username);
-  if (!raw) return fail('用户名或密码错误', 401);
+  if (!raw) return fail('账户不存在,或是密码不匹配', 401);
   const hashed = await sha256(password);
-  if (raw.password !== hashed) return fail('用户名或密码错误', 401);
-  // 禁用用户禁止登录
-  if (raw.disabled === 1) return fail('该账户已被禁用,请联系管理员', 403);
+  if (raw.password !== hashed) return fail('账户不存在,或是密码不匹配', 401);
+  // 禁用用户禁止登录 (同样返回统一提示,不暴露账户存在性)
+  if (raw.disabled === 1) return fail('账户不存在,或是密码不匹配', 401);
   const token = await db.createSession(ctx.env, raw.id);
   const user = await db.getUserById(ctx.env, raw.id);
   return ok({ session_token: token, user });
