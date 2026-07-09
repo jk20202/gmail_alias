@@ -20,6 +20,7 @@ const GOOGLE_SCOPES = [
 // (参考 emails_cloud 仓库实现:common 端点 + client_secret 对个人账号常出问题)
 const MS_AUTH_URL = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize';
 const MS_TOKEN_URL = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token';
+const MS_DEVICECODE_URL = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode';
 const MS_USERINFO_URL = 'https://graph.microsoft.com/v1.0/me';
 // Graph API 全限定 scope: Mail.Read 读邮件 + Mail.ReadWrite 标记已读 + User.Read 拿邮箱 + offline_access 拿 refresh_token
 const MS_SCOPES = [
@@ -274,4 +275,105 @@ export async function checkAccountAuthStatus(env: Env, accountId: string): Promi
   } catch (e) {
     return { ok: false, reason: 'refresh_token 已失效,需重新授权' };
   }
+}
+
+// ============ Device Code Flow (微软,绕过 redirect_uri 限制) ============
+// Thunderbird 公共客户端注册了固定的 redirect_uri,我们的 Worker 回调地址不匹配,
+// 因此改用 Device Code Flow:用户在任意设备打开验证链接输入 user_code,无需回调。
+// 会话存 KV,前端轮询 status 接口,每次轮询时 Worker 调一次 token 端点。
+
+export interface DeviceSession {
+  user_id: string;
+  provider: 'outlook';
+  device_code: string;
+  user_code: string;
+  verification_uri: string;
+  expires_at: number;       // device_code 过期时间戳(ms)
+  interval: number;         // 轮询间隔(秒)
+}
+
+// 发起 device code 授权,返回 user_code / 验证链接给前端展示
+export async function startDeviceFlow(env: Env, userId: string): Promise<{ user_code: string; verification_uri: string; expires_in: number }> {
+  const resp = await fetch(MS_DEVICECODE_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: msClientId(env),
+      scope: MS_SCOPES,
+    }),
+  });
+  const data = await resp.json() as {
+    device_code: string; user_code: string; verification_uri: string;
+    expires_in: number; interval: number; error?: string; error_description?: string;
+  };
+  if (!resp.ok) throw new Error(`Device code 请求失败: ${data.error_description || data.error}`);
+
+  // 存会话到 KV (15分钟过期)
+  const session: DeviceSession = {
+    user_id: userId,
+    provider: 'outlook',
+    device_code: data.device_code,
+    user_code: data.user_code,
+    verification_uri: data.verification_uri,
+    expires_at: Date.now() + data.expires_in * 1000,
+    interval: data.interval || 5,
+  };
+  await env.KV.put(`device:${userId}`, JSON.stringify(session), { expirationTtl: data.expires_in });
+  return { user_code: data.user_code, verification_uri: data.verification_uri, expires_in: data.expires_in };
+}
+
+// 轮询 device code 授权状态: 用 device_code 调 token 端点
+// 返回 status: success(已授权) / pending(等待用户操作) / failed(失败)
+export async function pollDeviceFlow(env: Env, userId: string): Promise<{ status: 'success' | 'pending' | 'failed'; reason?: string; email?: string }> {
+  const raw = await env.KV.get(`device:${userId}`);
+  if (!raw) return { status: 'failed', reason: '授权会话不存在或已过期,请重新发起' };
+  const session = JSON.parse(raw) as DeviceSession;
+  if (Date.now() > session.expires_at) {
+    await env.KV.delete(`device:${userId}`);
+    return { status: 'failed', reason: '授权已超时,请重新发起' };
+  }
+
+  // 调 token 端点轮询
+  const resp = await fetch(MS_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: msClientId(env),
+      grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+      device_code: session.device_code,
+    }),
+  });
+  const data = await resp.json() as TokenResponse & { error?: string; error_description?: string; interval?: number };
+
+  if (resp.ok && data.access_token) {
+    // 授权成功:拿邮箱 + upsert 存储 token
+    await env.KV.delete(`device:${userId}`);
+    const email = await getMicrosoftEmail(data.access_token);
+    if (!data.refresh_token) throw new Error('未返回 refresh_token');
+    const encAccess = await encrypt(data.access_token, env);
+    const encRefresh = await encrypt(data.refresh_token, env);
+    const expiresAt = new Date(Date.now() + (data.expires_in || 3600) * 1000).toISOString();
+    const existing = await getMailAccountByUserAndEmail(env, userId, 'outlook', email);
+    if (existing) {
+      await updateMailAccountToken(env, existing.id, encAccess, encRefresh, expiresAt);
+    } else {
+      await addMailAccount(env, userId, 'outlook', email, encAccess, encRefresh, expiresAt, false);
+    }
+    return { status: 'success', email };
+  }
+
+  // 处理错误码: pending 是正常的,declined/expired 是终止
+  const err = data.error;
+  if (err === 'authorization_pending' || err === 'slow_down') {
+    return { status: 'pending' };
+  }
+  if (err === 'authorization_declined') {
+    await env.KV.delete(`device:${userId}`);
+    return { status: 'failed', reason: '用户拒绝了授权' };
+  }
+  if (err === 'expired_token') {
+    await env.KV.delete(`device:${userId}`);
+    return { status: 'failed', reason: 'device code 已过期,请重新发起' };
+  }
+  return { status: 'failed', reason: data.error_description || err || '未知错误' };
 }

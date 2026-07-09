@@ -45,6 +45,7 @@ const ROUTE_TABLE: RouteEntry[] = [
   buildRoute('GET',  '/api/admin/users',        routes.adminListUsers),
   buildRoute('POST', '/api/admin/users',        routes.adminCreateUser),
   buildRoute('PUT',  '/api/admin/users/:id',   routes.adminUpdateUser),
+  buildRoute('POST', '/api/admin/users/:id/alias', routes.adminSetUserAlias),
   buildRoute('DELETE', '/api/admin/users/:id',  routes.adminDeleteUser),
   // Admin - 其他
   buildRoute('GET',  '/api/admin/stats',        routes.adminStats),
@@ -60,9 +61,12 @@ const ROUTE_TABLE: RouteEntry[] = [
   buildRoute('GET',  '/api/account/mail_accounts',     routes.accountListAccounts),
   buildRoute('GET',  '/api/account/mail_accounts/available', routes.accountAvailableAccounts),
   buildRoute('GET',  '/api/account/mail_accounts/:id/status', routes.accountAuthStatus),
+  buildRoute('PUT',  '/api/account/mail_accounts/:id/public', routes.accountTogglePublic),
   buildRoute('DELETE', '/api/account/mail_accounts/:id', routes.accountDeleteAccount),
-  // OAuth
+  // OAuth (Gmail 走 Authorization Code 回调;微软走 Device Code 轮询,无需回调)
   buildRoute('GET',  '/api/account/oauth/start', routes.accountOAuthStart),
+  buildRoute('POST', '/api/account/oauth/device',       routes.accountDeviceStart),
+  buildRoute('GET',  '/api/account/oauth/device/status', routes.accountDeviceStatus),
   buildRoute('GET',  '/oauth/callback',          routes.oauthCallback),
   // 别名
   buildRoute('POST', '/api/account/alias',       routes.accountSetAlias),

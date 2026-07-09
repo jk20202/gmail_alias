@@ -408,6 +408,7 @@ const State = {
   availableAccounts: [], // 可用邮箱缓存(邮件查询用)
   mailAccounts: [],     // 我的邮箱缓存
   oauthTimer: null,     // OAuth 轮询定时器
+  deviceTimer: null,    // 微软 Device Code 轮询定时器
 };
 
 // localStorage 持久化键
@@ -662,8 +663,9 @@ function viewMailHtml() {
               </button>
             </div>
           </div>
-          <div class="form-group" style="flex:1; display:flex; align-items:flex-end">
-            <button class="btn btn-block" onclick="setAlias()">设置别名</button>
+          <div class="form-group" style="flex:1">
+            <label class="form-label" style="visibility:hidden">占位</label>
+            <button class="btn btn-block" style="height:38px;box-sizing:border-box" onclick="setAlias()">设置别名</button>
           </div>
         </div>
         <div id="currentAlias" class="form-hint"></div>
@@ -701,8 +703,9 @@ function viewMailHtml() {
             <label class="form-label">数量上限</label>
             <input type="number" id="qLimit" class="form-control" value="20" min="1" max="100">
           </div>
-          <div class="form-group" style="display:flex; align-items:flex-end; gap:8px">
-            <label class="switch">
+          <div class="form-group">
+            <label class="form-label" style="visibility:hidden">占位</label>
+            <label class="switch" style="height:38px; display:inline-flex; align-items:center; gap:8px">
               <input type="checkbox" id="qUnread">
               <span class="track"></span>
               <span>仅未读</span>
@@ -914,31 +917,6 @@ function viewAccountHtml() {
     </div>
 
     <div class="card">
-      <div class="card-header"><h3>API Key</h3></div>
-      <div class="card-body">
-        <p class="form-hint" style="margin-bottom:12px">编程调用接口时使用的密钥,重新生成后旧密钥立即失效</p>
-        <div class="apikey-row">
-          <span class="mono" id="apiKeyText">${esc(u.api_key)}</span>
-          <button class="btn btn-secondary btn-sm" onclick="copyText('${esc(u.api_key)}')">复制</button>
-          <button class="btn btn-danger btn-sm" onclick="regenApiKey()">重新生成</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-header"><h3>OAuth 邮箱绑定</h3></div>
-      <div class="card-body">
-        <p class="form-hint" style="margin-bottom:12px">绑定邮箱后,系统将自动刷新访问令牌并代为查询邮件。Outlook/Hotmail 采用微软公共客户端,无需自建 Azure 应用即可授权。</p>
-        <div style="display:flex; gap:8px; margin-bottom:16px">
-          <button class="btn" onclick="startOAuth('gmail')">绑定 Gmail</button>
-          <button class="btn" onclick="startOAuth('outlook')">绑定 Outlook/Hotmail</button>
-        </div>
-        <h4 style="font-size:13px; color:var(--text-light); margin-bottom:8px">已绑定的邮箱</h4>
-        <div id="myAccounts"><div class="loading"><span class="spinner"></span> 加载中...</div></div>
-      </div>
-    </div>
-
-    <div class="card">
       <div class="card-header"><h3>修改密码</h3></div>
       <div class="card-body">
         <div class="form-row">
@@ -960,6 +938,31 @@ function viewAccountHtml() {
         </div>
       </div>
     </div>
+
+    <div class="card">
+      <div class="card-header"><h3>API Key</h3></div>
+      <div class="card-body">
+        <p class="form-hint" style="margin-bottom:12px">编程调用接口时使用的密钥,重新生成后旧密钥立即失效</p>
+        <div class="apikey-row">
+          <span class="mono" id="apiKeyText">${esc(u.api_key)}</span>
+          <button class="btn btn-secondary btn-sm" onclick="copyText('${esc(u.api_key)}')">复制</button>
+          <button class="btn btn-danger btn-sm" onclick="regenApiKey()">重新生成</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h3>OAuth 邮箱绑定</h3></div>
+      <div class="card-body">
+        <p class="form-hint" style="margin-bottom:12px">绑定邮箱后,系统将自动刷新访问令牌并代为查询邮件。Outlook/Hotmail 采用 Device Code 授权,无需配置回调地址即可使用。</p>
+        <div style="display:flex; gap:8px; margin-bottom:16px">
+          <button class="btn" onclick="startOAuth('gmail')">绑定 Gmail</button>
+          <button class="btn" onclick="startOAuth('outlook')">绑定 Outlook/Hotmail</button>
+        </div>
+        <h4 style="font-size:13px; color:var(--text-light); margin-bottom:8px">已绑定的邮箱</h4>
+        <div id="myAccounts"><div class="loading"><span class="spinner"></span> 加载中...</div></div>
+      </div>
+    </div>
   </div>`;
 }
 
@@ -977,18 +980,25 @@ async function loadMyAccounts() {
       box.innerHTML = '<div class="mail-empty">尚未绑定任何邮箱,点击上方按钮开始绑定</div>';
       return;
     }
-    // 渲染表格骨架: 邮箱 / 类型 / Plus寻址 / 授权状态 / 操作
+    // 渲染表格骨架: 邮箱 / 类型 / Plus寻址 / 授权状态 / 是否公开 / 操作
     // 授权状态先显示"检测中",随后异步探测更新
     box.innerHTML = `<div class="table-wrap"><table class="table">
       <thead><tr>
-        <th>邮箱</th><th>类型</th><th>Plus寻址</th><th>授权状态</th><th>操作</th>
+        <th>邮箱</th><th>类型</th><th>Plus寻址</th><th>授权状态</th><th>是否公开</th><th>操作</th>
       </tr></thead>
       <tbody>${list.map(a => `
         <tr>
-          <td><span class="mono">${esc(a.email)}</span>${a.is_public ? ' <span class="badge badge-gray">公开</span>' : ''}</td>
+          <td><span class="mono">${esc(a.email)}</span></td>
           <td><span class="badge ${a.provider === 'gmail' ? 'badge-primary' : 'badge-warning'}">${esc(a.provider)}</span></td>
           <td><span class="badge badge-success">✓ 启用</span></td>
           <td id="acc-status-${esc(a.id)}"><span class="badge badge-gray">检测中...</span></td>
+          <td>
+            <label class="switch" style="display:inline-flex; align-items:center; gap:6px; cursor:pointer">
+              <input type="checkbox" ${a.is_public ? 'checked' : ''} onchange="togglePublic('${esc(a.id)}', this.checked)">
+              <span class="track"></span>
+              <span>${a.is_public ? '公开' : '私有'}</span>
+            </label>
+          </td>
           <td>
             <button class="btn btn-secondary btn-sm" id="acc-reauth-${esc(a.id)}" onclick="reauthAccount('${esc(a.id)}','${esc(a.provider)}')">重新授权</button>
             <button class="btn btn-danger btn-sm" onclick="deleteAccount('${esc(a.id)}','${esc(a.email)}')">删除</button>
@@ -1025,6 +1035,16 @@ async function probeAuthStatus(id) {
 // 重新授权 / 继续授权: 复用 OAuth 流程,回调时按 email upsert 更新 token
 function reauthAccount(id, provider) {
   startOAuth(provider);
+}
+
+// 切换邮箱公开状态 (是否允许其他用户使用该邮箱查询)
+async function togglePublic(id, isPublic) {
+  try {
+    await api('/api/account/mail_accounts/' + id + '/public', { method: 'PUT', body: { is_public: isPublic } });
+    toast(isPublic ? '已设为公开,其他用户可使用此邮箱' : '已设为私有', 'success');
+    loadMyAccounts();
+    loadAvailableAccounts();
+  } catch (err) { toast(err.message, 'error'); loadMyAccounts(); }
 }
 
 // 重新生成 API Key
@@ -1073,17 +1093,18 @@ async function deleteAccount(id, email) {
   });
 }
 
-// 启动 OAuth 绑定: 新窗口打开授权页,主页面轮询直到窗口关闭
+// 启动 OAuth 绑定
+// - gmail: 新窗口打开授权页,主页面轮询直到窗口关闭
+// - outlook: 微软改用 Device Code Flow (无需 redirect_uri),弹窗显示 user_code + 链接,轮询状态
 async function startOAuth(provider) {
+  if (provider === 'outlook') return startMsDeviceFlow();
   try {
     const data = await api('/api/account/oauth/start?provider=' + provider);
     if (!data.auth_url) { toast('未获取到授权地址', 'error'); return; }
     const win = window.open(data.auth_url, '_blank');
     if (!win) { toast('浏览器拦截了弹窗，请允许后重试', 'warning'); return; }
     toast('请在弹出的窗口完成授权', 'info', 4000);
-    // 清理已有定时器
     if (State.oauthTimer) clearInterval(State.oauthTimer);
-    // 每 2 秒检查授权窗口是否已关闭,关闭后刷新邮箱列表
     State.oauthTimer = setInterval(() => {
       if (win.closed) {
         clearInterval(State.oauthTimer);
@@ -1094,6 +1115,47 @@ async function startOAuth(provider) {
       }
     }, 2000);
   } catch (err) { toast(err.message, 'error'); }
+}
+
+// 微软 Device Code Flow: 弹窗显示 user_code + 验证链接,每 4 秒轮询状态
+async function startMsDeviceFlow() {
+  let data;
+  try {
+    data = await api('/api/account/oauth/device', { method: 'POST' });
+  } catch (err) { toast(err.message, 'error'); return; }
+  showModal('微软邮箱授权', `
+    <div style="text-align:center; padding:8px 0">
+      <p style="margin-bottom:12px">请在新页面登录微软账号并输入以下代码完成授权:</p>
+      <div style="font-size:28px; font-weight:700; letter-spacing:3px; padding:14px; background:var(--bg); border:1px dashed var(--border); border-radius:8px; margin-bottom:14px; font-family:monospace">${esc(data.user_code)}</div>
+      <a href="${esc(data.verification_uri)}" target="_blank" class="btn" style="display:inline-block; text-decoration:none">打开授权页面</a>
+      <p class="form-hint" style="margin-top:14px">代码有效期 ${data.expires_in || 900} 秒,授权完成后本窗口会自动关闭</p>
+      <div id="deviceStatus" style="margin-top:10px"><span class="badge badge-gray">等待授权中...</span></div>
+    </div>`,
+    `<button class="btn btn-secondary" onclick="cancelMsDevice()">取消</button>`);
+  // 轮询授权状态
+  if (State.deviceTimer) clearInterval(State.deviceTimer);
+  State.deviceTimer = setInterval(async () => {
+    try {
+      const st = await api('/api/account/oauth/device/status');
+      const el = document.getElementById('deviceStatus');
+      if (st.status === 'success') {
+        clearInterval(State.deviceTimer); State.deviceTimer = null;
+        if (el) el.innerHTML = '<span class="badge badge-success">授权成功: ' + esc(st.email || '') + '</span>';
+        toast('微软邮箱 ' + (st.email || '') + ' 绑定成功', 'success');
+        setTimeout(() => { closeModal(); loadMyAccounts(); loadAvailableAccounts(); }, 1500);
+      } else if (st.status === 'failed') {
+        clearInterval(State.deviceTimer); State.deviceTimer = null;
+        if (el) el.innerHTML = '<span class="badge badge-danger">' + esc(st.reason || '授权失败') + '</span>';
+        toast(st.reason || '授权失败', 'error');
+      }
+    } catch (e) { /* 网络抖动忽略 */ }
+  }, 4000);
+}
+
+// 取消微软 device 授权
+function cancelMsDevice() {
+  if (State.deviceTimer) { clearInterval(State.deviceTimer); State.deviceTimer = null; }
+  closeModal();
 }
 
 // 复制文本到剪贴板
@@ -1620,7 +1682,7 @@ function escJs(code) { return esc(code); }
 function viewUsersHtml() {
   return `
   <div class="page-title">用户管理</div>
-  <div class="page-desc">创建、修改密码或删除系统用户</div>
+  <div class="page-desc">创建、编辑用户、设置别名、改密、禁用,以及管理所有用户认证的邮箱</div>
   <div class="section">
     <div class="card">
       <div class="card-header" style="display:flex; justify-content:space-between; align-items:center">
@@ -1631,11 +1693,21 @@ function viewUsersHtml() {
         <div id="usersList" class="table-wrap"><div class="loading"><span class="spinner"></span> 加载中...</div></div>
       </div>
     </div>
+  </div>
+  <div class="section">
+    <div class="card">
+      <div class="card-header"><h3>所有用户认证邮箱管理</h3></div>
+      <div class="card-body">
+        <p class="form-hint" style="margin-bottom:12px">在此可统一管理全系统所有用户绑定的邮箱,切换公开状态或删除</p>
+        <div id="allAccountsList" class="table-wrap"><div class="loading"><span class="spinner"></span> 加载中...</div></div>
+      </div>
+    </div>
   </div>`;
 }
 
 async function initUsersPage() {
   await loadUsers();
+  await loadAllAccounts();
 }
 
 async function loadUsers() {
@@ -1643,25 +1715,82 @@ async function loadUsers() {
   if (!box) return;
   try {
     const list = await api('/api/admin/users');
+    State.adminUsers = list || [];
     box.innerHTML = `<table class="table">
-      <thead><tr><th>用户名</th><th>角色</th><th>API Key</th><th>邮箱数</th><th>别名</th><th>创建时间</th><th>操作</th></tr></thead>
+      <thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>API Key</th><th>邮箱数</th><th>别名</th><th>创建时间</th><th>操作</th></tr></thead>
       <tbody>${list.map(u => `
         <tr>
           <td><strong>${esc(u.username)}</strong></td>
           <td>${u.is_admin ? '<span class="badge badge-primary">管理员</span>' : '<span class="badge badge-gray">用户</span>'}</td>
+          <td>${u.disabled ? '<span class="badge badge-danger">已禁用</span>' : '<span class="badge badge-success">正常</span>'}</td>
           <td class="mono" style="font-size:12px">${esc(u.api_key)}</td>
           <td>${u.mail_accounts ? u.mail_accounts.length : 0}</td>
           <td>${u.alias ? '<span class="badge badge-success">' + esc(u.alias.full) + '</span>' : '-'}</td>
           <td>${fmtTime(u.created_at)}</td>
           <td>
-            <button class="btn btn-secondary btn-sm" onclick="showChangePwdModal('${esc(u.id)}','${esc(u.username)}')">改密</button>
-            ${u.username === 'admin' ? '' : `<button class="btn btn-danger btn-sm" onclick="deleteUser('${esc(u.id)}','${esc(u.username)}')">删除</button>`}
+            <button class="btn btn-sm" onclick="showEditUserModal('${esc(u.id)}')">编辑</button>
+            ${u.is_admin ? '' : `<button class="btn ${u.disabled ? 'btn-secondary' : 'btn-warning'} btn-sm" onclick="toggleDisableUser('${esc(u.id)}', ${!u.disabled})">${u.disabled ? '启用' : '禁用'}</button>`}
+            ${u.is_admin ? '' : `<button class="btn btn-danger btn-sm" onclick="deleteUser('${esc(u.id)}','${esc(u.username)}')">删除</button>`}
           </td>
         </tr>`).join('')}</tbody>
     </table>`;
   } catch (err) {
     box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
   }
+}
+
+// 加载所有用户邮箱(管理员邮箱管理板块)
+async function loadAllAccounts() {
+  const box = document.getElementById('allAccountsList');
+  if (!box) return;
+  try {
+    const list = await api('/api/admin/mail_accounts');
+    if (!list.length) {
+      box.innerHTML = '<div class="mail-empty">暂无任何用户绑定的邮箱</div>';
+      return;
+    }
+    box.innerHTML = `<table class="table">
+      <thead><tr><th>邮箱</th><th>类型</th><th>归属用户</th><th>是否公开</th><th>创建时间</th><th>操作</th></tr></thead>
+      <tbody>${list.map(a => `
+        <tr>
+          <td><span class="mono">${esc(a.email)}</span></td>
+          <td><span class="badge ${a.provider === 'gmail' ? 'badge-primary' : 'badge-warning'}">${esc(a.provider)}</span></td>
+          <td>${esc(a.owner_username || '-')}</td>
+          <td>
+            <label class="switch" style="display:inline-flex; align-items:center; gap:6px; cursor:pointer">
+              <input type="checkbox" ${a.is_public ? 'checked' : ''} onchange="adminTogglePublic('${esc(a.id)}', this.checked)">
+              <span class="track"></span>
+              <span>${a.is_public ? '公开' : '私有'}</span>
+            </label>
+          </td>
+          <td>${fmtTime(a.created_at)}</td>
+          <td><button class="btn btn-danger btn-sm" onclick="adminDeleteAccount('${esc(a.id)}','${esc(a.email)}')">删除</button></td>
+        </tr>`).join('')}</tbody>
+    </table>`;
+  } catch (err) {
+    box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
+  }
+}
+
+// 管理员切换邮箱公开状态
+async function adminTogglePublic(id, isPublic) {
+  try {
+    await api('/api/admin/mail_accounts/' + id, { method: 'PUT', body: { is_public: isPublic } });
+    toast(isPublic ? '已设为公开' : '已设为私有', 'success');
+    loadAllAccounts();
+  } catch (err) { toast(err.message, 'error'); loadAllAccounts(); }
+}
+
+// 管理员删除邮箱
+async function adminDeleteAccount(id, email) {
+  confirmDialog(`确认删除邮箱 ${email}？`, async () => {
+    try {
+      await api('/api/admin/mail_accounts/' + id, { method: 'DELETE' });
+      toast('邮箱已删除', 'success');
+      loadAllAccounts();
+      loadUsers();
+    } catch (err) { toast(err.message, 'error'); }
+  });
 }
 
 function showCreateUserModal() {
@@ -1695,23 +1824,65 @@ async function createUser() {
   } catch (err) { toast(err.message, 'error'); }
 }
 
-function showChangePwdModal(id, username) {
-  showModal('修改密码 - ' + username, `
+// 编辑用户弹窗: 用户名 / 角色 / 重置密码 / 设置别名 (改密整合进编辑)
+function showEditUserModal(id) {
+  const u = (State.adminUsers || []).find(x => x.id === id);
+  if (!u) return;
+  const aliasMailId = u.alias ? u.alias.mail_account_id : (u.mail_accounts[0] ? u.mail_accounts[0].id : '');
+  const mailOpts = (u.mail_accounts || []).map(a =>
+    `<option value="${esc(a.id)}" ${a.id === aliasMailId ? 'selected' : ''}>${esc(a.email)}</option>`
+  ).join('');
+  showModal('编辑用户 - ' + u.username, `
     <div class="form-group">
-      <label class="form-label">新密码 <span class="req">*</span></label>
+      <label class="form-label">用户名 <span class="req">*</span></label>
+      <input type="text" id="editUsername" class="form-control" value="${esc(u.username)}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">新密码 <span class="form-hint" style="font-weight:normal">(留空则不修改)</span></label>
       <input type="password" id="editPassword" class="form-control" placeholder="至少 6 个字符">
+    </div>
+    <div class="form-group">
+      <label class="switch"><input type="checkbox" id="editIsAdmin" ${u.is_admin ? 'checked' : ''}><span class="track"></span><span>管理员</span></label>
+    </div>
+    <hr style="border:none; border-top:1px solid var(--border); margin:16px 0">
+    <div class="form-group">
+      <label class="form-label">设置别名 (选择该用户的邮箱 + 标签)</label>
+      <div style="display:flex; gap:8px">
+        <select id="editAliasMail" class="form-control" style="flex:2">${mailOpts || '<option value="">无邮箱</option>'}</select>
+        <input type="text" id="editAliasLabel" class="form-control" style="flex:2" placeholder="别名标签" value="${esc(u.alias ? u.alias.label : '')}">
+      </div>
     </div>`,
-    `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn" onclick="changePassword('${esc(id)}')">保存</button>`);
-  setTimeout(() => document.getElementById('editPassword').focus(), 50);
+    `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn" onclick="saveEditUser('${esc(id)}')">保存</button>`);
 }
 
-async function changePassword(id) {
+// 保存编辑: 用户名/密码/角色走 PUT, 别名走 POST alias
+async function saveEditUser(id) {
+  const username = document.getElementById('editUsername').value.trim();
   const password = document.getElementById('editPassword').value;
-  if (!password || password.length < 6) { toast('密码至少 6 个字符', 'warning'); return; }
+  const is_admin = document.getElementById('editIsAdmin').checked;
+  if (!username || username.length < 3) { toast('用户名至少 3 个字符', 'warning'); return; }
+  if (password && password.length < 6) { toast('新密码至少 6 个字符', 'warning'); return; }
+  const body = { username, is_admin };
+  if (password) body.password = password;
   try {
-    await api('/api/admin/users/' + id, { method: 'PUT', body: { password } });
-    toast('密码已修改', 'success');
+    await api('/api/admin/users/' + id, { method: 'PUT', body });
+    // 设置别名 (仅当选择了邮箱且填了标签)
+    const mailId = document.getElementById('editAliasMail').value;
+    const label = document.getElementById('editAliasLabel').value.trim();
+    if (mailId && label) {
+      await api('/api/admin/users/' + id + '/alias', { method: 'POST', body: { mail_account_id: mailId, label } });
+    }
+    toast('用户信息已更新', 'success');
     closeModal();
+    loadUsers();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+// 禁用 / 启用用户
+async function toggleDisableUser(id, disable) {
+  try {
+    await api('/api/admin/users/' + id, { method: 'PUT', body: { disabled: disable } });
+    toast(disable ? '用户已禁用' : '用户已启用', 'success');
     loadUsers();
   } catch (err) { toast(err.message, 'error'); }
 }

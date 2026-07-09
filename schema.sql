@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
   password      TEXT NOT NULL,                     -- SHA256
   api_key       TEXT UNIQUE NOT NULL,              -- 32位hex
   is_admin      INTEGER NOT NULL DEFAULT 0,        -- 0/1
+  disabled      INTEGER NOT NULL DEFAULT 0,        -- 0=正常 1=禁用(管理员可禁用用户)
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

@@ -8,7 +8,7 @@ const LOG_RETENTION_DAYS = 30;
 // ============ 转换函数 (DB 行 -> 安全对象) ============
 interface UserRow {
   id: string; username: string; password: string; api_key: string;
-  is_admin: number; created_at: string;
+  is_admin: number; disabled: number; created_at: string;
 }
 interface MailAccountRow {
   id: string; user_id: string; provider: string; email: string;
@@ -65,6 +65,7 @@ async function toSafeUser(env: Env, row: UserRow): Promise<SafeUser> {
     username: row.username,
     api_key: row.api_key,
     is_admin: row.is_admin === 1,
+    disabled: row.disabled === 1,
     mail_accounts: (accounts.results || []).map(toSafeMailAccount),
     alias,
     created_at: row.created_at,
@@ -124,15 +125,26 @@ export async function createUser(env: Env, username: string, password: string, i
   return getUserById(env, id);
 }
 
-export async function updateUser(env: Env, userId: string, password?: string, isAdmin?: boolean): Promise<SafeUser | null> {
-  if (password !== undefined) {
-    const hashed = await sha256(password);
+// 更新用户: 支持用户名/密码/管理员/禁用状态 (管理员编辑功能)
+export async function updateUser(env: Env, userId: string, opts: {
+  username?: string; password?: string; isAdmin?: boolean; disabled?: boolean;
+}): Promise<SafeUser | null> {
+  if (opts.username !== undefined) {
+    await env.DB.prepare('UPDATE users SET username = ? WHERE id = ?')
+      .bind(opts.username, userId).run();
+  }
+  if (opts.password !== undefined) {
+    const hashed = await sha256(opts.password);
     await env.DB.prepare('UPDATE users SET password = ? WHERE id = ?')
       .bind(hashed, userId).run();
   }
-  if (isAdmin !== undefined) {
+  if (opts.isAdmin !== undefined) {
     await env.DB.prepare('UPDATE users SET is_admin = ? WHERE id = ?')
-      .bind(isAdmin ? 1 : 0, userId).run();
+      .bind(opts.isAdmin ? 1 : 0, userId).run();
+  }
+  if (opts.disabled !== undefined) {
+    await env.DB.prepare('UPDATE users SET disabled = ? WHERE id = ?')
+      .bind(opts.disabled ? 1 : 0, userId).run();
   }
   return getUserById(env, userId);
 }
@@ -329,6 +341,19 @@ export async function setAlias(env: Env, userId: string, mailAccountId: string, 
 
 export async function clearAlias(env: Env, userId: string): Promise<void> {
   await env.DB.prepare('DELETE FROM aliases WHERE user_id = ?').bind(userId).run();
+}
+
+// 管理员为指定用户设置别名 (复用 setAlias 逻辑,不校验所有权,由调用方保证邮箱存在)
+export async function adminSetAlias(env: Env, userId: string, mailAccountId: string, label: string): Promise<{ alias: Alias | null; err?: string }> {
+  const account = await env.DB.prepare('SELECT * FROM mail_accounts WHERE id = ?').bind(mailAccountId).first<MailAccountRow>();
+  if (!account) return { alias: null, err: '未找到指定的邮箱' };
+  const full = buildAliasFull(account.email, label);
+  if (!full) return { alias: null, err: '别名生成失败,邮箱格式错误' };
+  await env.DB.prepare(
+    `INSERT INTO aliases(user_id, mail_account_id, label, full, updated_at) VALUES(?,?,?,?,?)
+     ON CONFLICT(user_id) DO UPDATE SET mail_account_id=excluded.mail_account_id, label=excluded.label, full=excluded.full, updated_at=excluded.updated_at`
+  ).bind(userId, mailAccountId, label, full, nowISO()).run();
+  return { alias: await getAlias(env, userId) };
 }
 
 // ============ 使用日志 ============

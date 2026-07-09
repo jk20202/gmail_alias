@@ -1,7 +1,7 @@
 // 所有 HTTP 路由处理 - 按模块分组,每个函数接收 ctx 返回 Response
 import type { Env, SafeUser, FetchParams } from './types';
 import * as db from './db';
-import { buildAuthURL, handleOAuthCallback, checkAccountAuthStatus } from './oauth';
+import { buildAuthURL, handleOAuthCallback, checkAccountAuthStatus, startDeviceFlow, pollDeviceFlow } from './oauth';
 import { fetchEmails, markEmailsRead } from './emailService';
 import { sha256, randomLabel } from './utils';
 import { pollAndPush, sendTestEvent } from './webhook';
@@ -90,6 +90,8 @@ export async function authLogin(ctx: Ctx): Promise<Response> {
   if (!raw) return fail('用户名或密码错误', 401);
   const hashed = await sha256(password);
   if (raw.password !== hashed) return fail('用户名或密码错误', 401);
+  // 禁用用户禁止登录
+  if (raw.disabled === 1) return fail('该账户已被禁用,请联系管理员', 403);
   const token = await db.createSession(ctx.env, raw.id);
   const user = await db.getUserById(ctx.env, raw.id);
   return ok({ session_token: token, user });
@@ -154,11 +156,31 @@ export async function adminCreateUser(ctx: Ctx): Promise<Response> {
 export async function adminUpdateUser(ctx: Ctx): Promise<Response> {
   const admin = await requireAdmin(ctx);
   const userId = ctx.url.pathname.split('/')[4];
-  const { password, is_admin } = ctx.body;
-  const user = await db.updateUser(ctx.env, userId, password, is_admin);
+  const { username, password, is_admin, disabled } = ctx.body;
+  // 用户名若修改需校验唯一性
+  if (username !== undefined) {
+    const exist = await db.getUserByUsername(ctx.env, username);
+    if (exist && exist.id !== userId) return fail('用户名已存在', 409);
+  }
+  const user = await db.updateUser(ctx.env, userId, {
+    username, password, isAdmin: is_admin, disabled,
+  });
   if (!user) return fail('用户不存在', 404);
   await db.addLog(ctx.env, admin.id, admin.username, '', 'update_user', `更新了用户 ${user.username}`);
   return ok(user);
+}
+
+// 管理员为指定用户设置别名 (管理员编辑用户时的别名设置)
+// 路径 /api/admin/users/:id/alias
+export async function adminSetUserAlias(ctx: Ctx): Promise<Response> {
+  const admin = await requireAdmin(ctx);
+  const userId = ctx.url.pathname.split('/')[4];
+  const { mail_account_id, label } = ctx.body;
+  if (!mail_account_id || !label) return fail('邮箱和别名标签必填');
+  const result = await db.adminSetAlias(ctx.env, userId, mail_account_id, label);
+  if (result.err) return fail(result.err);
+  await db.addLog(ctx.env, admin.id, admin.username, '', 'admin_set_alias', `为用户 ${userId} 设置别名 ${result.alias?.full}`);
+  return ok(result.alias);
 }
 
 export async function adminDeleteUser(ctx: Ctx): Promise<Response> {
@@ -293,6 +315,36 @@ export async function accountDeleteAccount(ctx: Ctx): Promise<Response> {
   const ok2 = await db.deleteMailAccount(ctx.env, user.id, id);
   if (!ok2) return fail('邮箱账号不存在', 404);
   await db.addLog(ctx.env, user.id, user.username, '', 'delete_account', `删除了邮箱 ${id}`);
+  return ok(null);
+}
+
+// ============ Device Code Flow (微软,绕过 redirect_uri) ============
+// 发起 device code 授权,前端弹窗显示 user_code
+export async function accountDeviceStart(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  try {
+    const data = await startDeviceFlow(ctx.env, user.id);
+    return ok(data);
+  } catch (e) {
+    return fail((e as Error).message);
+  }
+}
+
+// 轮询 device code 授权状态,前端每 3-5 秒调用一次
+export async function accountDeviceStatus(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const result = await pollDeviceFlow(ctx.env, user.id);
+  return ok(result);
+}
+
+// 用户自助切换自己邮箱的公开状态 (是否允许其他用户使用该邮箱)
+// 路径 /api/account/mail_accounts/:id/public
+export async function accountTogglePublic(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const id = ctx.url.pathname.split('/').slice(-2, -1)[0];
+  const { is_public } = ctx.body;
+  await db.updateMailAccount(ctx.env, user.id, id, is_public);
+  await db.addLog(ctx.env, user.id, user.username, '', 'toggle_public', `邮箱 ${id} 公开状态改为 ${is_public}`);
   return ok(null);
 }
 

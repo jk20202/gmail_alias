@@ -26,6 +26,7 @@ export interface SafeUser {
   username: string;
   api_key: string;
   is_admin: boolean;
+  disabled: boolean;          // 是否被管理员禁用
   mail_accounts: SafeMailAccount[];
   alias: Alias | null;
   created_at: string;
