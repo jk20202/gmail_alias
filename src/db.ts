@@ -210,6 +210,13 @@ export async function getMailAccountById(env: Env, accountId: string): Promise<M
   return row ? (row as unknown as MailAccountRaw) : null;
 }
 
+// 按 user + provider + email 查询(用于 OAuth 重新授权时 upsert,避免重复绑定)
+export async function getMailAccountByUserAndEmail(env: Env, userId: string, provider: string, email: string): Promise<MailAccountRow | null> {
+  return env.DB.prepare(
+    'SELECT * FROM mail_accounts WHERE user_id = ? AND provider = ? AND email = ?'
+  ).bind(userId, provider, email).first<MailAccountRow>();
+}
+
 // 列出用户可用的邮箱(自己的 + 别人公开的),不含 token
 export async function listAvailableAccounts(env: Env, userId: string): Promise<Array<SafeMailAccount & { owner: string; is_own: boolean }>> {
   const { results } = await env.DB.prepare(

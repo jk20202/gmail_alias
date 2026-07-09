@@ -8,8 +8,9 @@ export interface Env {
   // OAuth 凭据 (通过 wrangler secret 设置)
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
-  MS_CLIENT_ID: string;
-  MS_CLIENT_SECRET: string;
+  // 微软:默认走 Thunderbird 公共客户端(无需 secret),MS_CLIENT_ID 可覆盖,MS_CLIENT_SECRET 已废弃保留兼容
+  MS_CLIENT_ID?: string;
+  MS_CLIENT_SECRET?: string;
   // 安全密钥
   JWT_SECRET: string;
   ENCRYPT_KEY: string;        // 32字节 hex,用于 AES-GCM 加密 refresh_token

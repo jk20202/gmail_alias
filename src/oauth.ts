@@ -1,8 +1,8 @@
 // OAuth 流程: Google (Gmail) + Microsoft (Outlook/Hotmail/Live)
 // 两者都使用 Authorization Code Flow + refresh_token
-import type { Env } from './types';
+import type { Env, MailAccountRaw } from './types';
 import { randomHex, encrypt, decrypt, isExpired, nowISO } from './utils';
-import { addMailAccount, updateMailAccountToken, getMailAccountById } from './db';
+import { addMailAccount, updateMailAccountToken, getMailAccountById, getMailAccountByUserAndEmail } from './db';
 
 // ============ 公共配置 ============
 // Gmail OAuth 端点
@@ -15,12 +15,28 @@ const GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/userinfo.email',
 ].join(' ');
 
-// Microsoft OAuth 端点 (common 支持个人+组织账户)
-const MS_AUTH_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
-const MS_TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
+// Microsoft OAuth 端点
+// 使用 consumers 租户:仅支持个人微软账号(hotmail/outlook/live),与公共客户端搭配无需 client_secret
+// (参考 emails_cloud 仓库实现:common 端点 + client_secret 对个人账号常出问题)
+const MS_AUTH_URL = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize';
+const MS_TOKEN_URL = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token';
 const MS_USERINFO_URL = 'https://graph.microsoft.com/v1.0/me';
-// Mail.Read 读邮件 + offline_access 拿 refresh_token
-const MS_SCOPES = ['Mail.Read', 'offline_access'].join(' ');
+// Graph API 全限定 scope: Mail.Read 读邮件 + Mail.ReadWrite 标记已读 + User.Read 拿邮箱 + offline_access 拿 refresh_token
+const MS_SCOPES = [
+  'https://graph.microsoft.com/Mail.Read',
+  'https://graph.microsoft.com/Mail.ReadWrite',
+  'https://graph.microsoft.com/User.Read',
+  'offline_access',
+].join(' ');
+
+// Thunderbird 公开注册的 Azure 应用 client_id (公共客户端,无需 client_secret)
+// 作为默认值;如自注册了应用,可用环境变量 MS_CLIENT_ID 覆盖
+const MS_DEFAULT_CLIENT_ID = '9e5f94bc-e8a4-4e73-b8be-63364c29d753';
+
+// 取微软 client_id:优先环境变量,否则用 Thunderbird 公共客户端
+function msClientId(env: Env): string {
+  return env.MS_CLIENT_ID || MS_DEFAULT_CLIENT_ID;
+}
 
 // ============ 1) 生成授权 URL ============
 // state 存到 KV (5分钟过期),防 CSRF
@@ -30,15 +46,17 @@ export async function buildAuthURL(env: Env, userId: string, provider: 'gmail' |
   const stateData = JSON.stringify({ user_id: userId, provider, ts: Date.now() });
   await env.KV.put(`oauth:${state}`, stateData, { expirationTtl: 300 });
 
+  // 公共参数
   const params = new URLSearchParams({
-    client_id: provider === 'gmail' ? env.GOOGLE_CLIENT_ID : env.MS_CLIENT_ID,
+    client_id: provider === 'gmail' ? env.GOOGLE_CLIENT_ID : msClientId(env),
     redirect_uri: redirectUri,
     response_type: 'code',
     scope: provider === 'gmail' ? GOOGLE_SCOPES : MS_SCOPES,
     state,
-    access_type: 'offline',         // 要求返回 refresh_token
     prompt: 'consent',             // 强制重新同意,保证拿到 refresh_token
   });
+  // access_type=offline 是 Google 专有参数,微软靠 offline_access scope 拿 refresh_token
+  if (provider === 'gmail') params.set('access_type', 'offline');
 
   const base = provider === 'gmail' ? GOOGLE_AUTH_URL : MS_AUTH_URL;
   return `${base}?${params.toString()}`;
@@ -74,12 +92,18 @@ export async function handleOAuthCallback(env: Env, code: string, state: string)
     ? await getGoogleEmail(tokenResp.access_token)
     : await getMicrosoftEmail(tokenResp.access_token);
 
-  // 4. 加密存储
+  // 4. 加密存储 (upsert: 同一用户同 provider 同 email 已存在则更新 token,避免重复绑定)
   const encAccess = await encrypt(tokenResp.access_token, env);
   const encRefresh = await encrypt(tokenResp.refresh_token, env);
   const expiresAt = new Date(Date.now() + (tokenResp.expires_in || 3600) * 1000).toISOString();
 
-  await addMailAccount(env, stateData.user_id, stateData.provider, email, encAccess, encRefresh, expiresAt, false);
+  const existing = await getMailAccountByUserAndEmail(env, stateData.user_id, stateData.provider, email);
+  if (existing) {
+    // 重新授权:仅更新 token,保留 id / is_public 等属性
+    await updateMailAccountToken(env, existing.id, encAccess, encRefresh, expiresAt);
+  } else {
+    await addMailAccount(env, stateData.user_id, stateData.provider, email, encAccess, encRefresh, expiresAt, false);
+  }
 
   return {
     provider: stateData.provider,
@@ -125,11 +149,11 @@ async function getGoogleEmail(accessToken: string): Promise<string> {
 }
 
 // ============ Microsoft: 换 token ============
+// 公共客户端(无 client_secret):仅用 client_id + code 换 token
 async function exchangeMicrosoftCode(env: Env, code: string, redirectUri: string): Promise<TokenResponse> {
   const params = new URLSearchParams({
     code,
-    client_id: env.MS_CLIENT_ID,
-    client_secret: env.MS_CLIENT_SECRET,
+    client_id: msClientId(env),
     redirect_uri: redirectUri,
     grant_type: 'authorization_code',
     scope: MS_SCOPES,
@@ -200,20 +224,54 @@ async function refreshGoogleToken(env: Env, refreshToken: string): Promise<Token
   return { ...data, refresh_token: data.refresh_token || refreshToken };
 }
 
-// Microsoft 刷新
+// Microsoft 刷新 (公共客户端,无 client_secret)
 async function refreshMicrosoftToken(env: Env, refreshToken: string): Promise<TokenResponse> {
   const resp = await fetch(MS_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
-      client_id: env.MS_CLIENT_ID,
-      client_secret: env.MS_CLIENT_SECRET,
+      client_id: msClientId(env),
       refresh_token: refreshToken,
       grant_type: 'refresh_token',
       scope: MS_SCOPES,
     }),
   });
-  const data = await resp.json() as TokenResponse & { error?: string };
-  if (!resp.ok) throw new Error(`Microsoft refresh error: ${data.error}`);
+  const data = await resp.json() as TokenResponse & { error?: string; error_description?: string };
+  if (!resp.ok) throw new Error(`Microsoft refresh error: ${data.error_description || data.error}`);
   return { ...data, refresh_token: data.refresh_token || refreshToken };
+}
+
+// ============ 授权状态探测 ============
+// 用 access_token 调一次 Graph /me 或 Gmail userinfo,能成功说明 token 有效
+// 失败则尝试刷新一次,刷新也失败说明需重新授权
+export async function checkAccountAuthStatus(env: Env, accountId: string): Promise<{ ok: boolean; reason?: string }> {
+  let account: MailAccountRaw | null;
+  try {
+    account = await getMailAccountById(env, accountId);
+  } catch {
+    return { ok: false, reason: '账号不存在' };
+  }
+  if (!account) return { ok: false, reason: '账号不存在' };
+
+  // 直接用 access_token 试探(不触发自动刷新)
+  const accessToken = await decrypt(account.access_token, env);
+  const probeResp = account.provider === 'gmail'
+    ? await fetch(GOOGLE_USERINFO_URL, { headers: { Authorization: `Bearer ${accessToken}` } })
+    : await fetch(MS_USERINFO_URL, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (probeResp.ok) return { ok: true };
+
+  // access_token 失效,尝试刷新一次
+  try {
+    const refreshToken = await decrypt(account.refresh_token, env);
+    const refreshed = account.provider === 'gmail'
+      ? await refreshGoogleToken(env, refreshToken)
+      : await refreshMicrosoftToken(env, refreshToken);
+    const encAccess = await encrypt(refreshed.access_token, env);
+    const encRefresh = refreshed.refresh_token ? await encrypt(refreshed.refresh_token, env) : account.refresh_token;
+    const newExpiresAt = new Date(Date.now() + (refreshed.expires_in || 3600) * 1000).toISOString();
+    await updateMailAccountToken(env, accountId, encAccess, encRefresh, newExpiresAt);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: 'refresh_token 已失效,需重新授权' };
+  }
 }

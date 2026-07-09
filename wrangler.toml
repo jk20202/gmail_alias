@@ -24,8 +24,10 @@ id = "351359d5a2614b28b273465a29bdfd2d"
 # OAuth 应用凭据 - 实际部署请用 `wrangler secret put` 写入
 # GOOGLE_CLIENT_ID = "xxx"
 # GOOGLE_CLIENT_SECRET = "xxx"
+# 微软: 默认走 Thunderbird 公共客户端(consumers 端点,无需 client_secret),无需配置即可授权 Outlook/Hotmail
+# 如需改用自注册 Azure 应用,可设置 MS_CLIENT_ID 覆盖默认值
 # MS_CLIENT_ID = "xxx"
-# MS_CLIENT_SECRET = "xxx"
+# MS_CLIENT_SECRET = "xxx"   # 已废弃: 公共客户端不再使用 client_secret,保留仅为兼容旧部署
 # JWT_SECRET = "随机长字符串"
 # ENCRYPT_KEY = "32字节hex,用于加密refresh_token"
 # BASE_URL = "https://your-worker.workers.dev"

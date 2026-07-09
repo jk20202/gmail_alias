@@ -8,6 +8,8 @@
 ## 功能特性
 
 - ✅ **多邮箱平台 OAuth 绑定**：Gmail + Outlook/Hotmail/Live（统一走 Microsoft Graph）
+- ✅ **微软公共客户端授权**：内置 Thunderbird 公共 client_id + `consumers` 租户，**无需自建 Azure 应用、无需 client_secret**，开箱即用授权个人微软邮箱
+- ✅ **授权状态探测**：邮箱列表实时显示每个邮箱的授权状态（已授权/未授权），支持一键重新授权（upsert 更新 token，不产生重复记录）
 - ✅ **别名邮箱管理**：基于 `+` 号别名规则，每用户一个别名
 - ✅ **API Key 调用**：32 位密钥，无过期，外部程序直接调用
 - ✅ **Webhook 推送**：新邮件到达自动推送到你的服务，HMAC-SHA256 签名验真
@@ -83,12 +85,16 @@
 4. 凭据 → 创建 OAuth 客户端 ID → 类型 Web → 添加重定向 URI：`https://你的-worker.workers.dev/oauth/callback`
 5. 拿到 `Client ID` 和 `Client Secret`
 
-**注册 Microsoft Azure AD 应用**（用于 Outlook/Hotmail）：
+**注册 Microsoft Azure AD 应用**（用于 Outlook/Hotmail，**可选**）：
+
+> 默认无需注册：系统内置 Thunderbird 公共客户端（`consumers` 租户 + 公共 client_id），开箱即可授权个人微软邮箱（outlook/hotmail/live），**不需要 client_secret**。仅当需要改用自注册应用时才执行以下步骤。
+
 1. 访问 https://portal.azure.com/ → Azure Active Directory → 应用注册 → 新注册
-2. 账户类型选「任何 Azure AD 目录中的账户和个人 Microsoft 账户」
+2. 账户类型选「个人 Microsoft 账户」（与默认 `consumers` 租户一致）
 3. 重定向 URI：Web → `https://你的-worker.workers.dev/oauth/callback`
-4. API 权限 → 添加 `Mail.Read` 和 `offline_access`（委托权限）
-5. 证书和密码 → 新客户端密码 → 拿到 `Client ID`（应用 ID）和 `Client Secret`（Value）
+4. API 权限 → 添加 `Mail.Read`、`Mail.ReadWrite`、`User.Read` 和 `offline_access`（委托权限）
+5. 应用类型设为「公共客户端」（不要创建 client_secret），拿到 `Client ID`（应用 ID）
+6. 用 `wrangler secret put MS_CLIENT_ID` 覆盖默认的 Thunderbird client_id
 
 ### 2. 创建 Cloudflare 资源
 
@@ -126,8 +132,9 @@ wrangler d1 execute mail_alias --local --file=./schema.sql
 ```bash
 wrangler secret put GOOGLE_CLIENT_ID
 wrangler secret put GOOGLE_CLIENT_SECRET
-wrangler secret put MS_CLIENT_ID
-wrangler secret put MS_CLIENT_SECRET
+# 微软默认走 Thunderbird 公共客户端,以下两项可选(仅自注册应用时需要):
+# wrangler secret put MS_CLIENT_ID
+# wrangler secret put MS_CLIENT_SECRET   # 已废弃,公共客户端不使用
 wrangler secret put JWT_SECRET              # 随便输个长字符串
 wrangler secret put ENCRYPT_KEY             # 32 字节 hex:openssl rand -hex 32
 wrangler secret put BASE_URL                # https://你的-worker.workers.dev
@@ -350,6 +357,7 @@ curl "https://your-worker.workers.dev/api/webhook/poll?key=YOUR_KEY&account_id=g
 | GET | `/api/account/mail_accounts` | Session | 我的邮箱 |
 | GET | `/api/account/mail_accounts/available` | Session | 可用邮箱（含公开） |
 | DELETE | `/api/account/mail_accounts/:id` | Session | 删除邮箱 |
+| GET | `/api/account/mail_accounts/:id/status` | Session | 授权状态探测 |
 | GET | `/api/account/oauth/start?provider=gmail\|outlook` | Session | 启动 OAuth |
 | GET | `/oauth/callback` | - | OAuth 回调 |
 | POST | `/api/account/alias` | Session | 设置别名 |
@@ -424,7 +432,9 @@ wrangler dev
 | OAuth 报 `invalid_grant` | 用户之前已授权过，Google 不再返回 refresh_token | 在 Google 账户权限页面撤销本应用授权后重试 |
 | `refresh error: invalid_grant` | refresh_token 失效（用户改密码/撤销授权） | 删除邮箱重新绑定 |
 | 邮件查询返回空但邮箱里有邮件 | 时间范围不对 / 别名过滤太严 | 检查 `to` 参数和 `start_time` |
-| `Mail.Read 权限不足` | Azure 应用没加权限或没管理员同意 | Azure AD → API 权限 → 添加 `Mail.Read` → 点「为 xxx 授予管理员同意」 |
+| `Mail.Read 权限不足` | Azure 应用没加权限或没管理员同意 | 默认 Thunderbird 公共客户端已含所需权限;自注册应用需在 Azure AD → API 权限 → 添加 `Mail.Read` → 点「为 xxx 授予管理员同意」 |
+| 微软授权报 `invalid_client` / 需要 client_secret | 误用了机密客户端流程 | 本项目已改为公共客户端(consumers 端点),无需 client_secret;若自设了 `MS_CLIENT_SECRET` 请删除 |
+| 微软授权只能用个人账号 | `consumers` 租户仅支持个人微软账号 | 如需企业账号,需自注册应用并改用 `common`/`organizations` 端点(需自行改代码) |
 
 ## 附录：Webhook 签名验签
 

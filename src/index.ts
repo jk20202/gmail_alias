@@ -59,6 +59,7 @@ const ROUTE_TABLE: RouteEntry[] = [
   buildRoute('POST', '/api/account/api_key',     routes.accountRegenApiKey),
   buildRoute('GET',  '/api/account/mail_accounts',     routes.accountListAccounts),
   buildRoute('GET',  '/api/account/mail_accounts/available', routes.accountAvailableAccounts),
+  buildRoute('GET',  '/api/account/mail_accounts/:id/status', routes.accountAuthStatus),
   buildRoute('DELETE', '/api/account/mail_accounts/:id', routes.accountDeleteAccount),
   // OAuth
   buildRoute('GET',  '/api/account/oauth/start', routes.accountOAuthStart),

@@ -1,7 +1,7 @@
 // 所有 HTTP 路由处理 - 按模块分组,每个函数接收 ctx 返回 Response
 import type { Env, SafeUser, FetchParams } from './types';
 import * as db from './db';
-import { buildAuthURL, handleOAuthCallback } from './oauth';
+import { buildAuthURL, handleOAuthCallback, checkAccountAuthStatus } from './oauth';
 import { fetchEmails, markEmailsRead } from './emailService';
 import { sha256, randomLabel } from './utils';
 import { pollAndPush, sendTestEvent } from './webhook';
@@ -294,6 +294,19 @@ export async function accountDeleteAccount(ctx: Ctx): Promise<Response> {
   if (!ok2) return fail('邮箱账号不存在', 404);
   await db.addLog(ctx.env, user.id, user.username, '', 'delete_account', `删除了邮箱 ${id}`);
   return ok(null);
+}
+
+// 授权状态探测:校验 token 是否有效,前端列表「授权状态」列用
+// 路径 /api/account/mail_accounts/{id}/status, id 为倒数第二段
+export async function accountAuthStatus(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const segs = ctx.url.pathname.split('/');
+  const id = segs[segs.length - 2];
+  // 越权防护:校验邮箱归属(自己的或公开的)
+  const account = await db.getMailAccountRaw(ctx.env, user.id, id);
+  if (!account) return fail('无权操作该邮箱', 403);
+  const status = await checkAccountAuthStatus(ctx.env, id);
+  return ok(status);
 }
 
 export async function accountAvailableAccounts(ctx: Ctx): Promise<Response> {

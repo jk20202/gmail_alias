@@ -928,10 +928,10 @@ function viewAccountHtml() {
     <div class="card">
       <div class="card-header"><h3>OAuth 邮箱绑定</h3></div>
       <div class="card-body">
-        <p class="form-hint" style="margin-bottom:12px">绑定 Gmail / Outlook 后,系统将自动刷新访问令牌并代为查询邮件</p>
+        <p class="form-hint" style="margin-bottom:12px">绑定邮箱后,系统将自动刷新访问令牌并代为查询邮件。Outlook/Hotmail 采用微软公共客户端,无需自建 Azure 应用即可授权。</p>
         <div style="display:flex; gap:8px; margin-bottom:16px">
           <button class="btn" onclick="startOAuth('gmail')">绑定 Gmail</button>
-          <button class="btn" onclick="startOAuth('outlook')">绑定 Outlook</button>
+          <button class="btn" onclick="startOAuth('outlook')">绑定 Outlook/Hotmail</button>
         </div>
         <h4 style="font-size:13px; color:var(--text-light); margin-bottom:8px">已绑定的邮箱</h4>
         <div id="myAccounts"><div class="loading"><span class="spinner"></span> 加载中...</div></div>
@@ -974,19 +974,57 @@ async function loadMyAccounts() {
     const list = await api('/api/account/mail_accounts');
     State.mailAccounts = list || [];
     if (!list.length) {
-      box.innerHTML = '<div class="mail-empty">尚未绑定任何邮箱</div>';
+      box.innerHTML = '<div class="mail-empty">尚未绑定任何邮箱,点击上方按钮开始绑定</div>';
       return;
     }
-    box.innerHTML = list.map(a => `
-      <div class="account-mail-row">
-        <span class="badge ${a.provider === 'gmail' ? 'badge-primary' : 'badge-warning'}">${esc(a.provider)}</span>
-        <span class="email-text">${esc(a.email)}</span>
-        ${a.is_public ? '<span class="badge badge-gray">公开</span>' : ''}
-        <button class="btn btn-danger btn-sm" onclick="deleteAccount('${esc(a.id)}','${esc(a.email)}')">删除</button>
-      </div>`).join('');
+    // 渲染表格骨架: 邮箱 / 类型 / Plus寻址 / 授权状态 / 操作
+    // 授权状态先显示"检测中",随后异步探测更新
+    box.innerHTML = `<div class="table-wrap"><table class="table">
+      <thead><tr>
+        <th>邮箱</th><th>类型</th><th>Plus寻址</th><th>授权状态</th><th>操作</th>
+      </tr></thead>
+      <tbody>${list.map(a => `
+        <tr>
+          <td><span class="mono">${esc(a.email)}</span>${a.is_public ? ' <span class="badge badge-gray">公开</span>' : ''}</td>
+          <td><span class="badge ${a.provider === 'gmail' ? 'badge-primary' : 'badge-warning'}">${esc(a.provider)}</span></td>
+          <td><span class="badge badge-success">✓ 启用</span></td>
+          <td id="acc-status-${esc(a.id)}"><span class="badge badge-gray">检测中...</span></td>
+          <td>
+            <button class="btn btn-secondary btn-sm" id="acc-reauth-${esc(a.id)}" onclick="reauthAccount('${esc(a.id)}','${esc(a.provider)}')">重新授权</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteAccount('${esc(a.id)}','${esc(a.email)}')">删除</button>
+          </td>
+        </tr>`).join('')}</tbody>
+    </table></div>`;
+    // 并发探测每个邮箱的授权状态(不阻塞渲染)
+    list.forEach(a => probeAuthStatus(a.id));
   } catch (err) {
     box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
   }
+}
+
+// 探测单个邮箱授权状态并更新对应单元格与操作按钮
+async function probeAuthStatus(id) {
+  const cell = document.getElementById('acc-status-' + id);
+  if (!cell) return;
+  try {
+    const data = await api('/api/account/mail_accounts/' + id + '/status');
+    if (data && data.ok) {
+      cell.innerHTML = '<span class="badge badge-success">已授权</span>';
+    } else {
+      cell.innerHTML = '<span class="badge badge-danger">未授权</span>';
+      const btn = document.getElementById('acc-reauth-' + id);
+      if (btn) btn.textContent = '继续授权';
+    }
+  } catch (e) {
+    cell.innerHTML = '<span class="badge badge-danger">未授权</span>';
+    const btn = document.getElementById('acc-reauth-' + id);
+    if (btn) btn.textContent = '继续授权';
+  }
+}
+
+// 重新授权 / 继续授权: 复用 OAuth 流程,回调时按 email upsert 更新 token
+function reauthAccount(id, provider) {
+  startOAuth(provider);
 }
 
 // 重新生成 API Key
