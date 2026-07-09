@@ -4,9 +4,12 @@ compatibility_date = "2024-04-01"
 compatibility_flags = ["nodejs_compat"]
 
 # Workers 静态资源(前端界面)
+# run_worker_first = true: 所有请求先经过 Worker,由 Worker 调用 ASSETS 并设置缓存头
+# 这样能确保 HTML 不被 CDN 边缘缓存,用户总能加载最新前端代码
 [assets]
 directory = "./static"
 binding = "ASSETS"
+run_worker_first = true
 
 # D1 数据库(用户/邮箱账号/Webhook/日志)
 [[d1_databases]]
