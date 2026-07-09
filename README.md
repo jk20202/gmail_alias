@@ -8,14 +8,15 @@
 ## 功能特性
 
 - ✅ **多邮箱平台 OAuth 绑定**：Gmail + Outlook/Hotmail/Live（统一走 Microsoft Graph）
-- ✅ **微软公共客户端授权**：内置 Thunderbird 公共 client_id + `consumers` 租户，**无需自建 Azure 应用、无需 client_secret**，开箱即用授权个人微软邮箱
+- ✅ **微软 Device Code 授权**：采用 Device Code Flow，**无需 redirect_uri、无需自建 Azure 应用、无需 client_secret**，用户在新页面输入 user_code 完成授权，完美绕过公共客户端回调地址不匹配问题
 - ✅ **授权状态探测**：邮箱列表实时显示每个邮箱的授权状态（已授权/未授权），支持一键重新授权（upsert 更新 token，不产生重复记录）
-- ✅ **别名邮箱管理**：基于 `+` 号别名规则，每用户一个别名
+- ✅ **别名邮箱管理**：基于 `+` 号别名规则，每用户一个别名，别名地址一键复制
 - ✅ **API Key 调用**：32 位密钥，无过期，外部程序直接调用
-- ✅ **Webhook 推送**：新邮件到达自动推送到你的服务，HMAC-SHA256 签名验真
-- ✅ **多用户**：管理员 + 普通用户，注册开关
+- ✅ **Webhook 推送**：支持**直接推送到飞书/钉钉群机器人**（自动转换消息格式），也支持原始 JSON 推送到自建服务；HMAC-SHA256 签名验真
+- ✅ **多用户**：管理员 + 普通用户，注册开关，管理员可编辑/禁用用户
+- ✅ **邮箱共享**：用户可将自有邮箱设为公开，其他用户可通过公开邮箱创建自己的别名
 - ✅ **使用统计**：30 天保留，按用户/邮箱统计
-- ✅ **Web 界面**：响应式中文界面
+- ✅ **Web 界面**：响应式中文界面，API 文档左右分栏布局
 - ✅ **零服务器**：全 Cloudflare 免费层（Workers 10 万请求/天 + D1 5GB + KV）
 
 ## 与 Python 版本的对比
@@ -85,16 +86,13 @@
 4. 凭据 → 创建 OAuth 客户端 ID → 类型 Web → 添加重定向 URI：`https://你的-worker.workers.dev/oauth/callback`
 5. 拿到 `Client ID` 和 `Client Secret`
 
-**注册 Microsoft Azure AD 应用**（用于 Outlook/Hotmail，**可选**）：
+**微软邮箱授权**（用于 Outlook/Hotmail，**无需任何配置**）：
 
-> 默认无需注册：系统内置 Thunderbird 公共客户端（`consumers` 租户 + 公共 client_id），开箱即可授权个人微软邮箱（outlook/hotmail/live），**不需要 client_secret**。仅当需要改用自注册应用时才执行以下步骤。
-
-1. 访问 https://portal.azure.com/ → Azure Active Directory → 应用注册 → 新注册
-2. 账户类型选「个人 Microsoft 账户」（与默认 `consumers` 租户一致）
-3. 重定向 URI：Web → `https://你的-worker.workers.dev/oauth/callback`
-4. API 权限 → 添加 `Mail.Read`、`Mail.ReadWrite`、`User.Read` 和 `offline_access`（委托权限）
-5. 应用类型设为「公共客户端」（不要创建 client_secret），拿到 `Client ID`（应用 ID）
-6. 用 `wrangler secret put MS_CLIENT_ID` 覆盖默认的 Thunderbird client_id
+> 系统采用 **Device Code Flow** 授权微软邮箱，**无需注册 Azure 应用、无需 redirect_uri、无需 client_secret**。
+> 用户在「我的账户」点击「绑定 Outlook/Hotmail」后，弹窗显示 `user_code`，用户在新页面登录微软账号并输入代码即可完成授权。
+> 此方案完美绕过 Thunderbird 公共客户端 redirect_uri 不匹配的问题。
+>
+> 仅当需要改用自注册应用时，才用 `wrangler secret put MS_CLIENT_ID` 覆盖默认的 client_id。
 
 ### 2. 创建 Cloudflare 资源
 
@@ -304,12 +302,30 @@ client.mark_read("user+site1@gmail.com", sender="noreply@example.com")
 
 ## Webhook 推送
 
+### 两种推送模式
+
+系统根据回调 URL 的域名自动识别推送模式：
+
+| 模式 | 回调 URL 示例 | 行为 |
+|------|--------------|------|
+| **飞书直推** | `https://open.feishu.cn/open-apis/bot/v2/hook/xxx` | 自动转换为飞书 `msg_type=text` 消息格式，直接推送到飞书群 |
+| **钉钉直推** | `https://oapi.dingtalk.com/robot/send?access_token=xxx` | 自动转换为钉钉消息格式 |
+| **原始 JSON** | 其他任意 HTTPS 地址 | POST 完整 JSON 载荷，Content-Type: application/json |
+
+> **推荐使用飞书直推**：无需自建中转服务，回调 URL 直接填飞书群机器人地址即可。
+> SSRF 防护已白名单放行飞书/钉钉/企业微信/Slack/Discord 域名。
+
 ### 工作流程
 
-1. 在「Webhook 订阅」页填写：监听的邮箱账号、回调 URL、订阅事件（`new_mail`）、可选 secret
+1. 在「Webhook 订阅」页填写：监听的邮箱账号、回调 URL（飞书机器人地址或其他）、订阅事件（`new_mail`）
 2. 系统**主动轮询**该邮箱最近 10 分钟的邮件，匹配后聚合推送到你的 URL
-3. 推送是 HTTP POST，Content-Type: application/json
-4. 如果填了 secret，会带 `X-Webhook-Signature` 头用于验真
+3. **每用户仅保留一个 Webhook 订阅**（创建新的会自动清除旧的；更换别名也会自动清除）
+4. 如果填了 secret（仅原始 JSON 模式有效），会带 `X-Webhook-Signature` 头用于验真
+
+### 权限规则
+
+- **自己拥有的邮箱**：可订阅整个邮箱（监听全部邮件），target_alias 可选
+- **别人公开的邮箱**：不能订阅整箱；只能订阅自己的别名（target_alias 自动锁定为你的别名）
 
 ### 触发推送
 
@@ -358,27 +374,31 @@ curl "https://your-worker.workers.dev/api/webhook/poll?key=YOUR_KEY&account_id=g
 | GET | `/api/account/mail_accounts/available` | Session | 可用邮箱（含公开） |
 | DELETE | `/api/account/mail_accounts/:id` | Session | 删除邮箱 |
 | GET | `/api/account/mail_accounts/:id/status` | Session | 授权状态探测 |
-| GET | `/api/account/oauth/start?provider=gmail\|outlook` | Session | 启动 OAuth |
-| GET | `/oauth/callback` | - | OAuth 回调 |
-| POST | `/api/account/alias` | Session | 设置别名 |
+| PUT | `/api/account/mail_accounts/:id/public` | Session | 切换邮箱公开状态 |
+| GET | `/api/account/oauth/start?provider=gmail` | Session | 启动 Gmail OAuth |
+| POST | `/api/account/oauth/device` | Session | 启动微软 Device Code 授权 |
+| GET | `/api/account/oauth/device/status` | Session | 轮询微软授权状态 |
+| GET | `/oauth/callback` | - | Gmail OAuth 回调 |
+| POST | `/api/account/alias` | Session | 设置别名（会自动清除旧 Webhook） |
 | GET | `/api/account/alias/random_label` | Session | 随机别名 |
 | POST | `/api/email/fetch?key=` | API Key | 查询邮件 |
 | POST | `/api/email/mark_read?key=` | API Key | 标记已读 |
 | POST | `/api/web/email/fetch` | Session | Web 查询邮件 |
 | GET | `/api/webhooks` | Session | 我的 Webhook |
-| POST | `/api/webhooks` | Session | 创建 Webhook |
+| POST | `/api/webhooks` | Session | 创建 Webhook（每用户仅一个，自动清除旧的） |
 | DELETE | `/api/webhooks/:id` | Session | 删除 Webhook |
 | POST | `/api/webhooks/:id/test` | Session | 测试推送 |
 | GET | `/api/webhook/poll?key=&account_id=` | API Key | 触发轮询推送 |
 | GET | `/api/admin/users` | Admin | 用户列表 |
 | POST | `/api/admin/users` | Admin | 创建用户 |
-| PUT | `/api/admin/users/:id` | Admin | 修改用户 |
+| PUT | `/api/admin/users/:id` | Admin | 编辑用户（用户名/密码/角色/禁用） |
+| POST | `/api/admin/users/:id/alias` | Admin | 为用户设置别名 |
 | DELETE | `/api/admin/users/:id` | Admin | 删除用户 |
 | GET | `/api/admin/stats` | Admin | 系统统计 |
 | GET | `/api/admin/settings` | - | 注册开关 |
 | PUT | `/api/admin/settings` | Admin | 修改设置 |
 | GET | `/api/admin/mail_accounts` | Admin | 所有邮箱 |
-| PUT | `/api/admin/mail_accounts/:id` | Admin | 修改邮箱 |
+| PUT | `/api/admin/mail_accounts/:id` | Admin | 修改邮箱（含公开状态） |
 | DELETE | `/api/admin/mail_accounts/:id` | Admin | 删除邮箱 |
 
 ## 数据存储
@@ -428,13 +448,14 @@ wrangler dev
 
 | 现象 | 原因 | 解决 |
 |------|------|------|
-| OAuth 回调报 `redirect_uri_mismatch` | Google/Azure 配置的回调 URI 和实际不一致 | 在 Google/Azure 控制台把回调 URI 改成 `https://你的-worker.workers.dev/oauth/callback` |
+| Gmail OAuth 回调报 `redirect_uri_mismatch` | Google 配置的回调 URI 和实际不一致 | 在 Google 控制台把回调 URI 改成 `https://你的-worker.workers.dev/oauth/callback` |
+| 微软授权弹窗显示 user_code 后无反应 | 用户未在有效期内完成授权 / 网络问题 | 重新点击「绑定 Outlook/Hotmail」获取新 user_code，5 分钟内在新页面完成登录 |
+| 微软授权报 `expired_token` | device code 已过期（默认 15 分钟） | 重新发起授权流程 |
 | OAuth 报 `invalid_grant` | 用户之前已授权过，Google 不再返回 refresh_token | 在 Google 账户权限页面撤销本应用授权后重试 |
 | `refresh error: invalid_grant` | refresh_token 失效（用户改密码/撤销授权） | 删除邮箱重新绑定 |
 | 邮件查询返回空但邮箱里有邮件 | 时间范围不对 / 别名过滤太严 | 检查 `to` 参数和 `start_time` |
-| `Mail.Read 权限不足` | Azure 应用没加权限或没管理员同意 | 默认 Thunderbird 公共客户端已含所需权限;自注册应用需在 Azure AD → API 权限 → 添加 `Mail.Read` → 点「为 xxx 授予管理员同意」 |
-| 微软授权报 `invalid_client` / 需要 client_secret | 误用了机密客户端流程 | 本项目已改为公共客户端(consumers 端点),无需 client_secret;若自设了 `MS_CLIENT_SECRET` 请删除 |
-| 微软授权只能用个人账号 | `consumers` 租户仅支持个人微软账号 | 如需企业账号,需自注册应用并改用 `common`/`organizations` 端点(需自行改代码) |
+| Webhook 测试推送飞书未收到 | 回调 URL 填了内网地址 / 非飞书域名被 SSRF 拦截 | 回调 URL 直接填飞书机器人地址 `https://open.feishu.cn/open-apis/bot/v2/hook/xxx` |
+| 登录提示「该账户已被禁用」 | 管理员在用户管理页禁用了该账户 | 联系管理员在用户管理页点击「启用」 |
 
 ## 附录：Webhook 签名验签
 
