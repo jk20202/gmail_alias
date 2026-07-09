@@ -71,12 +71,7 @@ export async function indexPage(ctx: Ctx): Promise<Response> {
   // 走 [assets] 绑定,直接 fetch 静态资源
   const url = new URL(ctx.req.url);
   if (url.pathname === '/' || url.pathname === '/index.html') {
-    const resp = await ctx.env.ASSETS.fetch(new Request('http://localhost/', { method: 'GET' }));
-    // HTML 禁用缓存: 防止 CDN 边缘缓存旧版前端导致登录等功能失效
-    const h = new Headers(resp.headers);
-    h.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-    h.set('Pragma', 'no-cache');
-    return new Response(resp.body, { status: resp.status, headers: h, statusText: resp.statusText });
+    return ctx.env.ASSETS.fetch(new Request('http://localhost/', { method: 'GET' }));
   }
   // 其他静态文件交给 ASSETS
   return ctx.env.ASSETS.fetch(ctx.req);
