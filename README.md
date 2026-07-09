@@ -145,6 +145,13 @@ database_id = "上一步复制的 database_id"
 binding = "KV"
 id = "上一步复制的 KV namespace id"
 
+# 静态资源配置: run_worker_first=true 确保所有请求先经过 Worker
+# 由 Worker 控制 HTML 缓存头(no-cache),防止 CDN 缓存旧版前端导致登录失效
+[assets]
+directory = "./static"
+binding = "ASSETS"
+run_worker_first = true
+
 # 管理员账号 (首次部署时初始化用,务必改成自己的强密码!)
 # 部署成功后立即登录并在「我的账户」修改密码
 ADMIN_USERNAME = "admin"
@@ -152,6 +159,8 @@ ADMIN_PASSWORD = "你的强密码"   # ← 务必修改,切勿保留默认值
 ```
 
 > ⚠️ **安全提示**：`ADMIN_PASSWORD` 是首次部署时初始化管理员账号用的，部署后请立即登录系统在「我的账户」修改密码。如果后续要重置密码，可直接在 D1 数据库更新 users 表的 password 字段（SHA256 哈希值）。
+
+> 💡 **缓存策略**：`run_worker_first = true` 让所有请求先经过 Worker 脚本，由 Worker 对 HTML 响应设置 `Cache-Control: no-cache` 头。这样每次部署后用户都能立即加载最新前端代码，不会出现「点击登录无反应」「页面不更新」等缓存问题。请勿删除此配置项。
 
 ### 5. 注入 Secrets（敏感配置）
 
@@ -505,7 +514,9 @@ wrangler dev
 | `refresh error: invalid_grant` | refresh_token 失效（用户改密码/撤销授权） | 删除邮箱重新绑定 |
 | 邮件查询返回空但邮箱里有邮件 | 时间范围不对 / 别名过滤太严 | 检查 `to` 参数和 `start_time` |
 | Webhook 测试推送飞书未收到 | 回调 URL 填了内网地址 / 非飞书域名被 SSRF 拦截 | 回调 URL 直接填飞书机器人地址 `https://open.feishu.cn/open-apis/bot/v2/hook/xxx` |
-| 登录提示「该账户已被禁用」 | 管理员在用户管理页禁用了该账户 | 联系管理员在用户管理页点击「启用」 |
+| 登录点击无反应/抓包看不到请求 | 浏览器或 CDN 缓存了旧版前端 HTML | 硬刷新 `Ctrl+Shift+R`；系统已对 HTML 设置 `no-cache` 头并启用 `run_worker_first`，正常情况下不会复现 |
+| 登录提示「账户不存在,或是密码不匹配」 | 用户名/密码错误，或账户被禁用 | 检查账号密码；若确认正确仍无法登录，联系管理员核对账户是否被禁用（统一提示不暴露账户存在性） |
+| 修改代码部署后页面没变化 | CDN 边缘缓存了旧 HTML | 硬刷新浏览器；或等待 CDN 缓存自然过期（已设 no-cache，通常无需等待） |
 
 ## 附录：Webhook 签名验签
 

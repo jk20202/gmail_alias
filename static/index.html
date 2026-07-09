@@ -555,10 +555,13 @@ async function doLogin(e) {
   try {
     const data = await api('/api/auth/login', { method: 'POST', body: { username, password } });
     saveSession(data.session_token, data.user);
+    // 登录成功即时提示
+    toast('登录成功，正在进入系统...', 'success');
     showAppView();
   } catch (err) {
     // 统一提示,不区分"用户不存在"和"密码错误",防止账户枚举
     showLoginError('账户不存在,或是密码不匹配');
+    toast('登录失败:账户不存在或密码不匹配', 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '登录'; }
   }
