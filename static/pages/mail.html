@@ -1,0 +1,85 @@
+<div class="page-title">邮件查询</div>
+<div class="page-desc">选择邮箱并设置别名后，可查询该别名收件箱中的邮件</div>
+<div class="section">
+  <div class="card">
+    <div class="card-header"><h3>别名设置</h3></div>
+    <div class="card-body">
+      <div class="form-row">
+        <div class="form-group" style="flex:2">
+          <label class="form-label">选择邮箱</label>
+          <select id="aliasAccount" class="form-control" style="height:38px;box-sizing:border-box"><option value="">加载中...</option></select>
+        </div>
+        <div class="form-group" style="flex:2">
+          <label class="form-label">别名标签</label>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="aliasLabel" class="form-control" placeholder="如 newsletter" style="height:38px;box-sizing:border-box">
+            <button class="dice-btn" title="随机生成" onclick="genRandomLabel()" aria-label="随机生成">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zM8 17a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm0-7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm4 3.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM16 17a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm0-7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="form-group" style="flex:1">
+          <label class="form-label" style="visibility:hidden">占位</label>
+          <button class="btn btn-block" style="height:38px;box-sizing:border-box" onclick="setAlias()">设置别名</button>
+        </div>
+      </div>
+      <div id="currentAlias" class="form-hint"></div>
+    </div>
+  </div>
+</div>
+<div class="section">
+  <div class="card">
+    <div class="card-header"><h3>查询条件</h3></div>
+    <div class="card-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">发件人</label>
+          <input type="text" id="qSender" class="form-control" placeholder="按发件人筛选">
+        </div>
+        <div class="form-group">
+          <label class="form-label">主题</label>
+          <input type="text" id="qSubject" class="form-control" placeholder="按主题筛选">
+        </div>
+        <div class="form-group">
+          <label class="form-label">关键词</label>
+          <input type="text" id="qKeyword" class="form-control" placeholder="正文关键词">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">开始时间</label>
+          <input type="datetime-local" id="qStart" class="form-control">
+        </div>
+        <div class="form-group">
+          <label class="form-label">结束时间</label>
+          <input type="datetime-local" id="qEnd" class="form-control">
+        </div>
+        <div class="form-group">
+          <label class="form-label">数量上限</label>
+          <input type="number" id="qLimit" class="form-control" value="20" min="1" max="100">
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="visibility:hidden">占位</label>
+          <label class="switch" style="height:38px; display:inline-flex; align-items:center; gap:8px">
+            <input type="checkbox" id="qUnread">
+            <span class="track"></span>
+            <span>仅未读</span>
+          </label>
+        </div>
+      </div>
+      <div style="margin-top:8px">
+        <button class="btn" onclick="fetchMails()">查询邮件</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="section">
+  <div class="card">
+    <div class="card-header"><h3>邮件列表 <span id="mailCount" class="badge badge-gray" style="margin-left:8px">0</span></h3></div>
+    <div class="card-body">
+      <div id="mailList"><div class="mail-empty">请设置查询条件后点击「查询邮件」</div></div>
+    </div>
+  </div>
+</div>

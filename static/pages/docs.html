@@ -1,0 +1,315 @@
+<div class="page-title">API 接入文档</div>
+  <div class="page-desc">本页面面向开发者,介绍如何通过 API Key 调用邮件查询接口与 Webhook 推送。所有接口统一返回 <code class="mono">{ code, msg, data }</code>,<code class="mono">code=0</code> 表示成功。</div>
+
+  <div class="doc-layout">
+    <nav class="doc-nav" id="docNav">
+      <a class="doc-nav-item active" onclick="switchDocPanel('auth')">鉴权方式</a>
+      <a class="doc-nav-item" onclick="switchDocPanel('fetch')"><span class="method-tag" style="background:#0ea5e9;color:#fff">POST</span>查询邮件</a>
+      <a class="doc-nav-item" onclick="switchDocPanel('markread')"><span class="method-tag" style="background:#0ea5e9;color:#fff">POST</span>标记已读</a>
+      <a class="doc-nav-item" onclick="switchDocPanel('poll')"><span class="method-tag" style="background:#16a34a;color:#fff">GET</span>触发推送</a>
+      <a class="doc-nav-item" onclick="switchDocPanel('payload')">推送载荷</a>
+      <a class="doc-nav-item" onclick="switchDocPanel('fields')">emails 字段</a>
+    </nav>
+    <div class="doc-content">
+
+    <div class="doc-panel active" id="panel-auth">
+      <div class="doc-section">
+        <h4>鉴权方式</h4>
+        <div class="card card-body">
+          <p style="margin-bottom:0"><strong>API Key 认证</strong> — 编程调用时在 URL 上携带查询参数 <code class="mono">?key=&lt;your_api_key&gt;</code>。当前账号的 API Key 可在「我的账户」页重新生成。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="doc-panel" id="panel-fetch">
+      <div class="doc-section">
+        <h4>查询邮件</h4>
+        <div class="endpoint">
+    <span class="method m-post">POST</span><span class="path">/api/email/fetch?key=YOUR_API_KEY</span>
+    <div class="desc">按收件地址(含别名)查询邮件,支持多维筛选与全文搜索</div>
+  </div>
+        <h5>请求参数</h5>
+        <div class="table-wrap"><table class="table">
+    <thead><tr><th>字段</th><th>类型</th><th>必填</th><th>说明</th></tr></thead>
+    <tbody><tr><td class="mono">to</td><td>string</td><td>是</td><td>查询邮箱地址(含别名,如 user+site@gmail.com)</td></tr><tr><td class="mono">sender</td><td>string</td><td>否</td><td>按发件人邮箱筛选</td></tr><tr><td class="mono">subject</td><td>string</td><td>否</td><td>按主题关键字筛选</td></tr><tr><td class="mono">keyword</td><td>string</td><td>否</td><td>全文搜索(自动匹配 from/to/subject/body)</td></tr><tr><td class="mono">unseen</td><td>boolean</td><td>否</td><td>true=仅未读邮件</td></tr><tr><td class="mono">start_time</td><td>string</td><td>否</td><td>开始时间 ISO 8601</td></tr><tr><td class="mono">end_time</td><td>string</td><td>否</td><td>结束时间 ISO 8601</td></tr><tr><td class="mono">limit</td><td>number</td><td>否</td><td>返回数量,默认 50,上限 100</td></tr></tbody>
+  </table></div>
+        <h5>请求示例(curl / Python)</h5>
+        <div class="code-tabs">
+  <div class="tab-bar">
+    <button class="tab active" onclick="switchCodeTab(this, 'curl')">curl</button>
+    <button class="tab" onclick="switchCodeTab(this, 'python')">Python</button>
+  </div>
+  <div class="code-pane curl"><div class="code-block-wrap">
+  <button class="copy-btn" onclick="copyCode(this, &quot;curl -X POST \&quot;https://your-worker.workers.dev/api/email/fetch?key=YOUR_API_KEY\&quot; \\\n  -H \&quot;Content-Type: application/json\&quot; \\\n  -d '{\n    \&quot;to\&quot;: \&quot;user+site@gmail.com\&quot;,\n    \&quot;unseen\&quot;: true,\n    \&quot;limit\&quot;: 20\n  }'&quot;)">复制</button>
+  <pre class="code-block"><code>curl -X POST &quot;https://your-worker.workers.dev/api/email/fetch?key=YOUR_API_KEY&quot; \
+  -H &quot;Content-Type: application/json&quot; \
+  -d &#39;{
+    &quot;to&quot;: &quot;user+site@gmail.com&quot;,
+    &quot;unseen&quot;: true,
+    &quot;limit&quot;: 20
+  }&#39;</code></pre>
+</div></div>
+  <div class="code-pane python" style="display:none"><div class="code-block-wrap">
+  <button class="copy-btn" onclick="copyCode(this, &quot;import requests\n\nAPI_BASE = \&quot;https://your-worker.workers.dev\&quot;\nAPI_KEY = \&quot;YOUR_API_KEY\&quot;\n\n# 查询别名邮箱的未读邮件\nresp = requests.post(\n    f\&quot;{API_BASE}/api/email/fetch\&quot;,\n    params={\&quot;key\&quot;: API_KEY},\n    json={\n        \&quot;to\&quot;: \&quot;user+site@gmail.com\&quot;,     # 别名邮箱地址\n        \&quot;sender\&quot;: \&quot;\&quot;,                    # 可选: 按发件人筛选\n        \&quot;subject\&quot;: \&quot;\&quot;,                   # 可选: 按主题筛选\n        \&quot;keyword\&quot;: \&quot;验证码\&quot;,              # 可选: 全文搜索\n        \&quot;unseen\&quot;: True,                  # 可选: 仅未读邮件\n        \&quot;limit\&quot;: 20,                     # 可选: 返回数量, 默认 50, 上限 100\n        # \&quot;start_time\&quot;: \&quot;2026-01-01T00:00:00Z\&quot;,\n        # \&quot;end_time\&quot;:   \&quot;2026-07-08T00:00:00Z\&quot;,\n    },\n    timeout=30,\n)\ndata = resp.json()\nif data[\&quot;code\&quot;] != 0:\n    raise RuntimeError(data[\&quot;msg\&quot;])\n\nresult = data[\&quot;data\&quot;]\nprint(f\&quot;共 {result['total']} 封邮件\&quot;)\nfor mail in result[\&quot;emails\&quot;]:\n    print(f\&quot;- [{mail['date']}] {mail['subject']}  from {mail['from']}\&quot;)\n    print(f\&quot;  正文: {mail['body'][:200]}\&quot;)&quot;)">复制</button>
+  <pre class="code-block"><code>import requests
+
+API_BASE = &quot;https://your-worker.workers.dev&quot;
+API_KEY = &quot;YOUR_API_KEY&quot;
+
+# 查询别名邮箱的未读邮件
+resp = requests.post(
+    f&quot;{API_BASE}/api/email/fetch&quot;,
+    params={&quot;key&quot;: API_KEY},
+    json={
+        &quot;to&quot;: &quot;user+site@gmail.com&quot;,     # 别名邮箱地址
+        &quot;sender&quot;: &quot;&quot;,                    # 可选: 按发件人筛选
+        &quot;subject&quot;: &quot;&quot;,                   # 可选: 按主题筛选
+        &quot;keyword&quot;: &quot;验证码&quot;,              # 可选: 全文搜索
+        &quot;unseen&quot;: True,                  # 可选: 仅未读邮件
+        &quot;limit&quot;: 20,                     # 可选: 返回数量, 默认 50, 上限 100
+        # &quot;start_time&quot;: &quot;2026-01-01T00:00:00Z&quot;,
+        # &quot;end_time&quot;:   &quot;2026-07-08T00:00:00Z&quot;,
+    },
+    timeout=30,
+)
+data = resp.json()
+if data[&quot;code&quot;] != 0:
+    raise RuntimeError(data[&quot;msg&quot;])
+
+result = data[&quot;data&quot;]
+print(f&quot;共 {result[&#39;total&#39;]} 封邮件&quot;)
+for mail in result[&quot;emails&quot;]:
+    print(f&quot;- [{mail[&#39;date&#39;]}] {mail[&#39;subject&#39;]}  from {mail[&#39;from&#39;]}&quot;)
+    print(f&quot;  正文: {mail[&#39;body&#39;][:200]}&quot;)</code></pre>
+</div></div>
+</div>
+        <h5>响应示例</h5>
+        <div class="code-block-wrap">
+  <button class="copy-btn" onclick="copyCode(this, &quot;{\n  \&quot;code\&quot;: 0,\n  \&quot;msg\&quot;: \&quot;ok\&quot;,\n  \&quot;data\&quot;: {\n    \&quot;total\&quot;: 1,\n    \&quot;emails\&quot;: [\n      {\n        \&quot;id\&quot;: \&quot;msg-abc123\&quot;,\n        \&quot;from\&quot;: \&quot;noreply@example.com\&quot;,\n        \&quot;to\&quot;: \&quot;user+site@gmail.com\&quot;,\n        \&quot;subject\&quot;: \&quot;您的验证码\&quot;,\n        \&quot;date\&quot;: \&quot;2026-07-08 14:30:00\&quot;,\n        \&quot;date_iso\&quot;: \&quot;2026-07-08T06:30:00.000Z\&quot;,\n        \&quot;body\&quot;: \&quot;您的验证码是 884213,5 分钟内有效。\&quot;,\n        \&quot;html\&quot;: \&quot;&lt;p>您的验证码是 &lt;b>884213&lt;/b>,5 分钟内有效。&lt;/p>\&quot;,\n        \&quot;unread\&quot;: true,\n        \&quot;provider\&quot;: \&quot;gmail\&quot;\n      }\n    ],\n    \&quot;query\&quot;: {\n      \&quot;to\&quot;: \&quot;user+site@gmail.com\&quot;,\n      \&quot;unseen\&quot;: true,\n      \&quot;limit\&quot;: 20\n    }\n  }\n}&quot;)">复制</button>
+  <pre class="code-block"><code>{
+  &quot;code&quot;: 0,
+  &quot;msg&quot;: &quot;ok&quot;,
+  &quot;data&quot;: {
+    &quot;total&quot;: 1,
+    &quot;emails&quot;: [
+      {
+        &quot;id&quot;: &quot;msg-abc123&quot;,
+        &quot;from&quot;: &quot;noreply@example.com&quot;,
+        &quot;to&quot;: &quot;user+site@gmail.com&quot;,
+        &quot;subject&quot;: &quot;您的验证码&quot;,
+        &quot;date&quot;: &quot;2026-07-08 14:30:00&quot;,
+        &quot;date_iso&quot;: &quot;2026-07-08T06:30:00.000Z&quot;,
+        &quot;body&quot;: &quot;您的验证码是 884213,5 分钟内有效。&quot;,
+        &quot;html&quot;: &quot;&lt;p&gt;您的验证码是 &lt;b&gt;884213&lt;/b&gt;,5 分钟内有效。&lt;/p&gt;&quot;,
+        &quot;unread&quot;: true,
+        &quot;provider&quot;: &quot;gmail&quot;
+      }
+    ],
+    &quot;query&quot;: {
+      &quot;to&quot;: &quot;user+site@gmail.com&quot;,
+      &quot;unseen&quot;: true,
+      &quot;limit&quot;: 20
+    }
+  }
+}</code></pre>
+</div>
+      </div>
+    </div>
+
+    <div class="doc-panel" id="panel-markread">
+      <div class="doc-section">
+        <h4>标记邮件已读</h4>
+        <div class="endpoint">
+    <span class="method m-post">POST</span><span class="path">/api/email/mark_read?key=YOUR_API_KEY</span>
+    <div class="desc">把符合条件的邮件标记为已读</div>
+  </div>
+        <h5>请求参数</h5>
+        <div class="table-wrap"><table class="table">
+    <thead><tr><th>字段</th><th>类型</th><th>必填</th><th>说明</th></tr></thead>
+    <tbody><tr><td class="mono">to</td><td>string</td><td>是</td><td>查询邮箱地址(含别名)</td></tr><tr><td class="mono">sender</td><td>string</td><td>否</td><td>按发件人筛选,限定标记范围</td></tr><tr><td class="mono">subject</td><td>string</td><td>否</td><td>按主题筛选,限定标记范围</td></tr></tbody>
+  </table></div>
+        <h5>请求示例(curl / Python)</h5>
+        <div class="code-tabs">
+  <div class="tab-bar">
+    <button class="tab active" onclick="switchCodeTab(this, 'curl')">curl</button>
+    <button class="tab" onclick="switchCodeTab(this, 'python')">Python</button>
+  </div>
+  <div class="code-pane curl"><div class="code-block-wrap">
+  <button class="copy-btn" onclick="copyCode(this, &quot;curl -X POST \&quot;https://your-worker.workers.dev/api/email/mark_read?key=YOUR_API_KEY\&quot; \\\n  -H \&quot;Content-Type: application/json\&quot; \\\n  -d '{\n    \&quot;to\&quot;: \&quot;user+site@gmail.com\&quot;,\n    \&quot;sender\&quot;: \&quot;noreply@example.com\&quot;\n  }'&quot;)">复制</button>
+  <pre class="code-block"><code>curl -X POST &quot;https://your-worker.workers.dev/api/email/mark_read?key=YOUR_API_KEY&quot; \
+  -H &quot;Content-Type: application/json&quot; \
+  -d &#39;{
+    &quot;to&quot;: &quot;user+site@gmail.com&quot;,
+    &quot;sender&quot;: &quot;noreply@example.com&quot;
+  }&#39;</code></pre>
+</div></div>
+  <div class="code-pane python" style="display:none"><div class="code-block-wrap">
+  <button class="copy-btn" onclick="copyCode(this, &quot;import requests\n\nAPI_BASE = \&quot;https://your-worker.workers.dev\&quot;\nAPI_KEY = \&quot;YOUR_API_KEY\&quot;\n\n# 把指定发件人发来的邮件标记为已读\nresp = requests.post(\n    f\&quot;{API_BASE}/api/email/mark_read\&quot;,\n    params={\&quot;key\&quot;: API_KEY},\n    json={\n        \&quot;to\&quot;: \&quot;user+site@gmail.com\&quot;,       # 必填: 别名邮箱\n        \&quot;sender\&quot;: \&quot;noreply@example.com\&quot;,   # 可选: 仅标记该发件人\n        # \&quot;subject\&quot;: \&quot;验证码\&quot;,             # 可选: 仅标记含该主题的邮件\n    },\n    timeout=30,\n)\ndata = resp.json()\nif data[\&quot;code\&quot;] != 0:\n    raise RuntimeError(data[\&quot;msg\&quot;])\n\nprint(f\&quot;已标记 {data['data']['marked']} 封邮件为已读\&quot;)&quot;)">复制</button>
+  <pre class="code-block"><code>import requests
+
+API_BASE = &quot;https://your-worker.workers.dev&quot;
+API_KEY = &quot;YOUR_API_KEY&quot;
+
+# 把指定发件人发来的邮件标记为已读
+resp = requests.post(
+    f&quot;{API_BASE}/api/email/mark_read&quot;,
+    params={&quot;key&quot;: API_KEY},
+    json={
+        &quot;to&quot;: &quot;user+site@gmail.com&quot;,       # 必填: 别名邮箱
+        &quot;sender&quot;: &quot;noreply@example.com&quot;,   # 可选: 仅标记该发件人
+        # &quot;subject&quot;: &quot;验证码&quot;,             # 可选: 仅标记含该主题的邮件
+    },
+    timeout=30,
+)
+data = resp.json()
+if data[&quot;code&quot;] != 0:
+    raise RuntimeError(data[&quot;msg&quot;])
+
+print(f&quot;已标记 {data[&#39;data&#39;][&#39;marked&#39;]} 封邮件为已读&quot;)</code></pre>
+</div></div>
+</div>
+        <h5>响应示例</h5>
+        <div class="code-block-wrap">
+  <button class="copy-btn" onclick="copyCode(this, &quot;{\n  \&quot;code\&quot;: 0,\n  \&quot;msg\&quot;: \&quot;ok\&quot;,\n  \&quot;data\&quot;: {\n    \&quot;marked\&quot;: 3\n  }\n}&quot;)">复制</button>
+  <pre class="code-block"><code>{
+  &quot;code&quot;: 0,
+  &quot;msg&quot;: &quot;ok&quot;,
+  &quot;data&quot;: {
+    &quot;marked&quot;: 3
+  }
+}</code></pre>
+</div>
+      </div>
+    </div>
+
+    <div class="doc-panel" id="panel-poll">
+      <div class="doc-section">
+        <h4>触发 Webhook 推送</h4>
+        <div class="endpoint">
+    <span class="method m-get">GET</span><span class="path">/api/webhook/poll?key=YOUR_API_KEY&amp;account_id=ACCOUNT_ID</span>
+    <div class="desc">主动触发一次轮询:系统会拉取该邮箱最近 10 分钟邮件并推送到订阅的回调 URL</div>
+  </div>
+        <h5>请求参数</h5>
+        <div class="table-wrap"><table class="table">
+    <thead><tr><th>字段</th><th>类型</th><th>必填</th><th>说明</th></tr></thead>
+    <tbody><tr><td class="mono">key</td><td>string</td><td>是</td><td>API Key(URL 查询参数)</td></tr><tr><td class="mono">account_id</td><td>string</td><td>是</td><td>邮箱账号 ID(在「我的账户」页可查看)</td></tr></tbody>
+  </table></div>
+        <h5>请求示例(curl / Python)</h5>
+        <div class="code-tabs">
+  <div class="tab-bar">
+    <button class="tab active" onclick="switchCodeTab(this, 'curl')">curl</button>
+    <button class="tab" onclick="switchCodeTab(this, 'python')">Python</button>
+  </div>
+  <div class="code-pane curl"><div class="code-block-wrap">
+  <button class="copy-btn" onclick="copyCode(this, &quot;curl \&quot;https://your-worker.workers.dev/api/webhook/poll?key=YOUR_API_KEY&amp;account_id=ACCOUNT_ID\&quot;&quot;)">复制</button>
+  <pre class="code-block"><code>curl &quot;https://your-worker.workers.dev/api/webhook/poll?key=YOUR_API_KEY&amp;account_id=ACCOUNT_ID&quot;</code></pre>
+</div></div>
+  <div class="code-pane python" style="display:none"><div class="code-block-wrap">
+  <button class="copy-btn" onclick="copyCode(this, &quot;import requests\n\nAPI_BASE = \&quot;https://your-worker.workers.dev\&quot;\nAPI_KEY = \&quot;YOUR_API_KEY\&quot;\nACCOUNT_ID = \&quot;your-account-id\&quot;   # 在「我的账户」页可查看\n\n# 主动触发一次轮询: 系统会拉取最近 10 分钟邮件并推送到订阅的回调 URL\nresp = requests.get(\n    f\&quot;{API_BASE}/api/webhook/poll\&quot;,\n    params={\&quot;key\&quot;: API_KEY, \&quot;account_id\&quot;: ACCOUNT_ID},\n    timeout=30,\n)\ndata = resp.json()\nif data[\&quot;code\&quot;] != 0:\n    raise RuntimeError(data[\&quot;msg\&quot;])\n\nresult = data[\&quot;data\&quot;]\nprint(f\&quot;本次推送 {result['pushed']} 个订阅, 失败 {len(result['errors'])} 个\&quot;)&quot;)">复制</button>
+  <pre class="code-block"><code>import requests
+
+API_BASE = &quot;https://your-worker.workers.dev&quot;
+API_KEY = &quot;YOUR_API_KEY&quot;
+ACCOUNT_ID = &quot;your-account-id&quot;   # 在「我的账户」页可查看
+
+# 主动触发一次轮询: 系统会拉取最近 10 分钟邮件并推送到订阅的回调 URL
+resp = requests.get(
+    f&quot;{API_BASE}/api/webhook/poll&quot;,
+    params={&quot;key&quot;: API_KEY, &quot;account_id&quot;: ACCOUNT_ID},
+    timeout=30,
+)
+data = resp.json()
+if data[&quot;code&quot;] != 0:
+    raise RuntimeError(data[&quot;msg&quot;])
+
+result = data[&quot;data&quot;]
+print(f&quot;本次推送 {result[&#39;pushed&#39;]} 个订阅, 失败 {len(result[&#39;errors&#39;])} 个&quot;)</code></pre>
+</div></div>
+</div>
+        <h5>响应示例</h5>
+        <div class="code-block-wrap">
+  <button class="copy-btn" onclick="copyCode(this, &quot;{\n  \&quot;code\&quot;: 0,\n  \&quot;msg\&quot;: \&quot;ok\&quot;,\n  \&quot;data\&quot;: {\n    \&quot;pushed\&quot;: 2,\n    \&quot;errors\&quot;: []\n  }\n}&quot;)">复制</button>
+  <pre class="code-block"><code>{
+  &quot;code&quot;: 0,
+  &quot;msg&quot;: &quot;ok&quot;,
+  &quot;data&quot;: {
+    &quot;pushed&quot;: 2,
+    &quot;errors&quot;: []
+  }
+}</code></pre>
+</div>
+      </div>
+    </div>
+
+    <div class="doc-panel" id="panel-payload">
+      <div class="doc-section">
+        <h4>Webhook 推送载荷说明</h4>
+        <p class="form-hint" style="margin-bottom:12px">系统支持两种推送模式:<br>① <strong>直接推送飞书/钉钉</strong>:回调 URL 填飞书机器人地址(<code class="mono">https://open.feishu.cn/open-apis/bot/v2/hook/xxx</code>),系统自动按飞书消息格式推送,无需中转服务。<br>② <strong>原始 JSON 推送</strong>:回调 URL 填其他地址时,以 POST application/json 推送完整邮件数据。</p>
+        <h5>载荷字段(原始 JSON 模式)</h5>
+        <div class="table-wrap"><table class="table">
+    <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
+    <tbody><tr><td class="mono">event</td><td>string</td><td>事件类型: new_mail / unread / test</td></tr><tr><td class="mono">delivered_at</td><td>string</td><td>推送时间 ISO 8601</td></tr><tr><td class="mono">mail_account_id</td><td>string</td><td>邮箱账号 ID</td></tr><tr><td class="mono">email</td><td>string</td><td>主邮箱地址</td></tr><tr><td class="mono">to_alias</td><td>string?</td><td>命中的别名(未指定时不存在)</td></tr><tr><td class="mono">count</td><td>number</td><td>本次推送邮件数量</td></tr><tr><td class="mono">emails</td><td>array</td><td>邮件数组(字段同查询接口返回)</td></tr></tbody>
+  </table></div>
+        <h5>接收 Webhook 推送的 Python 示例(Flask + 飞书推送)</h5>
+        <div class="code-block-wrap">
+  <button class="copy-btn" onclick="copyCode(this, &quot;import requests\nfrom flask import Flask, request, jsonify\n\napp = Flask(__name__)\n\n# 飞书群机器人 webhook 地址(替换为你自己的)\nFEISHU_WEBHOOK = \&quot;https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx\&quot;\n\n\ndef push_to_feishu(text: str):\n    \&quot;\&quot;\&quot;把消息推送到飞书群机器人\&quot;\&quot;\&quot;\n    requests.post(\n        FEISHU_WEBHOOK,\n        json={\&quot;msg_type\&quot;: \&quot;text\&quot;, \&quot;content\&quot;: {\&quot;text\&quot;: text}},\n        timeout=10,\n    )\n\n\n@app.route(\&quot;/webhook\&quot;, methods=[\&quot;POST\&quot;])\ndef receive_webhook():\n    payload = request.get_json(force=True)\n    event = payload.get(\&quot;event\&quot;)\n    emails = payload.get(\&quot;emails\&quot;, [])\n    alias = payload.get(\&quot;to_alias\&quot;, \&quot;无别名\&quot;)\n\n    # 拼接飞书消息内容\n    lines = [f\&quot;收到新邮件通知 ({event})\&quot;]\n    lines.append(f\&quot;主邮箱: {payload.get('email')}  别名: {alias}\&quot;)\n    lines.append(f\&quot;共 {payload.get('count', 0)} 封邮件:\&quot;)\n    for mail in emails:\n        lines.append(\n            f\&quot;- [{mail.get('date')}] {mail.get('subject')}\&quot;\n            f\&quot;  from {mail.get('from')}\&quot;\n        )\n        body = mail.get(\&quot;body\&quot;, \&quot;\&quot;)\n        if body:\n            lines.append(f\&quot;  正文: {body[:200]}\&quot;)\n\n    push_to_feishu(\&quot;\\n\&quot;.join(lines))\n    return jsonify({\&quot;ok\&quot;: True}), 200\n\n\nif __name__ == \&quot;__main__\&quot;:\n    app.run(host=\&quot;0.0.0.0\&quot;, port=5000)&quot;)">复制</button>
+  <pre class="code-block"><code>import requests
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+
+# 飞书群机器人 webhook 地址(替换为你自己的)
+FEISHU_WEBHOOK = &quot;https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx&quot;
+
+
+def push_to_feishu(text: str):
+    &quot;&quot;&quot;把消息推送到飞书群机器人&quot;&quot;&quot;
+    requests.post(
+        FEISHU_WEBHOOK,
+        json={&quot;msg_type&quot;: &quot;text&quot;, &quot;content&quot;: {&quot;text&quot;: text}},
+        timeout=10,
+    )
+
+
+@app.route(&quot;/webhook&quot;, methods=[&quot;POST&quot;])
+def receive_webhook():
+    payload = request.get_json(force=True)
+    event = payload.get(&quot;event&quot;)
+    emails = payload.get(&quot;emails&quot;, [])
+    alias = payload.get(&quot;to_alias&quot;, &quot;无别名&quot;)
+
+    # 拼接飞书消息内容
+    lines = [f&quot;收到新邮件通知 ({event})&quot;]
+    lines.append(f&quot;主邮箱: {payload.get(&#39;email&#39;)}  别名: {alias}&quot;)
+    lines.append(f&quot;共 {payload.get(&#39;count&#39;, 0)} 封邮件:&quot;)
+    for mail in emails:
+        lines.append(
+            f&quot;- [{mail.get(&#39;date&#39;)}] {mail.get(&#39;subject&#39;)}&quot;
+            f&quot;  from {mail.get(&#39;from&#39;)}&quot;
+        )
+        body = mail.get(&quot;body&quot;, &quot;&quot;)
+        if body:
+            lines.append(f&quot;  正文: {body[:200]}&quot;)
+
+    push_to_feishu(&quot;\n&quot;.join(lines))
+    return jsonify({&quot;ok&quot;: True}), 200
+
+
+if __name__ == &quot;__main__&quot;:
+    app.run(host=&quot;0.0.0.0&quot;, port=5000)</code></pre>
+</div>
+      </div>
+    </div>
+
+    <div class="doc-panel" id="panel-fields">
+      <div class="doc-section">
+        <h4>邮件对象 emails[] 字段说明</h4>
+        <div class="table-wrap"><table class="table">
+    <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
+    <tbody><tr><td class="mono">id</td><td>string</td><td>邮件唯一 ID</td></tr><tr><td class="mono">from</td><td>string</td><td>发件人</td></tr><tr><td class="mono">to</td><td>string</td><td>收件人(别名地址)</td></tr><tr><td class="mono">subject</td><td>string</td><td>主题</td></tr><tr><td class="mono">date</td><td>string</td><td>显示用时间 YYYY-MM-DD HH:MM:SS</td></tr><tr><td class="mono">date_iso</td><td>string</td><td>ISO 8601 时间</td></tr><tr><td class="mono">body</td><td>string</td><td>纯文本正文</td></tr><tr><td class="mono">html</td><td>string</td><td>HTML 正文</td></tr><tr><td class="mono">unread</td><td>boolean</td><td>是否未读</td></tr><tr><td class="mono">provider</td><td>string</td><td>邮箱提供方 gmail/outlook</td></tr></tbody>
+  </table></div>
+      </div>
+    </div>
+
+    </div>
+  </div>

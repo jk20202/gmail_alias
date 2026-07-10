@@ -1,0 +1,39 @@
+<div class="page-title">Webhook 订阅</div>
+<div class="page-desc">当邮箱收到新邮件时,系统会主动向你的回调 URL 推送邮件数据</div>
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header"><h3>创建订阅</h3></div>
+    <div class="card-body">
+      <div class="form-group">
+        <label class="form-label">监听邮箱 <span class="req">*</span></label>
+        <select id="whAccount" class="form-control"><option value="">加载中...</option></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">回调 URL <span class="req">*</span></label>
+        <input type="text" id="whUrl" class="form-control" placeholder="直接填飞书机器人地址 https://open.feishu.cn/open-apis/bot/v2/hook/xxx">
+      </div>
+      <div class="form-group">
+        <label class="form-label">订阅事件 <span class="req">*</span></label>
+        <div style="display:flex; gap:16px; padding-top:6px">
+          <label class="switch"><input type="checkbox" id="whEvNew" checked><span class="track"></span><span>new_mail 新邮件</span></label>
+          <label class="switch"><input type="checkbox" id="whEvUnread"><span class="track"></span><span>unread 未读</span></label>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">目标别名 (可选)</label>
+        <input type="text" id="whAlias" class="form-control" placeholder="仅推送命中此别名的邮件,留空表示全部">
+      </div>
+      <div class="form-group">
+        <label class="form-label">签名密钥 Secret (可选)</label>
+        <input type="text" id="whSecret" class="form-control" placeholder="填写后推送将携带 X-Webhook-Signature 签名">
+      </div>
+      <button class="btn" onclick="createWebhook()">创建订阅</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h3>已订阅列表</h3></div>
+    <div class="card-body">
+      <div id="whList"><div class="loading"><span class="spinner"></span> 加载中...</div></div>
+    </div>
+  </div>
+</div>

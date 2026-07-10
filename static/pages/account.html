@@ -1,0 +1,66 @@
+<div class="page-title">我的账户</div>
+<div class="page-desc">管理个人信息、API Key、OAuth 邮箱绑定与登录密码</div>
+<div class="card-stack">
+  <div class="card">
+    <div class="card-header"><h3>基本信息</h3></div>
+    <div class="card-body" id="accountInfoBody">
+      <div class="info-item">
+        <span class="label">用户名</span>
+        <span class="value" id="accUsername"></span>
+      </div>
+      <div class="info-item">
+        <span class="label">角色</span>
+        <span class="value" id="accRole"></span>
+      </div>
+      <div class="info-item">
+        <span class="label">创建时间</span>
+        <span class="value" id="accCreatedAt"></span>
+      </div>
+      <div id="accAliasSection"></div>
+      <div class="info-item" style="flex-direction:column; align-items:stretch">
+        <span class="label" style="margin-bottom:6px">API Key <span class="form-hint" style="font-weight:normal">编程调用接口的密钥,重新生成后旧密钥立即失效</span></span>
+        <div class="apikey-row">
+          <span class="mono" id="apiKeyText"></span>
+          <button class="btn btn-secondary btn-sm" id="btnCopyApiKey">复制</button>
+          <button class="btn btn-danger btn-sm" onclick="regenApiKey()">重新生成</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>修改密码</h3></div>
+    <div class="card-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">原密码 <span class="req">*</span></label>
+          <input type="password" id="oldPassword" class="form-control" placeholder="请输入当前密码">
+        </div>
+        <div class="form-group">
+          <label class="form-label">新密码 <span class="req">*</span></label>
+          <input type="password" id="newPassword" class="form-control" placeholder="至少 6 个字符">
+        </div>
+        <div class="form-group">
+          <label class="form-label">确认新密码 <span class="req">*</span></label>
+          <input type="password" id="confirmPassword" class="form-control" placeholder="再次输入新密码">
+        </div>
+      </div>
+      <div style="margin-top:8px">
+        <button class="btn" onclick="changeMyPassword()">保存修改</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>OAuth 邮箱绑定</h3></div>
+    <div class="card-body">
+      <p class="form-hint" style="margin-bottom:12px">绑定邮箱后,系统将自动刷新访问令牌并代为查询邮件。Outlook/Hotmail 采用 Device Code 授权,无需配置回调地址即可使用。</p>
+      <div style="display:flex; gap:8px; margin-bottom:16px">
+        <button class="btn" onclick="startOAuth('gmail')">绑定 Gmail</button>
+        <button class="btn" onclick="startOAuth('outlook')">绑定 Outlook/Hotmail</button>
+      </div>
+      <h4 style="font-size:13px; color:var(--text-light); margin-bottom:8px">已绑定的邮箱</h4>
+      <div id="myAccounts"><div class="loading"><span class="spinner"></span> 加载中...</div></div>
+    </div>
+  </div>
+</div>

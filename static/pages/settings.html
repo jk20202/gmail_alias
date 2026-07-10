@@ -1,0 +1,32 @@
+<div class="page-title">系统设置</div>
+<div class="page-desc">管理系统级开关与查看运行统计</div>
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header"><h3>基础设置</h3></div>
+    <div class="card-body">
+      <div class="info-item">
+        <span class="label">允许注册</span>
+        <label class="switch">
+          <input type="checkbox" id="setAllowReg" onchange="saveSettings()">
+          <span class="track"></span>
+          <span id="setAllowRegText"></span>
+        </label>
+      </div>
+      <p class="form-hint">关闭后,注册接口将拒绝新用户注册</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h3>系统统计</h3></div>
+    <div class="card-body">
+      <div class="grid-3" id="statsCards"><div class="loading"><span class="spinner"></span></div></div>
+    </div>
+  </div>
+</div>
+<div class="section">
+  <div class="card">
+    <div class="card-header"><h3>调用日志</h3></div>
+    <div class="card-body">
+      <div id="logsBox" class="table-wrap"><div class="loading"><span class="spinner"></span> 加载中...</div></div>
+    </div>
+  </div>
+</div>
