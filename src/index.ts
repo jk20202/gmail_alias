@@ -136,7 +136,6 @@ export default {
         if (ct.includes('text/html')) {
           newHeaders.set('Cache-Control', 'no-cache, no-store, must-revalidate, proxy-no-cache');
           newHeaders.set('Pragma', 'no-cache');
-          newHeaders.set('Edge Cache TTL', '0');
           newHeaders.set('Surrogate-Control', 'no-store');
         }
         return new Response(assetResp.body, { status: assetResp.status, headers: newHeaders, statusText: assetResp.statusText });

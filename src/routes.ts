@@ -76,7 +76,6 @@ export async function indexPage(ctx: Ctx): Promise<Response> {
     const h = new Headers(resp.headers);
     h.set('Cache-Control', 'no-cache, no-store, must-revalidate, proxy-no-cache');
     h.set('Pragma', 'no-cache');
-    h.set('Edge Cache TTL', '0');
     h.set('Surrogate-Control', 'no-store');
     return new Response(resp.body, { status: resp.status, headers: h, statusText: resp.statusText });
   }
