@@ -1,35 +1,54 @@
 /* ============================================================
- * mail.js — 邮件查询页 (含自动收件、条件缓存、重置)
+ * mail.js — 邮件查询页 (自动收件 + 条件缓存 + 弹窗查看 + 静默更新)
  * ============================================================ */
 
 // localStorage 缓存键
-const LS_MAIL_QUERY = 'mail_alias_mail_query';   // 查询条件
-const LS_MAIL_RESULTS = 'mail_alias_mail_results'; // 邮件结果
+const LS_MAIL_QUERY = 'mail_alias_mail_query';
+const LS_MAIL_RESULTS = 'mail_alias_mail_results';
 
 // 自动收件定时器
 let _mailAutoTimer = null;
+// 标记是否正在查看邮件弹窗 (弹窗打开时静默更新不干扰)
+let _mailViewingIndex = -1;
 
 async function initMailPage() {
   await loadAvailableAccounts();
   refreshCurrentAlias();
   // 恢复缓存的查询条件
   restoreMailQuery();
-  // 如果没有缓存的时间,设置默认为最近1小时
+  // 如果没有缓存的时间,设置默认为当天 00:00 ~ 23:59
   const startEl = document.getElementById('qStart');
   const endEl = document.getElementById('qEnd');
   if (startEl && !startEl.value) {
-    const now = new Date();
-    const oneHourAgo = new Date(now.getTime() - 3600_000);
-    startEl.value = toLocalDT(oneHourAgo);
+    startEl.value = todayStartDT();
   }
   if (endEl && !endEl.value) {
-    endEl.value = toLocalDT(new Date());
+    endEl.value = todayEndDT();
   }
   // 恢复缓存的邮件结果
   restoreMailResults();
   // 启动自动收件
   const cb = document.getElementById('qAutoFetch');
   if (cb && cb.checked) startAutoFetch();
+}
+
+// ============ 时间工具 ============
+// 当天 00:00 的 datetime-local 字符串
+function todayStartDT() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T00:00`;
+}
+// 当天 23:59 的 datetime-local 字符串
+function todayEndDT() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T23:59`;
+}
+// Date -> datetime-local 格式
+function toLocalDT(d) {
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 // ============ 查询条件缓存 ============
@@ -62,7 +81,6 @@ function restoreMailQuery() {
 // ============ 邮件结果缓存 ============
 function saveMailResults(emails) {
   try {
-    // 只缓存最近50封,避免 localStorage 溢出
     const trimmed = (emails || []).slice(0, 50);
     localStorage.setItem(LS_MAIL_RESULTS, JSON.stringify(trimmed));
   } catch { /* localStorage 满了就跳过 */ }
@@ -72,7 +90,7 @@ function restoreMailResults() {
   try {
     const emails = JSON.parse(localStorage.getItem(LS_MAIL_RESULTS) || '[]');
     if (emails.length > 0) {
-      renderMailList(emails);
+      renderMailList(emails, true);
     }
   } catch { /* ignore */ }
 }
@@ -82,11 +100,9 @@ function resetMailQuery() {
   document.getElementById('qSender').value = '';
   document.getElementById('qSubject').value = '';
   document.getElementById('qKeyword').value = '';
-  // 默认时间: 最近1小时
-  const now = new Date();
-  const oneHourAgo = new Date(now.getTime() - 3600_000);
-  document.getElementById('qStart').value = toLocalDT(oneHourAgo);
-  document.getElementById('qEnd').value = toLocalDT(now);
+  // 默认时间: 当天 00:00 ~ 23:59
+  document.getElementById('qStart').value = todayStartDT();
+  document.getElementById('qEnd').value = todayEndDT();
   document.getElementById('qLimit').value = '20';
   document.getElementById('qUnread').checked = false;
   // 清除缓存
@@ -101,20 +117,11 @@ function resetMailQuery() {
   toast('查询条件已重置', 'info');
 }
 
-// ISO -> datetime-local 格式
-function toLocalDT(d) {
-  const pad = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
 // ============ 自动收件 ============
 function toggleAutoFetch() {
   const cb = document.getElementById('qAutoFetch');
-  if (cb.checked) {
-    startAutoFetch();
-  } else {
-    stopAutoFetch();
-  }
+  if (cb.checked) startAutoFetch();
+  else stopAutoFetch();
 }
 
 function startAutoFetch() {
@@ -135,9 +142,9 @@ function stopAutoFetch() {
   if (statusEl) statusEl.textContent = '';
 }
 
-// 切换页面时停止定时器 (由 app.js switchTab 间接调用,因为页面会被替换)
 function cleanupMailPage() {
   stopAutoFetch();
+  _mailViewingIndex = -1;
 }
 
 // ============ 加载可用邮箱 ============
@@ -198,7 +205,7 @@ async function setAlias() {
 }
 
 // ============ 查询邮件 ============
-// silent=true: 自动收件,不记录日志
+// silent=true: 自动收件,静默更新不干扰用户
 async function fetchMails(silent = false) {
   const params = {
     sender: document.getElementById('qSender').value.trim() || undefined,
@@ -215,7 +222,7 @@ async function fetchMails(silent = false) {
   // 保存查询条件
   saveMailQuery();
 
-  // 自动收件模式: 静默查询,不显示 loading
+  // 非静默模式显示 loading
   if (!silent) {
     const list = document.getElementById('mailList');
     list.innerHTML = '<div class="loading"><span class="spinner"></span> 正在查询...</div>';
@@ -226,8 +233,13 @@ async function fetchMails(silent = false) {
       body: { ...params, silent: silent ? true : undefined },
     });
     const emails = data.emails || [];
-    renderMailList(emails);
-    saveMailResults(emails);
+    // 静默模式: 合并新邮件,不破坏当前页面状态
+    if (silent) {
+      silentMergeMails(emails);
+    } else {
+      renderMailList(emails, false);
+      saveMailResults(emails);
+    }
   } catch (err) {
     if (!silent) {
       const list = document.getElementById('mailList');
@@ -236,67 +248,151 @@ async function fetchMails(silent = false) {
   }
 }
 
-function renderMailList(emails) {
+// 静默合并: 将新邮件插入列表头部,不破坏已有展开状态
+function silentMergeMails(newEmails) {
+  if (!newEmails || newEmails.length === 0) return;
+  const oldMails = State._mails || [];
+  // 找出旧列表中没有的新邮件 (按 id 去重)
+  const oldIds = new Set(oldMails.map(m => m.id));
+  const fresh = newEmails.filter(m => !oldIds.has(m.id));
+  if (fresh.length === 0) {
+    // 没有新邮件,只更新数量
+    document.getElementById('mailCount').textContent = oldMails.length;
+    return;
+  }
+  // 合并: 新邮件在前面
+  const merged = [...fresh, ...oldMails];
+  // 限制数量
+  const limit = parseInt(document.getElementById('qLimit')?.value) || 20;
+  const trimmed = merged.slice(0, Math.max(limit, merged.length));
+  State._mails = trimmed;
+  saveMailResults(trimmed);
+  // 重新渲染列表 (但如果有弹窗打开,不关闭弹窗)
+  renderMailList(trimmed, true);
+  // 提示新邮件
+  if (fresh.length > 0) {
+    const statusEl = document.getElementById('autoFetchStatus');
+    if (statusEl) statusEl.textContent = `自动收件: 新增 ${fresh.length} 封`;
+    setTimeout(() => {
+      const s = document.getElementById('autoFetchStatus');
+      if (s) s.textContent = '自动收件已开启';
+    }, 3000);
+  }
+}
+
+// renderMailList: 渲染邮件列表
+// skipBody: true 时只渲染头部 (用于恢复缓存, 避免大量 body 渲染卡顿)
+function renderMailList(emails, skipBody = false) {
   const list = document.getElementById('mailList');
   if (!list) return;
   document.getElementById('mailCount').textContent = emails.length;
   if (!emails.length) {
     list.className = '';
     list.innerHTML = '<div class="mail-empty">没有符合条件的邮件</div>';
+    State._mails = [];
     return;
   }
   list.className = 'mail-list';
   list.innerHTML = emails.map((m, i) => `
     <div class="mail-item ${m.unread ? 'unread' : ''}" id="mail-${i}">
-      <div class="mail-head" onclick="toggleMail(${i})">
+      <div class="mail-head" onclick="viewMailDetail(${i})">
         ${m.unread ? '<span class="unread-dot"></span>' : ''}
         <span class="from">${esc(m.from || '(未知发件人)')}</span>
         <span class="subject">${esc(m.subject || '(无主题)')}</span>
         <span class="date">${esc(m.date || '')}</span>
       </div>
-      <div class="mail-body">
-        <div class="meta-row">
-          <span>收件人: ${esc(m.to || '-')}</span>
-          <span>时间: ${esc(m.date || '-')}</span>
-          ${m.unread ? '<span class="badge badge-primary">未读</span>' : '<span class="badge badge-gray">已读</span>'}
-        </div>
-        <div class="body-text" id="body-${i}">${esc(m.body || '(无正文)')}</div>
-        <div class="actions">
-          ${m.html ? `<button class="btn btn-secondary btn-sm" onclick="viewHtmlMail(${i})">查看 HTML</button>` : ''}
-          ${m.unread ? `<button class="btn btn-success btn-sm" onclick="markMailRead(${i})">标记已读</button>` : ''}
-        </div>
-      </div>
     </div>`).join('');
   State._mails = emails;
 }
 
-function toggleMail(i) {
-  document.getElementById('mail-' + i).classList.toggle('expanded');
-}
-
-function viewHtmlMail(i) {
+// ============ 弹窗查看邮件详情 ============
+function viewMailDetail(i) {
   const m = State._mails[i];
-  showModal('HTML 邮件预览',
-    `<iframe sandbox="allow-same-origin" srcdoc="${esc(m.html || '')}" style="width:100%;min-height:400px;border:1px solid var(--border);border-radius:6px"></iframe>`,
-    `<button class="btn btn-secondary" onclick="closeModal()">关闭</button>`);
+  if (!m) return;
+  _mailViewingIndex = i;
+
+  // 弹窗展示完整邮件内容
+  const bodyContent = m.html
+    ? `<iframe sandbox="allow-same-origin" srcdoc="${esc(m.html)}" style="width:100%;min-height:400px;border:1px solid var(--border);border-radius:6px"></iframe>`
+    : `<div class="mail-detail-body">${esc(m.body || '(无正文)')}</div>`;
+
+  const footer = `
+    ${m.html ? `<button class="btn btn-secondary" onclick="toggleMailView(${i})">切换纯文本</button>` : ''}
+    <button class="btn btn-secondary" onclick="closeModal()">关闭</button>
+  `;
+
+  showModal(
+    esc(m.subject || '(无主题)'),
+    `<div class="mail-detail">
+       <div class="mail-detail-meta">
+         <div><strong>发件人:</strong> ${esc(m.from || '-')}</div>
+         <div><strong>收件人:</strong> ${esc(m.to || '-')}</div>
+         <div><strong>时间:</strong> ${esc(m.date || '-')}</div>
+         <div><strong>状态:</strong> ${m.unread ? '<span class="badge badge-primary">未读</span>' : '<span class="badge badge-gray">已读</span>'}</div>
+       </div>
+       <hr style="margin:12px 0;border:none;border-top:1px solid var(--border)">
+       <div id="mailDetailBody">${bodyContent}</div>
+     </div>`,
+    footer
+  );
+
+  // 如果邮件未读,自动标记已读
+  if (m.unread) {
+    markMailRead(i, true);
+  }
 }
 
-async function markMailRead(i) {
+// 切换纯文本/HTML视图
+function toggleMailView(i) {
+  const m = State._mails[i];
+  if (!m) return;
+  const bodyEl = document.getElementById('mailDetailBody');
+  if (!bodyEl) return;
+  // 检查当前显示的是否是 iframe
+  const isHtml = bodyEl.querySelector('iframe');
+  if (isHtml) {
+    bodyEl.innerHTML = `<div class="mail-detail-body">${esc(m.body || '(无正文)')}</div>`;
+  } else {
+    bodyEl.innerHTML = `<iframe sandbox="allow-same-origin" srcdoc="${esc(m.html || '')}" style="width:100%;min-height:400px;border:1px solid var(--border);border-radius:6px"></iframe>`;
+  }
+}
+
+// ============ 标记已读 ============
+// autoMark: 弹窗查看时自动调用,不显示 toast
+async function markMailRead(i, autoMark = false) {
   const m = State._mails[i];
   if (!m) return;
   try {
-    const data = await api('/api/email/mark_read?key=' + encodeURIComponent(State.user.api_key), {
-      method: 'POST', body: { to: m.to, sender: m.from, subject: m.subject }
+    // 使用 web 端 session 认证的标记已读接口
+    const data = await api('/api/web/email/mark_read', {
+      method: 'POST',
+      body: { to: m.to, sender: m.from, subject: m.subject, mail_account_id: getMailAccountId() }
     });
-    toast('已标记 ' + (data.marked || 0) + ' 封已读', 'success');
+    if (!autoMark) {
+      toast('已标记 ' + (data.marked || 0) + ' 封已读', 'success');
+    }
+    // 更新本地状态
     m.unread = false;
+    // 更新列表中的样式
     const item = document.getElementById('mail-' + i);
-    item.classList.remove('unread');
-    item.querySelector('.unread-dot')?.remove();
-    const badge = item.querySelector('.badge-primary');
-    if (badge) { badge.className = 'badge badge-gray'; badge.textContent = '已读'; }
-    const btn = item.querySelector('.btn-success');
-    if (btn) btn.remove();
+    if (item) {
+      item.classList.remove('unread');
+      item.querySelector('.unread-dot')?.remove();
+    }
+    // 更新弹窗中的状态标签
+    if (_mailViewingIndex === i) {
+      const badge = document.querySelector('.modal-body .badge-primary');
+      if (badge) { badge.className = 'badge badge-gray'; badge.textContent = '已读'; }
+    }
     saveMailResults(State._mails);
-  } catch (err) { toast(err.message, 'error'); }
+  } catch (err) {
+    if (!autoMark) toast(err.message, 'error');
+  }
+}
+
+// 获取当前查询的邮箱账号ID
+function getMailAccountId() {
+  if (State.user?.alias?.mail_account_id) return State.user.alias.mail_account_id;
+  const sel = document.getElementById('aliasAccount');
+  return sel?.value || undefined;
 }

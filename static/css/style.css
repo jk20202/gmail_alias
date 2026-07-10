@@ -192,6 +192,13 @@ select.form-control { cursor: pointer; }
 .mail-body .actions { margin-top: 12px; display: flex; gap: 8px; }
 .mail-empty { text-align: center; padding: 40px 20px; color: var(--text-lighter); font-size: 14px; }
 
+/* 邮件详情弹窗 */
+.mail-detail { font-size: 13px; }
+.mail-detail-meta { display: flex; flex-direction: column; gap: 6px; }
+.mail-detail-meta strong { color: var(--text); display: inline-block; min-width: 70px; }
+.mail-detail-body { white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.7; padding: 16px; background: #f8fafc; border-radius: var(--radius-sm); max-height: 400px; overflow-y: auto; }
+.modal-body .mail-detail-meta .badge { margin-left: 0; }
+
 /* 加载与提示 */
 .loading { text-align: center; padding: 40px; color: var(--text-light); }
 .spinner { display: inline-block; width: 24px; height: 24px; border: 3px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; }

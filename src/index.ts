@@ -77,6 +77,7 @@ const ROUTE_TABLE: RouteEntry[] = [
   buildRoute('POST', '/api/email/fetch',         routes.apiFetchEmails),
   buildRoute('POST', '/api/email/mark_read',     routes.apiMarkRead),
   buildRoute('POST', '/api/web/email/fetch',     routes.webFetchEmails),
+  buildRoute('POST', '/api/web/email/mark_read', routes.webMarkRead),
   // Webhook
   buildRoute('GET',  '/api/webhooks',            routes.webhookList),
   buildRoute('POST', '/api/webhooks',            routes.webhookCreate),

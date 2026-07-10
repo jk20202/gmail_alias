@@ -196,12 +196,24 @@ function decodeBase64Url(s: string): string {
   }
 }
 
-// Gmail 标记已读 (用 modify 接口加 UNREAD 标签的反操作)
+// Gmail 标记已读 (用 modify 接口移除 UNREAD 标签)
+// sender 可能是 "Name <email@example.com>" 格式,需提取纯邮箱地址
 async function markGmailRead(token: string, sender?: string, subject?: string): Promise<number> {
-  const q = [sender ? `from:${sender}` : '', subject ? `subject:${subject}` : ''].filter(Boolean).join(' ');
-  // 找到所有未读
+  const parts: string[] = ['is:unread'];
+  if (sender) {
+    // 从 "Name <email@example.com>" 中提取邮箱地址
+    const emailMatch = sender.match(/<([^>]+)>/);
+    const emailAddr = emailMatch ? emailMatch[1] : sender;
+    parts.push(`from:${emailAddr}`);
+  }
+  if (subject) {
+    // subject 中的特殊字符需要处理,Gmail 搜索不支持复杂转义,去掉冒号
+    const cleanSubject = subject.replace(/[:"\\]/g, ' ').trim();
+    if (cleanSubject) parts.push(`subject:${cleanSubject}`);
+  }
+  const q = parts.join(' ');
   const listUrl = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages');
-  listUrl.searchParams.set('q', `is:unread ${q}`);
+  listUrl.searchParams.set('q', q);
   listUrl.searchParams.set('maxResults', '100');
   const listResp = await fetch(listUrl, { headers: { Authorization: `Bearer ${token}` } });
   if (!listResp.ok) return 0;
@@ -315,11 +327,16 @@ function parseGraphMessage(msg: GraphMessage): Email {
 
 async function markOutlookRead(token: string, sender?: string, subject?: string): Promise<number> {
   // 查找匹配的未读邮件,然后批量更新 isRead = true
+  // sender 可能是 "Name <email@example.com>" 格式,需提取纯邮箱地址
+  let senderAddr = sender || '';
+  const emailMatch = senderAddr.match(/<([^>]+)>/);
+  if (emailMatch) senderAddr = emailMatch[1];
+
   const url = new URL('https://graph.microsoft.com/v1.0/me/messages');
   url.searchParams.set('$select', 'id');
   url.searchParams.set('$top', '100');
   const filters = ['isRead eq false'];
-  if (sender) filters.push(`from/emailAddress/address eq '${sender.replace(/'/g, "''")}'`);
+  if (senderAddr) filters.push(`from/emailAddress/address eq '${senderAddr.replace(/'/g, "''")}'`);
   if (subject) filters.push(`subject eq '${subject.replace(/'/g, "''")}'`);
   url.searchParams.set('$filter', filters.join(' and '));
 

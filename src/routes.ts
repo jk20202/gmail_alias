@@ -499,6 +499,32 @@ export async function webFetchEmails(ctx: Ctx): Promise<Response> {
   }
 }
 
+// ============ Web 邮件标记已读 (Session) ============
+// 前端弹窗查看邮件时自动调用,使用 session 认证,无需 API Key
+export async function webMarkRead(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const rawUser = await db.getUserById(ctx.env, user.id);
+  const { sender, subject, mail_account_id } = ctx.body;
+
+  let accountId = mail_account_id;
+  // 别名优先
+  if (rawUser?.alias) {
+    accountId = rawUser.alias.mail_account_id;
+  }
+  if (!accountId) return fail('请选择邮箱');
+  // 越权防护
+  const account = await db.getMailAccountRaw(ctx.env, user.id, accountId);
+  if (!account) return fail('无权操作该邮箱', 403);
+
+  try {
+    const count = await markEmailsRead(ctx.env, accountId, sender, subject);
+    // 标记已读不记录日志 (避免自动查看时撑爆日志)
+    return ok({ marked: count });
+  } catch (e) {
+    return fail('标记已读失败,请稍后重试', 500);
+  }
+}
+
 // ============ Webhook 管理 ============
 export async function webhookList(ctx: Ctx): Promise<Response> {
   const user = await requireSession(ctx);
