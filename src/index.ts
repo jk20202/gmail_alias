@@ -131,6 +131,13 @@ export default {
       if (assetResp.status !== 404) {
         const newHeaders = new Headers(assetResp.headers);
         for (const [k, v] of Object.entries(CORS_HEADERS)) newHeaders.set(k, v);
+        // HTML 禁用缓存,确保用户总能加载最新前端代码(防止登录 bug 等旧版缓存问题)
+        const ct = newHeaders.get('Content-Type') || '';
+        if (ct.includes('text/html')) {
+          newHeaders.set('Cache-Control', 'no-cache, no-store, must-revalidate, proxy-no-cache');
+          newHeaders.set('Pragma', 'no-cache');
+          newHeaders.set('Surrogate-Control', 'no-store');
+        }
         return new Response(assetResp.body, { status: assetResp.status, headers: newHeaders, statusText: assetResp.statusText });
       }
     } catch { /* 走 404 */ }
