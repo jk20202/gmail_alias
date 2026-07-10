@@ -464,6 +464,8 @@ export async function webFetchEmails(ctx: Ctx): Promise<Response> {
   const user = await requireSession(ctx);
   const rawUser = await db.getUserById(ctx.env, user.id);
   const params: FetchParams = { limit: 50, ...ctx.body };
+  // silent=true: 自动收件模式,不记录日志
+  const silent = ctx.body?.silent === true;
 
   let accountId = params.mail_account_id;
   let toFilter = params.to;
@@ -483,7 +485,10 @@ export async function webFetchEmails(ctx: Ctx): Promise<Response> {
 
   try {
     const emails = await fetchEmails(ctx.env, accountId, { ...params, to: toFilter });
-    await db.addLog(ctx.env, user.id, user.username, toFilter || '(全部)', 'web_fetch', `获取了${emails.length}封邮件`);
+    // 仅非静默模式记录日志,避免自动收件撑爆日志
+    if (!silent) {
+      await db.addLog(ctx.env, user.id, user.username, toFilter || '(全部)', 'web_fetch', `获取了${emails.length}封邮件`);
+    }
     return ok({
       total: emails.length,
       emails,

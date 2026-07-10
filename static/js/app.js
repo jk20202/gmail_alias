@@ -249,6 +249,10 @@ function renderApp() {
 }
 
 async function switchTab(key) {
+  // 切换前清理当前页面 (如停止自动收件定时器)
+  if (State.tab === 'mail' && typeof cleanupMailPage === 'function') {
+    cleanupMailPage();
+  }
   State.tab = key;
   // 更新导航高亮
   document.querySelectorAll('#appNav button').forEach(btn => {

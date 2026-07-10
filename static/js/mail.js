@@ -1,13 +1,146 @@
 /* ============================================================
- * mail.js — 邮件查询页
+ * mail.js — 邮件查询页 (含自动收件、条件缓存、重置)
  * ============================================================ */
+
+// localStorage 缓存键
+const LS_MAIL_QUERY = 'mail_alias_mail_query';   // 查询条件
+const LS_MAIL_RESULTS = 'mail_alias_mail_results'; // 邮件结果
+
+// 自动收件定时器
+let _mailAutoTimer = null;
 
 async function initMailPage() {
   await loadAvailableAccounts();
   refreshCurrentAlias();
+  // 恢复缓存的查询条件
+  restoreMailQuery();
+  // 如果没有缓存的时间,设置默认为最近1小时
+  const startEl = document.getElementById('qStart');
+  const endEl = document.getElementById('qEnd');
+  if (startEl && !startEl.value) {
+    const now = new Date();
+    const oneHourAgo = new Date(now.getTime() - 3600_000);
+    startEl.value = toLocalDT(oneHourAgo);
+  }
+  if (endEl && !endEl.value) {
+    endEl.value = toLocalDT(new Date());
+  }
+  // 恢复缓存的邮件结果
+  restoreMailResults();
+  // 启动自动收件
+  const cb = document.getElementById('qAutoFetch');
+  if (cb && cb.checked) startAutoFetch();
 }
 
-// 加载可用邮箱(自己 + 公开)
+// ============ 查询条件缓存 ============
+function saveMailQuery() {
+  const q = {
+    sender: document.getElementById('qSender')?.value || '',
+    subject: document.getElementById('qSubject')?.value || '',
+    keyword: document.getElementById('qKeyword')?.value || '',
+    start: document.getElementById('qStart')?.value || '',
+    end: document.getElementById('qEnd')?.value || '',
+    limit: document.getElementById('qLimit')?.value || '20',
+    unread: document.getElementById('qUnread')?.checked || false,
+  };
+  localStorage.setItem(LS_MAIL_QUERY, JSON.stringify(q));
+}
+
+function restoreMailQuery() {
+  try {
+    const q = JSON.parse(localStorage.getItem(LS_MAIL_QUERY) || '{}');
+    if (q.sender) document.getElementById('qSender').value = q.sender;
+    if (q.subject) document.getElementById('qSubject').value = q.subject;
+    if (q.keyword) document.getElementById('qKeyword').value = q.keyword;
+    if (q.start) document.getElementById('qStart').value = q.start;
+    if (q.end) document.getElementById('qEnd').value = q.end;
+    if (q.limit) document.getElementById('qLimit').value = q.limit;
+    if (q.unread) document.getElementById('qUnread').checked = q.unread;
+  } catch { /* ignore */ }
+}
+
+// ============ 邮件结果缓存 ============
+function saveMailResults(emails) {
+  try {
+    // 只缓存最近50封,避免 localStorage 溢出
+    const trimmed = (emails || []).slice(0, 50);
+    localStorage.setItem(LS_MAIL_RESULTS, JSON.stringify(trimmed));
+  } catch { /* localStorage 满了就跳过 */ }
+}
+
+function restoreMailResults() {
+  try {
+    const emails = JSON.parse(localStorage.getItem(LS_MAIL_RESULTS) || '[]');
+    if (emails.length > 0) {
+      renderMailList(emails);
+    }
+  } catch { /* ignore */ }
+}
+
+// ============ 重置查询条件 ============
+function resetMailQuery() {
+  document.getElementById('qSender').value = '';
+  document.getElementById('qSubject').value = '';
+  document.getElementById('qKeyword').value = '';
+  // 默认时间: 最近1小时
+  const now = new Date();
+  const oneHourAgo = new Date(now.getTime() - 3600_000);
+  document.getElementById('qStart').value = toLocalDT(oneHourAgo);
+  document.getElementById('qEnd').value = toLocalDT(now);
+  document.getElementById('qLimit').value = '20';
+  document.getElementById('qUnread').checked = false;
+  // 清除缓存
+  localStorage.removeItem(LS_MAIL_QUERY);
+  localStorage.removeItem(LS_MAIL_RESULTS);
+  // 清空邮件列表
+  State._mails = [];
+  const list = document.getElementById('mailList');
+  list.className = '';
+  list.innerHTML = '<div class="mail-empty">已重置查询条件,请点击「查询邮件」</div>';
+  document.getElementById('mailCount').textContent = '0';
+  toast('查询条件已重置', 'info');
+}
+
+// ISO -> datetime-local 格式
+function toLocalDT(d) {
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// ============ 自动收件 ============
+function toggleAutoFetch() {
+  const cb = document.getElementById('qAutoFetch');
+  if (cb.checked) {
+    startAutoFetch();
+  } else {
+    stopAutoFetch();
+  }
+}
+
+function startAutoFetch() {
+  stopAutoFetch();
+  const statusEl = document.getElementById('autoFetchStatus');
+  if (statusEl) statusEl.textContent = '自动收件已开启';
+  // 立即触发一次
+  fetchMails(true);
+  _mailAutoTimer = setInterval(() => fetchMails(true), 10000);
+}
+
+function stopAutoFetch() {
+  if (_mailAutoTimer) {
+    clearInterval(_mailAutoTimer);
+    _mailAutoTimer = null;
+  }
+  const statusEl = document.getElementById('autoFetchStatus');
+  if (statusEl) statusEl.textContent = '';
+}
+
+// 切换页面时停止定时器 (由 app.js switchTab 间接调用,因为页面会被替换)
+function cleanupMailPage() {
+  stopAutoFetch();
+}
+
+// ============ 加载可用邮箱 ============
 async function loadAvailableAccounts() {
   const sel = document.getElementById('aliasAccount');
   if (!sel) return;
@@ -27,7 +160,6 @@ async function loadAvailableAccounts() {
   }
 }
 
-// 当前别名展示
 function refreshCurrentAlias() {
   const a = State.user.alias;
   const el = document.getElementById('currentAlias');
@@ -43,7 +175,6 @@ function refreshCurrentAlias() {
   }
 }
 
-// 随机标签
 async function genRandomLabel() {
   try {
     const data = await api('/api/account/alias/random_label');
@@ -51,7 +182,6 @@ async function genRandomLabel() {
   } catch (err) { toast(err.message, 'error'); }
 }
 
-// 设置别名
 async function setAlias() {
   const mail_account_id = document.getElementById('aliasAccount').value;
   const label = document.getElementById('aliasLabel').value.trim();
@@ -67,8 +197,9 @@ async function setAlias() {
   } catch (err) { toast(err.message, 'error'); }
 }
 
-// 查询邮件
-async function fetchMails() {
+// ============ 查询邮件 ============
+// silent=true: 自动收件,不记录日志
+async function fetchMails(silent = false) {
   const params = {
     sender: document.getElementById('qSender').value.trim() || undefined,
     subject: document.getElementById('qSubject').value.trim() || undefined,
@@ -81,20 +212,36 @@ async function fetchMails() {
   if (start) params.start_time = new Date(start).toISOString();
   if (end) params.end_time = new Date(end).toISOString();
 
-  const list = document.getElementById('mailList');
-  list.innerHTML = '<div class="loading"><span class="spinner"></span> 正在查询...</div>';
+  // 保存查询条件
+  saveMailQuery();
+
+  // 自动收件模式: 静默查询,不显示 loading
+  if (!silent) {
+    const list = document.getElementById('mailList');
+    list.innerHTML = '<div class="loading"><span class="spinner"></span> 正在查询...</div>';
+  }
   try {
-    const data = await api('/api/web/email/fetch', { method: 'POST', body: params });
-    renderMailList(data.emails || []);
+    const data = await api('/api/web/email/fetch', {
+      method: 'POST',
+      body: { ...params, silent: silent ? true : undefined },
+    });
+    const emails = data.emails || [];
+    renderMailList(emails);
+    saveMailResults(emails);
   } catch (err) {
-    list.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
+    if (!silent) {
+      const list = document.getElementById('mailList');
+      list.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
+    }
   }
 }
 
 function renderMailList(emails) {
   const list = document.getElementById('mailList');
+  if (!list) return;
   document.getElementById('mailCount').textContent = emails.length;
   if (!emails.length) {
+    list.className = '';
     list.innerHTML = '<div class="mail-empty">没有符合条件的邮件</div>';
     return;
   }
@@ -150,5 +297,6 @@ async function markMailRead(i) {
     if (badge) { badge.className = 'badge badge-gray'; badge.textContent = '已读'; }
     const btn = item.querySelector('.btn-success');
     if (btn) btn.remove();
+    saveMailResults(State._mails);
   } catch (err) { toast(err.message, 'error'); }
 }

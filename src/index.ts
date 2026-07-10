@@ -3,6 +3,8 @@ import type { Env } from './types';
 import { initDB } from './db';
 import * as routes from './routes';
 import { HTTPError, type Ctx } from './routes';
+import { getActiveWebhookAccountIds } from './db';
+import { pollAndPush } from './webhook';
 
 // CORS 头
 const CORS_HEADERS: Record<string, string> = {
@@ -97,7 +99,6 @@ export default {
   async fetch(req: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     // 1. 初始化数据库(默认管理员)
     try { await initDB(env); } catch { /* 已初始化则忽略 */ }
-
     // 2. CORS 预检
     if (req.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
@@ -146,6 +147,23 @@ export default {
       status: 404,
       headers: { 'Content-Type': 'application/json; charset=utf-8', ...CORS_HEADERS },
     });
+  },
+
+  // ============ 定时任务 (Cron Trigger) ============
+  // 每分钟自动轮询所有有活跃 webhook 的邮箱账号,拉取新邮件并推送
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    try {
+      const accountIds = await getActiveWebhookAccountIds(env);
+      if (accountIds.length === 0) return;
+      // 并发轮询所有账号 (Cloudflare Workers 支持)
+      ctx.waitUntil(Promise.allSettled(
+        accountIds.map(id => pollAndPush(env, id).catch(e => {
+          console.error(`Webhook poll failed for ${id}:`, e);
+        }))
+      ));
+    } catch (e) {
+      console.error('Scheduled webhook poll error:', e);
+    }
   },
 };
 

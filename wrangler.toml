@@ -39,3 +39,8 @@ id = "351359d5a2614b28b273465a29bdfd2d"
 # 请将下方密码改为自己的强密码,切勿使用示例值
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "请修改为你的强密码"
+
+# Cron Trigger: 每分钟自动轮询所有有活跃 webhook 的邮箱账号
+# 拉取新邮件并推送到订阅的回调 URL (飞书/钉钉/自定义)
+[triggers]
+crons = ["* * * * *"]

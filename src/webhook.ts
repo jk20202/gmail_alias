@@ -21,6 +21,7 @@ export interface WebhookPayload {
 
 // ============ 主动轮询模式 ============
 // 拉取最近邮件,逐条匹配订阅,推送给订阅者
+// 使用 KV 去重:已推送过的 message_id 1小时TTL,避免重复推送
 export async function pollAndPush(env: Env, accountId: string): Promise<{ pushed: number; errors: string[] }> {
   const errors: string[] = [];
   let pushed = 0;
@@ -48,8 +49,6 @@ export async function pollAndPush(env: Env, accountId: string): Promise<{ pushed
   const webhooks = await getWebhooksForAccount(env, accountId);
   if (webhooks.length === 0) return { pushed: 0, errors };
 
-  // 推送时去重:用 KV 记录已推送过的 message_id (1 小时 TTL)
-  // key: wh:pushed:{accountId}:{messageId}
   for (const wh of webhooks) {
     // 过滤事件
     const events = wh.events.split(',').map(s => s.trim());
@@ -62,15 +61,29 @@ export async function pollAndPush(env: Env, accountId: string): Promise<{ pushed
 
     if (filtered.length === 0) continue;
 
-    // 推送每封新邮件 (或聚合一次,这里聚合推一次更高效)
+    // KV 去重:只推送未推送过的邮件
+    const newEmails: Email[] = [];
+    for (const e of filtered) {
+      const dedupKey = `wh:pushed:${accountId}:${e.id}`;
+      const already = await env.KV.get(dedupKey);
+      if (!already) {
+        newEmails.push(e);
+        // 标记已推送,TTL 1小时
+        await env.KV.put(dedupKey, '1', { expirationTtl: 3600 });
+      }
+    }
+
+    if (newEmails.length === 0) continue;
+
+    // 聚合推送一次
     const payload: WebhookPayload = {
       event: 'new_mail',
       delivered_at: nowISO(),
       mail_account_id: accountId,
       email: account.email,
       to_alias: wh.target_alias || undefined,
-      count: filtered.length,
-      emails: filtered,
+      count: newEmails.length,
+      emails: newEmails,
     };
 
     const ok = await deliver(env, wh, payload);

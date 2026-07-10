@@ -68,9 +68,19 @@
             <span>仅未读</span>
           </label>
         </div>
+        <div class="form-group" style="flex:0 0 auto">
+          <label class="form-label" style="visibility:hidden">占位</label>
+          <button class="btn btn-secondary" style="height:38px" onclick="resetMailQuery()">重置条件</button>
+        </div>
       </div>
-      <div style="margin-top:8px">
+      <div style="margin-top:8px; display:flex; align-items:center; gap:12px">
         <button class="btn" onclick="fetchMails()">查询邮件</button>
+        <label class="switch" style="display:inline-flex; align-items:center; gap:6px">
+          <input type="checkbox" id="qAutoFetch" checked onchange="toggleAutoFetch()">
+          <span class="track"></span>
+          <span>自动收件 (10s)</span>
+        </label>
+        <span id="autoFetchStatus" class="form-hint" style="margin:0"></span>
       </div>
     </div>
   </div>

@@ -4,6 +4,7 @@ import { sha256, randomHex, maskToken, nowISO, buildAliasFull } from './utils';
 
 const SESSION_TTL_DAYS = 7;
 const LOG_RETENTION_DAYS = 30;
+const LOG_MAX_RECORDS = 20000; // 日志最大记录数,超过则舍弃旧的
 
 // ============ 转换函数 (DB 行 -> 安全对象) ============
 interface UserRow {
@@ -361,9 +362,15 @@ export async function addLog(env: Env, userId: string, username: string, target:
   await env.DB.prepare(
     'INSERT INTO usage_logs(user_id, username, target, action, detail) VALUES(?,?,?,?,?)'
   ).bind(userId, username, target, action, detail).run();
-  // 顺便清理过期(每次写入触发,简单高效)
+  // 清理过期日志 (30天前)
   const cutoff = new Date(Date.now() - LOG_RETENTION_DAYS * 86400 * 1000).toISOString();
   await env.DB.prepare('DELETE FROM usage_logs WHERE created_at < ?').bind(cutoff).run();
+  // 清理超量日志: 仅保留最新的 LOG_MAX_RECORDS 条
+  await env.DB.prepare(
+    `DELETE FROM usage_logs WHERE id NOT IN (
+      SELECT id FROM usage_logs ORDER BY id DESC LIMIT ?
+    )`
+  ).bind(LOG_MAX_RECORDS).run();
 }
 
 export async function listLogs(env: Env, limit = 500): Promise<LogRow[]> {
@@ -460,6 +467,14 @@ export async function toggleWebhook(env: Env, id: string, userId: string, active
   const r = await env.DB.prepare('UPDATE webhooks SET is_active = ? WHERE id = ? AND user_id = ?')
     .bind(active ? 1 : 0, id, userId).run();
   return r.meta.changes > 0;
+}
+
+// 获取所有有活跃 webhook 的邮箱账号ID (用于定时轮询)
+export async function getActiveWebhookAccountIds(env: Env): Promise<string[]> {
+  const { results } = await env.DB.prepare(
+    'SELECT DISTINCT mail_account_id FROM webhooks WHERE is_active = 1'
+  ).all<{ mail_account_id: string }>();
+  return (results || []).map(r => r.mail_account_id);
 }
 
 export async function logWebhookDelivery(env: Env, webhookId: string, payload: string, status: number, response: string, success: boolean): Promise<void> {
