@@ -15,7 +15,9 @@ export const ALIAS_HISTORY_PAGE_SIZE = 10;
 // ============ Schema 版本迁移 ============
 // Cloudflare 自动部署只跑 wrangler deploy,不会执行 schema.sql,
 // 因此这里做运行时的一次性迁移(用 KV 记录版本号,避免每次请求都跑 DDL)
-const SCHEMA_VERSION = '2';
+// 注意: 每次新增列 / 表,必须 +1 本版本号,否则 ensureSchema 会因 KV 已记录旧版本而直接返回,
+// 导致新迁移(如 users.google_client_id)在生产环境永远不执行。
+const SCHEMA_VERSION = '3';
 
 export async function ensureSchema(env: Env): Promise<void> {
   try {
