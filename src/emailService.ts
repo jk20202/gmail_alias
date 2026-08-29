@@ -3,13 +3,25 @@
 import type { Env, Email, FetchParams } from './types';
 import { ensureValidToken } from './oauth';
 import { htmlToText, formatShanghaiTime, parseTime } from './utils';
+import { getMailAccountById } from './db';
+import { fetchImapEmails, markImapRead } from './imap';
 
 // ============ 统一入口 ============
 export async function fetchEmails(env: Env, accountId: string, params: FetchParams): Promise<Email[]> {
-  const { token, provider, email } = await ensureValidToken(env, accountId);
-  const emails = provider === 'gmail'
-    ? await fetchGmailEmails(token, params)
-    : await fetchOutlookEmails(token, params);
+  // 先取账号判定 provider;IMAP 走独立的 TCP 收信通道,绕过 OAuth token 刷新
+  const account = await getMailAccountById(env, accountId);
+  if (!account) throw new Error('邮箱账号不存在');
+
+  const provider = account.provider;
+  let emails: Email[];
+  if (provider === 'imap') {
+    emails = await fetchImapEmails(env, accountId, params);
+  } else {
+    const { token } = await ensureValidToken(env, accountId);
+    emails = provider === 'gmail'
+      ? await fetchGmailEmails(token, params)
+      : await fetchOutlookEmails(token, params);
+  }
 
   let result = emails.map(e => ({
     ...e,
@@ -48,6 +60,19 @@ export async function fetchEmails(env: Env, accountId: string, params: FetchPara
   return result.map(e => ({ ...e, provider }));
 }
 
+export async function markEmailsRead(env: Env, accountId: string, sender?: string, subject?: string): Promise<number> {
+  const account = await getMailAccountById(env, accountId);
+  if (!account) throw new Error('邮箱账号不存在');
+  // IMAP 走独立的标记已读通道(按发件人 + 主题匹配)
+  if (account.provider === 'imap') {
+    return await markImapRead(env, accountId, sender, subject);
+  }
+  const { token, provider } = await ensureValidToken(env, accountId);
+  return provider === 'gmail'
+    ? markGmailRead(token, sender, subject)
+    : markOutlookRead(token, sender, subject);
+}
+
 // 全文模糊匹配: 发件人 / 收件人 / 主题 / 正文 / HTML / 附件名
 function matchFuzzy(e: Email, kw: string): boolean {
   if (
@@ -62,13 +87,6 @@ function matchFuzzy(e: Email, kw: string): boolean {
     if (a && a.toLowerCase().includes(kw)) return true;
   }
   return false;
-}
-
-export async function markEmailsRead(env: Env, accountId: string, sender?: string, subject?: string): Promise<number> {
-  const { token, provider } = await ensureValidToken(env, accountId);
-  return provider === 'gmail'
-    ? markGmailRead(token, sender, subject)
-    : markOutlookRead(token, sender, subject);
 }
 
 // ============ Gmail API 实现 ============

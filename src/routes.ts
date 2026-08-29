@@ -6,8 +6,9 @@ import {
   startGoogleDeviceFlow, pollGoogleDeviceFlow, getGoogleCreds, saveGoogleCreds, googleConfigStatus,
 } from './oauth';
 import { fetchEmails, markEmailsRead } from './emailService';
-import { sha256, randomLabel } from './utils';
+import { sha256, randomLabel, encrypt } from './utils';
 import { pollAndPush, sendTestEvent } from './webhook';
+import { testImapConnection, checkImapAuth } from './imap';
 
 // 路由上下文
 export interface Ctx {
@@ -577,8 +578,42 @@ export async function accountAuthStatus(ctx: Ctx): Promise<Response> {
   // 越权防护:校验邮箱归属(自己的或公开的)
   const account = await db.getMailAccountRaw(ctx.env, user.id, id);
   if (!account) return fail('无权操作该邮箱', 403);
-  const status = await checkAccountAuthStatus(ctx.env, id);
+  // IMAP 走连接测试探测;OAuth 走 token 校验
+  const status = account.provider === 'imap'
+    ? await checkImapAuth(ctx.env, id)
+    : await checkAccountAuthStatus(ctx.env, id);
   return ok(status);
+}
+
+// 绑定 IMAP(应用密码)收信账号
+// 校验字段 -> 加密密码 -> 测试连接(能登录 INBOX 才算通过) -> 落库(upsert) -> 记日志
+export async function accountBindImap(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const body = ctx.body || {};
+  const email = typeof body.email === 'string' ? body.email.trim() : '';
+  const imapHost = typeof body.imap_host === 'string' ? body.imap_host.trim() : '';
+  const imapUser = typeof body.imap_user === 'string' ? body.imap_user.trim() : '';
+  const imapPass = typeof body.imap_pass === 'string' ? body.imap_pass.trim() : '';
+  const portRaw = parseInt(String(body.imap_port || '993'), 10);
+  const isPublic = body.is_public === true;
+
+  if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return fail('请填写有效的邮箱地址');
+  if (!imapHost) return fail('请填写 IMAP 服务器地址');
+  if (isNaN(portRaw) || portRaw < 1 || portRaw > 65535) return fail('IMAP 端口无效（应为 1-65535）');
+  if (!imapUser) return fail('请填写 IMAP 用户名（通常为完整邮箱）');
+  if (!imapPass) return fail('请填写应用密码（App Password）');
+
+  // 加密密码落库(与 OAuth refresh_token 同一套 AES-GCM)
+  const encPass = await encrypt(imapPass, ctx.env);
+  // 绑定前先测连接:只有能成功登录并选中收件箱才算通过,避免存进无法使用的配置
+  try {
+    await testImapConnection({ host: imapHost, port: portRaw, username: imapUser, password: imapPass });
+  } catch (e) {
+    return fail('IMAP 连接测试失败：' + (e as Error).message);
+  }
+  const accountId = await db.addImapAccount(ctx.env, user.id, email, imapHost, portRaw, imapUser, encPass, isPublic);
+  await db.addLog(ctx.env, user.id, user.username, email, 'bind_imap', `绑定了 IMAP 邮箱 ${email}`);
+  return ok({ id: accountId, provider: 'imap', email });
 }
 
 export async function accountAvailableAccounts(ctx: Ctx): Promise<Response> {

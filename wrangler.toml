@@ -1,6 +1,6 @@
 name = "mail-alias"
 main = "src/index.ts"
-compatibility_date = "2024-04-01"
+compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
 # Workers 静态资源(前端界面)

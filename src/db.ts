@@ -1,6 +1,6 @@
 // D1 数据访问层 - 封装所有 SQL 操作
 import type { Env, SafeUser, SafeMailAccount, MailAccountRaw, Alias, Webhook, UserAlias } from './types';
-import { sha256, randomHex, maskToken, nowISO, buildAliasFull } from './utils';
+import { sha256, randomHex, maskToken, nowISO, buildAliasFull, decrypt } from './utils';
 
 const SESSION_TTL_DAYS = 7;
 const LOG_RETENTION_DAYS = 30;
@@ -55,6 +55,17 @@ export async function ensureSchema(env: Env): Promise<void> {
     await env.DB.prepare(`ALTER TABLE webhooks ADD COLUMN format TEXT NOT NULL DEFAULT 'card'`).run();
   } catch { /* 列已存在 */ }
 
+  // mail_accounts 增加 IMAP(应用密码)绑定字段(旧库无此列,失败即说明已存在)
+  // 全部可空: OAuth 账号不受影响; IMAP 账号用前四项, access_token 等留空字符串
+  for (const col of [
+    'ALTER TABLE mail_accounts ADD COLUMN imap_host TEXT',
+    'ALTER TABLE mail_accounts ADD COLUMN imap_port INTEGER',
+    'ALTER TABLE mail_accounts ADD COLUMN imap_user TEXT',
+    'ALTER TABLE mail_accounts ADD COLUMN imap_pass TEXT',
+  ]) {
+    try { await env.DB.prepare(col).run(); } catch { /* 列已存在 */ }
+  }
+
   // 迁移旧版单别名数据 -> user_aliases(给 1 小时有效期,避免一升级就全部过期)
   // 注意:时间统一用 JS 生成的 ISO 字符串,不能用 SQLite 的 datetime('now')(格式不同会导致比较失效)
   try {
@@ -83,6 +94,8 @@ interface MailAccountRow {
   id: string; user_id: string; provider: string; email: string;
   access_token: string; refresh_token: string; token_expires_at: string;
   is_public: number; created_at: string;
+  imap_host?: string | null; imap_port?: number | null;
+  imap_user?: string | null; imap_pass?: string | null;
 }
 interface AliasRow {
   user_id: string; mail_account_id: string; label: string;
@@ -105,13 +118,17 @@ interface UserAliasRow {
 
 // 安全邮箱账号(脱敏)
 function toSafeMailAccount(row: MailAccountRow): SafeMailAccount {
+  const provider = row.provider as 'gmail' | 'outlook' | 'imap';
   return {
     id: row.id,
-    provider: row.provider as 'gmail' | 'outlook',
+    provider,
     email: row.email,
     is_public: row.is_public === 1,
     created_at: row.created_at,
-    token_masked: maskToken(row.access_token || ''),
+    // IMAP(应用密码)绑定: 有密文即视为已配置,但绝不回显明文/密文
+    token_masked: provider === 'imap'
+      ? (row.imap_pass ? '应用密码' : '')
+      : maskToken(row.access_token || ''),
   };
 }
 
@@ -425,6 +442,74 @@ export async function updateMailAccountToken(
   await env.DB.prepare(
     'UPDATE mail_accounts SET access_token = ?, refresh_token = ?, token_expires_at = ? WHERE id = ?'
   ).bind(accessToken, refreshToken, expiresAt, accountId).run();
+}
+
+// ============ IMAP(应用密码)绑定 ============
+// 解密后的 IMAP 连接配置(内部使用)
+export interface ImapConfig {
+  id: string;
+  user_id: string;
+  email: string;
+  host: string;
+  port: number;
+  username: string;
+  password: string;      // 已解密
+  is_public: boolean;
+}
+
+// 新增或更新 IMAP 账号(按 user_id + provider('imap') + email upsert)
+// imap_pass 为已加密字符串; access_token/refresh_token/token_expires_at 对 IMAP 无意义,留空
+export async function addImapAccount(
+  env: Env, userId: string, email: string,
+  imapHost: string, imapPort: number, imapUser: string, encPass: string, isPublic = false
+): Promise<string> {
+  const existing = await env.DB.prepare(
+    'SELECT * FROM mail_accounts WHERE user_id = ? AND provider = ? AND email = ?'
+  ).bind(userId, 'imap', email).first<MailAccountRow>();
+  if (existing) {
+    await env.DB.prepare(
+      `UPDATE mail_accounts
+          SET imap_host = ?, imap_port = ?, imap_user = ?, imap_pass = ?, is_public = ?
+        WHERE id = ?`
+    ).bind(imapHost, imapPort, imapUser, encPass, isPublic ? 1 : 0, existing.id).run();
+    return existing.id;
+  }
+  const id = 'i' + randomHex(4);
+  await env.DB.prepare(
+    `INSERT INTO mail_accounts
+       (id, user_id, provider, email, access_token, refresh_token, token_expires_at, is_public, imap_host, imap_port, imap_user, imap_pass)
+     VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`
+  ).bind(
+    id, userId, 'imap', email, '', '', '', isPublic ? 1 : 0,
+    imapHost, imapPort, imapUser, encPass
+  ).run();
+  return id;
+}
+
+// 取 IMAP 账号连接配置(解密 imap_pass); 不存在或字段不全返回 null
+export async function getImapAccountById(env: Env, accountId: string): Promise<ImapConfig | null> {
+  const row = await env.DB.prepare(
+    `SELECT id, user_id, email, imap_host, imap_port, imap_user, imap_pass, is_public
+       FROM mail_accounts WHERE id = ?`
+  ).bind(accountId).first<{
+    id: string; user_id: string; email: string;
+    imap_host: string | null; imap_port: number | null;
+    imap_user: string | null; imap_pass: string | null; is_public: number;
+  }>();
+  if (!row || !row.imap_host || !row.imap_pass) return null;
+  let password = '';
+  try { password = await decrypt(row.imap_pass, env); }
+  catch { return null; }
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    email: row.email,
+    host: row.imap_host,
+    port: row.imap_port || 993,
+    username: row.imap_user || row.email,
+    password,
+    is_public: row.is_public === 1,
+  };
 }
 
 export async function updateMailAccount(env: Env, userId: string, accountId: string, isPublic?: boolean): Promise<void> {

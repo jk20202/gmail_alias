@@ -47,11 +47,11 @@
   </div>
 
   <div class="card account-card">
-    <div class="card-header"><h3>OAuth 邮箱绑定</h3></div>
+    <div class="card-header"><h3>邮箱绑定</h3></div>
     <div class="card-body">
       <p class="form-hint" style="margin-bottom:12px">
-        绑定 Gmail / Outlook 后，系统会自动刷新访问令牌并代为查询邮件。
-        推荐选择「跳转授权」，授权页若打不开请自行开启网络代理后重试。
+        绑定 Gmail / Outlook 可走「设备码授权」（推荐）；若 Google Cloud 强制两步验证导致无法创建 OAuth 凭据，可改用「应用密码 + IMAP」方式收信。
+        当前 IMAP 方式仅支持收信，不支持发信。
       </p>
       <div class="bind-actions" style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap">
         <button class="btn" onclick="openBindModal('gmail')">
@@ -61,6 +61,10 @@
         <button class="btn" onclick="openBindModal('outlook')">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
           绑定 Outlook / Hotmail
+        </button>
+        <button class="btn" onclick="openBindModal('imap')">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+          绑定 IMAP / 应用密码
         </button>
       </div>
       <h4 style="font-size:13px; color:var(--text-light); margin-bottom:8px">已绑定的邮箱</h4>

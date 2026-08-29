@@ -36,7 +36,7 @@ export interface SafeUser {
 // 邮箱账号(对外脱敏,不含 token)
 export interface SafeMailAccount {
   id: string;
-  provider: 'gmail' | 'outlook';
+  provider: 'gmail' | 'outlook' | 'imap';
   email: string;
   is_public: boolean;
   created_at: string;
@@ -47,13 +47,18 @@ export interface SafeMailAccount {
 export interface MailAccountRaw {
   id: string;
   user_id: string;
-  provider: 'gmail' | 'outlook';
+  provider: 'gmail' | 'outlook' | 'imap';
   email: string;
   access_token: string;        // 已解密
   refresh_token: string;       // 已解密
   token_expires_at: string;
   is_public: boolean;
   created_at: string;
+  // IMAP(应用密码)绑定专用字段
+  imap_host?: string | null;
+  imap_port?: number | null;
+  imap_user?: string | null;
+  imap_pass?: string | null;   // 已加密
 }
 
 // 兼容旧结构:单别名
@@ -80,7 +85,7 @@ export interface UserAlias {
   created_at: string;
   // 关联查询附带(展示用)
   email?: string;                 // 主邮箱地址
-  provider?: 'gmail' | 'outlook';
+  provider?: 'gmail' | 'outlook' | 'imap';
   remain_ms?: number;             // 剩余有效毫秒(active 才有)
 }
 
@@ -96,7 +101,7 @@ export interface Email {
   html: string;
   unread: boolean;
   attachments: string[];       // 附件文件名列表(用于模糊搜索/展示)
-  provider?: 'gmail' | 'outlook';
+  provider?: 'gmail' | 'outlook' | 'imap';
   alias?: string;              // 命中的别名地址(多别名聚合时使用)
 }
 

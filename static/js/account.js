@@ -113,7 +113,9 @@ function renderMyAccounts(list, box) {
     <tbody>${list.map(a => `
       <tr>
         <td><span class="mono">${esc(a.email)}</span></td>
-        <td><span class="badge ${a.provider === 'gmail' ? 'badge-primary' : 'badge-warning'}">${esc(a.provider)}</span></td>
+        <td>${a.provider === 'imap'
+          ? '<span class="badge" style="background:#7c3aed;color:#fff">IMAP</span>'
+          : `<span class="badge ${a.provider === 'gmail' ? 'badge-primary' : 'badge-warning'}">${esc(a.provider)}</span>`}</td>
         <td><span class="badge badge-success">✓ 启用</span></td>
         <td id="acc-status-${esc(a.id)}"><span class="badge badge-gray">检测中...</span></td>
         <td>
@@ -151,6 +153,11 @@ async function probeAuthStatus(id) {
 }
 
 function reauthAccount(id, provider) {
+  if (provider === 'imap') {
+    const acc = (State.mailAccounts || []).find(a => a.id === id);
+    openImapForm(acc ? { email: acc.email } : {});
+    return;
+  }
   openBindModal(provider);
 }
 
@@ -188,6 +195,7 @@ async function deleteAccount(id, email) {
 
 /* ============ 绑定方式弹窗 ============ */
 function openBindModal(provider) {
+  if (provider === 'imap') return openImapForm();
   const isGmail = provider === 'gmail';
   const title = isGmail ? '绑定 Gmail' : '绑定 Outlook / Hotmail';
   const body = `
@@ -197,24 +205,96 @@ function openBindModal(provider) {
         <div class="bind-option-desc">复制弹出的授权码，到授权页输入完成绑定。无需在 Google / 微软后台登记任何回调地址，最适配 Cloudflare 部署。${isGmail ? '首次绑定会在弹窗内要求填写一次 Google 客户端凭据（全站共享）。' : ''}</div>
       </div>
       ${isGmail ? `
-      <div class="bind-option" onclick="showAppPasswordInfo()">
-        <div class="bind-option-title">🔑 应用密码 (App Password) · 暂不支持</div>
-        <div class="bind-option-desc">Gmail 的 16 位应用密码仅用于 IMAP / SMTP，与系统采用的 Gmail API（OAuth 2.0）通道不兼容，当前及可预见版本均无法接入。</div>
+      <div class="bind-option" onclick="openImapForm()">
+        <div class="bind-option-title">🔑 应用密码（IMAP）方式</div>
+        <div class="bind-option-desc">若 Google Cloud 强制两步验证导致无法创建 OAuth 凭据，可改用「应用密码 + IMAP」方式收信。需要先在 Google 账号开启两步验证并生成 16 位应用密码。</div>
       </div>` : ''}
     </div>`;
   showModal(title, body, '<button class="btn btn-secondary" onclick="closeModal()">取消</button>');
 }
 
-function showAppPasswordInfo() {
-  showModal('应用密码（App Password）能否用于本系统？', `
-    <p><b>结论：当前版本及可预见的未来版本均不支持应用密码方式。</b></p>
-    <p class="form-hint" style="margin-top:10px">原因有两点：</p>
-    <ol style="padding-left:18px; color:var(--text-light); font-size:13px; line-height:1.9">
-      <li><b>通道不同</b>：应用密码是 Gmail 给 <b>IMAP / SMTP</b> 客户端用的；本系统收邮件走的是 <b>Gmail API（OAuth 2.0）</b>，两者底层协议完全不同，应用密码对 API 通道无效。</li>
-      <li><b>实现成本极高</b>：要在 Cloudflare Workers 上支持应用密码，需要自写一整套 IMAP 客户端（TLS 握手、命令解析、收件轮询、与现有 token 刷新机制并存），工作量很大且容易出兼容问题。</li>
-    </ol>
-    <p class="form-hint">因此请直接使用上方的「设备码授权」OAuth 方式绑定 Gmail，体验一致、无需改代码，也无需在 Google Cloud 登记任何回调地址。</p>`,
-    '<button class="btn btn-secondary" onclick="closeModal()">知道了</button>');
+/* ============ IMAP 绑定（应用密码） ============ */
+function openImapForm(prefill) {
+  prefill = prefill || {};
+  showModal('绑定 IMAP / 应用密码', `
+    <p class="form-hint" style="margin:0 0 12px">使用应用密码（App Password）通过 IMAP 协议收信。无需 OAuth，适合 Gmail / Outlook / QQ / 163 等支持 IMAP 的邮箱。当前仅支持收信，不支持发信。</p>
+    <div class="form-group">
+      <label class="form-label">邮箱地址 <span class="req">*</span></label>
+      <input type="text" id="imapEmail" class="form-control" placeholder="you@example.com" value="${esc(prefill.email || '')}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">IMAP 服务器 <span class="req">*</span></label>
+      <input type="text" id="imapHost" class="form-control" placeholder="imap.example.com" value="${esc(prefill.imap_host || '')}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">端口</label>
+      <input type="number" id="imapPort" class="form-control" placeholder="993" value="${esc(prefill.imap_port || '993')}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">用户名 <span class="req">*</span></label>
+      <input type="text" id="imapUser" class="form-control" placeholder="通常为完整邮箱" value="${esc(prefill.imap_user || '')}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">应用密码 <span class="req">*</span></label>
+      <input type="password" id="imapPass" class="form-control" placeholder="16 位应用密码">
+    </div>
+    <div class="form-group" style="margin-top:4px">
+      <label class="switch" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="imapPublic" ${prefill.is_public ? 'checked' : ''}>
+        <span class="track"></span>
+        <span>设为公开（允许其他用户使用此邮箱）</span>
+      </label>
+    </div>
+    <details style="margin-top:8px">
+      <summary style="cursor:pointer;font-size:13px;color:var(--text-light)">常见邮箱 IMAP 设置（点击展开）</summary>
+      <ul style="padding-left:18px;color:var(--text-light);font-size:13px;line-height:1.8;margin-top:8px">
+        <li>Gmail：imap.gmail.com : 993，需开启两步验证后生成 16 位应用密码</li>
+        <li>Outlook / Hotmail：imap-mail.outlook.com : 993</li>
+        <li>QQ 邮箱：imap.qq.com : 993，需开启 IMAP 并生成授权码</li>
+        <li>163 邮箱：imap.163.com : 993，需开启 IMAP 并生成授权码</li>
+      </ul>
+    </details>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">取消</button>
+     <button class="btn" id="imapBindBtn">连接并绑定</button>`);
+  const btn = document.getElementById('imapBindBtn');
+  if (btn) btn.onclick = () => submitImapBind();
+}
+
+function getImapField(id) {
+  const e = document.getElementById(id);
+  return e ? e.value.trim() : '';
+}
+
+async function submitImapBind() {
+  const email = getImapField('imapEmail');
+  const host = getImapField('imapHost');
+  const port = getImapField('imapPort');
+  const user = getImapField('imapUser');
+  const pass = getImapField('imapPass');
+  const isPublic = document.getElementById('imapPublic') && document.getElementById('imapPublic').checked;
+  if (!email || !host || !user || !pass) { toast('请填写邮箱、服务器、用户名与应用密码', 'warning'); return; }
+  const btn = document.getElementById('imapBindBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '连接测试中...'; }
+  try {
+    await api('/api/account/mail_accounts/imap', {
+      method: 'POST',
+      body: {
+        email,
+        imap_host: host,
+        imap_port: parseInt(port, 10) || 993,
+        imap_user: user,
+        imap_pass: pass,
+        is_public: !!isPublic,
+      },
+    });
+    toast('IMAP 邮箱绑定成功', 'success');
+    closeModal();
+    loadMyAccounts(true);
+    if (typeof loadAvailableAccounts === 'function') loadAvailableAccounts();
+  } catch (err) {
+    toast(err.message, 'error', 6000);
+    if (btn) { btn.disabled = false; btn.textContent = '连接并绑定'; }
+  }
 }
 
 /* ============ 设备码授权 ============ */

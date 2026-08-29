@@ -66,6 +66,7 @@ const ROUTE_TABLE: RouteEntry[] = [
   buildRoute('POST', '/api/account/api_key',     routes.accountRegenApiKey),
   buildRoute('GET',  '/api/account/mail_accounts',     routes.accountListAccounts),
   buildRoute('GET',  '/api/account/mail_accounts/available', routes.accountAvailableAccounts),
+  buildRoute('POST', '/api/account/mail_accounts/imap', routes.accountBindImap),
   buildRoute('GET',  '/api/account/mail_accounts/:id/status', routes.accountAuthStatus),
   buildRoute('PUT',  '/api/account/mail_accounts/:id/public', routes.accountTogglePublic),
   buildRoute('DELETE', '/api/account/mail_accounts/:id', routes.accountDeleteAccount),
