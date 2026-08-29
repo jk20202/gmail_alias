@@ -259,16 +259,11 @@ async function openGmailAppPasswordForm() {
       <label class="form-label">IMAP 服务器</label>
       <input type="text" id="imapHost" class="form-control" value="imap.gmail.com" readonly>
     </div>
-    <div class="group-row">
-      <div class="form-group" style="flex:0 0 110px">
-        <label class="form-label">端口</label>
-        <input type="number" id="imapPort" class="form-control" value="993">
-      </div>
-      <div class="form-group" style="flex:1">
-        <label class="form-label">用户名 <span class="req">*</span></label>
-        <input type="text" id="imapUser" class="form-control" placeholder="通常为完整 Gmail 地址">
-      </div>
+    <div class="form-group">
+      <label class="form-label">端口</label>
+      <input type="number" id="imapPort" class="form-control" style="max-width:140px" value="993">
     </div>
+    <p class="form-hint">IMAP 登录用户名即上方 Gmail 地址，无需单独填写；密码填 16 位应用密码。</p>
     <div class="form-group">
       <label class="form-label">应用密码 <span class="req">*</span></label>
       <input type="password" id="imapPass" class="form-control" placeholder="16 位应用密码">
@@ -283,17 +278,6 @@ async function openGmailAppPasswordForm() {
     </div>`,
     `<button class="btn btn-secondary" onclick="closeModal()">取消</button>
      <button class="btn" id="imapBindBtn">连接并绑定</button>`);
-  // 用户名默认跟随邮箱输入,减少填写
-  const emailEl = document.getElementById('imapEmail');
-  const userEl = document.getElementById('imapUser');
-  if (emailEl && userEl) {
-    emailEl.addEventListener('input', () => {
-      if (!userEl.value || userEl.dataset.touched !== '1') {
-        userEl.value = emailEl.value.trim();
-      }
-    });
-    userEl.addEventListener('input', () => { userEl.dataset.touched = '1'; });
-  }
   wireAliasPreview('imapEmail', 'imapAliasTpl', 'imapAliasTplPreview');
   const btn = document.getElementById('imapBindBtn');
   if (btn) btn.onclick = () => submitImapBind();
@@ -317,8 +301,9 @@ function openImapForm(prefill) {
       <input type="number" id="imapPort" class="form-control" placeholder="993" value="${esc(prefill.imap_port || '993')}">
     </div>
     <div class="form-group">
-      <label class="form-label">用户名 <span class="req">*</span></label>
-      <input type="text" id="imapUser" class="form-control" placeholder="通常为完整邮箱" value="${esc(prefill.imap_user || '')}">
+      <label class="form-label">IMAP 登录用户名 <span class="req">*</span></label>
+      <input type="text" id="imapUser" class="form-control" placeholder="通常就是你的完整邮箱" value="${esc(prefill.imap_user || '')}">
+      <p class="form-hint" style="margin-top:6px">绝大多数邮箱（含 Gmail / QQ / 163 / Outlook）此处填<strong>完整邮箱地址</strong>即可；仅少数企业邮箱登录 ID 与邮箱不同才需改。</p>
     </div>
     <div class="form-group">
       <label class="form-label">应用密码 <span class="req">*</span></label>
@@ -344,6 +329,17 @@ function openImapForm(prefill) {
     `<button class="btn btn-secondary" onclick="closeModal()">取消</button>
      <button class="btn" id="imapBindBtn">连接并绑定</button>`);
   wireAliasPreview('imapEmail', 'imapAliasTpl', 'imapAliasTplPreview');
+  // 用户名默认跟随邮箱输入,绝大多数邮箱此处就是完整邮箱,免去单独填写
+  const imapEmailEl = document.getElementById('imapEmail');
+  const imapUserEl = document.getElementById('imapUser');
+  if (imapEmailEl && imapUserEl) {
+    imapEmailEl.addEventListener('input', () => {
+      if (!imapUserEl.value || imapUserEl.dataset.touched !== '1') {
+        imapUserEl.value = imapEmailEl.value.trim();
+      }
+    });
+    imapUserEl.addEventListener('input', () => { imapUserEl.dataset.touched = '1'; });
+  }
   const btn = document.getElementById('imapBindBtn');
   if (btn) btn.onclick = () => submitImapBind();
 }
@@ -397,11 +393,12 @@ async function submitImapBind() {
   const host = getImapField('imapHost');
   const port = getImapField('imapPort');
   // 应用密码常带空格显示(如 abcd efgh ...),登录时须去除所有空白
-  const user = getImapField('imapUser').replace(/\s+/g, '');
+  // 用户名未单独填写时回退为邮箱(IMAP 登录用户名通常就是完整邮箱)
+  const user = (getImapField('imapUser') || email).replace(/\s+/g, '');
   const pass = getImapField('imapPass').replace(/\s+/g, '');
   const isPublic = document.getElementById('imapPublic') && document.getElementById('imapPublic').checked;
   const aliasTpl = getImapField('imapAliasTpl');
-  if (!email || !host || !user || !pass) { toast('请填写邮箱、服务器、用户名与应用密码', 'warning'); return; }
+  if (!email || !host || !user || !pass) { toast('请填写邮箱、服务器与应用密码', 'warning'); return; }
   const btn = document.getElementById('imapBindBtn');
   if (btn) { btn.disabled = true; btn.textContent = '连接测试中...'; }
   try {

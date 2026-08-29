@@ -616,7 +616,9 @@ export async function accountBindImap(ctx: Ctx): Promise<Response> {
   const body = ctx.body || {};
   const email = typeof body.email === 'string' ? body.email.trim() : '';
   const imapHost = typeof body.imap_host === 'string' ? body.imap_host.trim() : '';
-  const imapUser = typeof body.imap_user === 'string' ? body.imap_user.trim() : '';
+  // IMAP 登录用户名: 绝大多数邮箱(含 Gmail / Outlook / QQ / 163)就是完整邮箱本身,
+  // 仅少数企业邮箱登录 ID 与邮箱不同。未提供时直接回退为邮箱,免去用户额外填写一个"用户名"。
+  const imapUser = (typeof body.imap_user === 'string' ? body.imap_user.trim() : '') || email;
   const imapPass = typeof body.imap_pass === 'string' ? body.imap_pass.trim() : '';
   const portRaw = parseInt(String(body.imap_port || '993'), 10);
   const isPublic = body.is_public === true;
