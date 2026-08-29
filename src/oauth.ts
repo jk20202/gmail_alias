@@ -3,7 +3,7 @@
 // 微软: Device Code Flow(公共客户端无回调地址)
 import type { Env, MailAccountRaw } from './types';
 import { randomHex, encrypt, decrypt, isExpired, nowISO } from './utils';
-import { addMailAccount, updateMailAccountToken, getMailAccountById, getMailAccountByUserAndEmail, getSetting, setSetting } from './db';
+import { addMailAccount, updateMailAccountToken, getMailAccountById, getMailAccountByUserAndEmail, getSetting, setSetting, getUserGoogleCreds } from './db';
 
 // ============ 公共配置 ============
 // Gmail OAuth 端点
@@ -44,11 +44,28 @@ function msClientId(env: Env): string {
 }
 
 // ============ Google 凭据读取 ============
-// 优先读管理后台写入 D1 的加密配置,其次读 Worker 环境变量(wrangler secret)
-// 两者都没配 -> 返回 null,由调用方给出明确中文提示,而不是让用户跳到 Google 的 401 页面
-export interface GoogleCreds { clientId: string; clientSecret: string; source: 'db' | 'env'; }
+// 优先级:① 用户自己填写并保存在 users 行的凭据(普通用户自助,完全与系统设置解耦)
+//         ② Worker 环境变量(wrangler secret,适合自托管统一提供)
+//         ③ 管理后台写入 D1 settings 的全局凭据(旧方案兜底)
+// 用户级凭据优先,意味着任何人(含普通用户)填错都不会"卡死"全局,改自己那一份即可。
+export interface GoogleCreds { clientId: string; clientSecret: string; source: 'user' | 'env' | 'db'; }
 
-export async function getGoogleCreds(env: Env): Promise<GoogleCreds | null> {
+export async function getGoogleCreds(env: Env, userId?: string): Promise<GoogleCreds | null> {
+  // ① 用户自身凭据(最高优先级)
+  if (userId) {
+    try {
+      const u = await getUserGoogleCreds(env, userId);
+      if (u && u.clientId) return { clientId: u.clientId, clientSecret: u.clientSecret, source: 'user' };
+    } catch { /* 用户行异常时忽略,继续降级 */ }
+  }
+  // ② 环境变量
+  const envId = (env.GOOGLE_CLIENT_ID || '').trim();
+  const envSecret = (env.GOOGLE_CLIENT_SECRET || '').trim();
+  const placeholder = ['', 'undefined', 'null', 'xxx', 'YOUR_CLIENT_ID', 'CHANGEME'];
+  if (envId && placeholder.indexOf(envId) === -1) {
+    return { clientId: envId, clientSecret: envSecret, source: 'env' };
+  }
+  // ③ 管理后台全局凭据(兜底)
   let dbId = '';
   let dbSecret = '';
   try {
@@ -57,18 +74,7 @@ export async function getGoogleCreds(env: Env): Promise<GoogleCreds | null> {
     if (rawId) dbId = await decrypt(rawId, env).catch(() => '');
     if (rawSecret) dbSecret = await decrypt(rawSecret, env).catch(() => '');
   } catch { /* settings 表异常时忽略 */ }
-
-  if (dbId && dbSecret) return { clientId: dbId, clientSecret: dbSecret, source: 'db' };
-  // 只有 id 没有 secret 时,Device Code Flow 也可以只用 client_id(公共客户端)
-  if (dbId) return { clientId: dbId, clientSecret: '', source: 'db' };
-
-  const envId = (env.GOOGLE_CLIENT_ID || '').trim();
-  const envSecret = (env.GOOGLE_CLIENT_SECRET || '').trim();
-  // 排除未配置时常见的占位值
-  const placeholder = ['', 'undefined', 'null', 'xxx', 'YOUR_CLIENT_ID', 'CHANGEME'];
-  if (envId && placeholder.indexOf(envId) === -1) {
-    return { clientId: envId, clientSecret: envSecret, source: 'env' };
-  }
+  if (dbId) return { clientId: dbId, clientSecret: dbSecret, source: 'db' };
   return null;
 }
 
@@ -96,9 +102,9 @@ export async function buildAuthURL(env: Env, userId: string, provider: 'gmail' |
   // 这里保留 Authorization Code 通道作为备用:未配置凭据时直接给中文提示,不再跳 Google 的 401 页
   let clientId = '';
   if (provider === 'gmail') {
-    const creds = await getGoogleCreds(env);
+    const creds = await getGoogleCreds(env, userId);
     if (!creds) {
-      throw new Error('尚未配置 Google OAuth 客户端凭据,请到「系统设置 → OAuth 凭据」填写 Client ID / Client Secret');
+      throw new Error('尚未配置 Google OAuth 客户端凭据,请在「绑定 Gmail」弹窗内填写你的 Client ID / Client Secret');
     }
     clientId = creds.clientId;
   } else {
@@ -186,16 +192,16 @@ interface TokenResponse {
   token_type: string;
 }
 
-async function exchangeGoogleCode(env: Env, code: string, redirectUri: string): Promise<TokenResponse> {
-  const creds = await getGoogleCreds(env);
-  if (!creds) throw new Error('尚未配置 Google OAuth 客户端凭据');
+async function exchangeGoogleCode(env: Env, code: string, redirectUri: string, creds?: GoogleCreds | null): Promise<TokenResponse> {
+  const c = creds || await getGoogleCreds(env);
+  if (!c) throw new Error('尚未配置 Google OAuth 客户端凭据');
   const body = new URLSearchParams({
     code,
-    client_id: creds.clientId,
+    client_id: c.clientId,
     redirect_uri: redirectUri,
     grant_type: 'authorization_code',
   });
-  if (creds.clientSecret) body.set('client_secret', creds.clientSecret);
+  if (c.clientSecret) body.set('client_secret', c.clientSecret);
   const resp = await fetch(GOOGLE_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -205,7 +211,7 @@ async function exchangeGoogleCode(env: Env, code: string, redirectUri: string): 
   if (!resp.ok) {
     const e = data.error || '';
     if (e === 'invalid_client') {
-      throw new Error('Google 返回 invalid_client: Client ID / Client Secret 不正确,或该客户端已被删除。请到「系统设置 → OAuth 凭据」核对后重试');
+      throw new Error('Google 返回 invalid_client: Client ID 无效或客户端类型不支持该授权方式。请在「绑定 Gmail」弹窗内核对并修改 Client ID / Client Secret 后重试');
     }
     throw new Error(`Google token error: ${data.error_description || data.error}`);
   }
@@ -268,7 +274,7 @@ export async function ensureValidToken(env: Env, accountId: string): Promise<{ t
   // 刷新 token
   const refreshToken = await decrypt(account.refresh_token, env);
   const refreshed = account.provider === 'gmail'
-    ? await refreshGoogleToken(env, refreshToken)
+    ? await refreshGoogleToken(env, refreshToken, await getGoogleCreds(env, account.user_id))
     : await refreshMicrosoftToken(env, refreshToken);
 
   // 重新加密存储
@@ -281,15 +287,15 @@ export async function ensureValidToken(env: Env, accountId: string): Promise<{ t
 }
 
 // Google 刷新
-async function refreshGoogleToken(env: Env, refreshToken: string): Promise<TokenResponse> {
-  const creds = await getGoogleCreds(env);
-  if (!creds) throw new Error('尚未配置 Google OAuth 客户端凭据');
+async function refreshGoogleToken(env: Env, refreshToken: string, creds?: GoogleCreds | null): Promise<TokenResponse> {
+  const c = creds || await getGoogleCreds(env);
+  if (!c) throw new Error('尚未配置 Google OAuth 客户端凭据');
   const body = new URLSearchParams({
-    client_id: creds.clientId,
+    client_id: c.clientId,
     refresh_token: refreshToken,
     grant_type: 'refresh_token',
   });
-  if (creds.clientSecret) body.set('client_secret', creds.clientSecret);
+  if (c.clientSecret) body.set('client_secret', c.clientSecret);
   const resp = await fetch(GOOGLE_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -340,7 +346,7 @@ export async function checkAccountAuthStatus(env: Env, accountId: string): Promi
   try {
     const refreshToken = await decrypt(account.refresh_token, env);
     const refreshed = account.provider === 'gmail'
-      ? await refreshGoogleToken(env, refreshToken)
+      ? await refreshGoogleToken(env, refreshToken, await getGoogleCreds(env, account.user_id))
       : await refreshMicrosoftToken(env, refreshToken);
     const encAccess = await encrypt(refreshed.access_token, env);
     const encRefresh = refreshed.refresh_token ? await encrypt(refreshed.refresh_token, env) : account.refresh_token;
@@ -464,6 +470,8 @@ export interface GoogleDeviceSession {
   verification_url: string;
   expires_at: number;
   interval: number;
+  client_id: string;          // 本次会话绑定的凭据(用户在弹窗内填写的,不再依赖全局配置)
+  client_secret: string;
 }
 
 export interface DeviceStartResult {
@@ -473,10 +481,15 @@ export interface DeviceStartResult {
   expires_in: number;
 }
 
-export async function startGoogleDeviceFlow(env: Env, userId: string): Promise<DeviceStartResult> {
-  const creds = await getGoogleCreds(env);
+export async function startGoogleDeviceFlow(
+  env: Env, userId: string, explicitCreds?: { clientId: string; clientSecret: string } | null
+): Promise<DeviceStartResult> {
+  // 优先用用户本次在弹窗内填写的凭据;否则回退到(用户级 → 环境变量 → 全局)配置
+  const creds = explicitCreds && explicitCreds.clientId
+    ? { clientId: explicitCreds.clientId, clientSecret: explicitCreds.clientSecret || '', source: 'user' as const }
+    : await getGoogleCreds(env, userId);
   if (!creds) {
-    throw new Error('尚未配置 Google OAuth 客户端凭据,请到「系统设置 → OAuth 凭据」填写后在绑定');
+    throw new Error('尚未填写 Google OAuth 客户端凭据,请在「绑定 Gmail」弹窗内填写你的 Client ID / Client Secret');
   }
   const body = new URLSearchParams({
     client_id: creds.clientId,
@@ -495,7 +508,7 @@ export async function startGoogleDeviceFlow(env: Env, userId: string): Promise<D
   if (!resp.ok || !data.device_code || !data.user_code) {
     const e = data.error || '';
     if (e === 'invalid_client') {
-      throw new Error('Google 返回 invalid_client: Client ID 无效或客户端类型不支持设备授权,请到「系统设置 → OAuth 凭据」核对');
+      throw new Error('Google 返回 invalid_client: Client ID 无效或客户端类型不支持设备授权。请在「绑定 Gmail」弹窗内核对并修改 Client ID / Client Secret 后重试');
     }
     throw new Error(`Google 设备码申请失败: ${data.error_description || data.error || resp.status}`);
   }
@@ -507,6 +520,8 @@ export async function startGoogleDeviceFlow(env: Env, userId: string): Promise<D
     verification_url: data.verification_url || GOOGLE_DEVICE_VERIFY_URL,
     expires_at: Date.now() + (data.expires_in || 1800) * 1000,
     interval: data.interval || 5,
+    client_id: creds.clientId,
+    client_secret: creds.clientSecret,
   };
   await env.KV.put(`gdevice:${userId}`, JSON.stringify(session), {
     expirationTtl: Math.max(60, data.expires_in || 1800),
@@ -541,9 +556,6 @@ async function persistGoogleAccount(env: Env, userId: string, tokenResp: TokenRe
 export async function pollGoogleDeviceFlow(
   env: Env, userId: string
 ): Promise<{ status: 'success' | 'pending' | 'failed'; reason?: string; email?: string }> {
-  const creds = await getGoogleCreds(env);
-  if (!creds) return { status: 'failed', reason: '尚未配置 Google OAuth 客户端凭据' };
-
   const raw = await env.KV.get(`gdevice:${userId}`);
   if (!raw) return { status: 'failed', reason: '授权会话不存在或已过期,请重新发起' };
   const session = JSON.parse(raw) as GoogleDeviceSession;
@@ -551,6 +563,9 @@ export async function pollGoogleDeviceFlow(
     await env.KV.delete(`gdevice:${userId}`);
     return { status: 'failed', reason: '设备码已过期,请重新发起' };
   }
+
+  // 直接使用本次会话绑定的凭据(用户在弹窗内填写的),与全局配置解耦
+  const creds = { clientId: session.client_id, clientSecret: session.client_secret || '' };
 
   const body = new URLSearchParams({
     client_id: creds.clientId,
@@ -592,7 +607,7 @@ export async function pollGoogleDeviceFlow(
   }
   if (err === 'invalid_client') {
     await env.KV.delete(`gdevice:${userId}`);
-    return { status: 'failed', reason: 'Google 返回 invalid_client: Client ID / Client Secret 不正确,请到系统设置核对' };
+    return { status: 'failed', reason: 'Google 返回 invalid_client: Client ID 无效或客户端类型不支持设备授权。请在「绑定 Gmail」弹窗内核对并修改 Client ID / Client Secret 后重试' };
   }
   if (err === 'invalid_grant') return { status: 'pending' };   // 用户尚未完成输入时也会短暂出现
   return { status: 'failed', reason: data.error_description || err || '未知错误' };

@@ -331,10 +331,25 @@ export async function accountOAuthStart(ctx: Ctx): Promise<Response> {
 }
 
 // Gmail: Device Code Flow 授权(推荐,无需回调地址)
+// 前端把用户在弹窗内填写的 Client ID / Secret 一并提交;后端:
+//  1) 持久化到该用户自己的账号下(便于下次预填;用户级凭据优先级最高)
+//  2) 用本次提交(或已保存)的凭据发起设备码,避免被历史全局配置卡死
 export async function accountGoogleDeviceStart(ctx: Ctx): Promise<Response> {
   const user = await requireSession(ctx);
+  const body = ctx.body || {};
+  const cid = typeof body.client_id === 'string' ? body.client_id.trim() : '';
+  const sec = typeof body.client_secret === 'string' ? body.client_secret.trim() : '';
+
+  let explicitCreds: { clientId: string; clientSecret: string } | null = null;
+  if (cid) {
+    // 仅在有值时写入,且不因本次留空而把已保存的 Secret 清空
+    const existing = await db.getUserGoogleCreds(ctx.env, user.id);
+    const secretToSave = sec || (existing ? existing.clientSecret : '');
+    await db.saveUserGoogleCreds(ctx.env, user.id, cid, secretToSave);
+    explicitCreds = { clientId: cid, clientSecret: secretToSave };
+  }
   try {
-    const data = await startGoogleDeviceFlow(ctx.env, user.id);
+    const data = await startGoogleDeviceFlow(ctx.env, user.id, explicitCreds);
     return ok({ ...data, provider: 'gmail' });
   } catch (e) {
     return fail((e as Error).message);
@@ -355,16 +370,23 @@ export async function adminGetOAuthConfig(ctx: Ctx): Promise<Response> {
   return ok({ ...status, has_client_secret: hasSecret });
 }
 
-// 普通用户:查看 Google OAuth 凭据是否已配置(供绑定弹窗判断是否要现场填凭据)
+// 普通用户:查看自己的 Google OAuth 凭据是否已配置(供绑定弹窗预填)
 export async function accountGoogleOAuthStatus(ctx: Ctx): Promise<Response> {
-  await requireSession(ctx);
-  const status = await googleConfigStatus(ctx.env);
-  return ok(status);
+  const user = await requireSession(ctx);
+  const own = await db.getUserGoogleCreds(ctx.env, user.id);
+  const envId = (ctx.env.GOOGLE_CLIENT_ID || '').trim();
+  return ok({
+    configured: !!(own || envId),
+    // Client ID 非机密,可直接回显便于预填;Secret 不回显(只告知是否已保存)
+    client_id: own ? own.clientId : envId,
+    has_client_secret: !!(own && own.clientSecret),
+    source: own ? 'user' : (envId ? 'env' : ''),
+  });
 }
 
-// 普通用户:在绑定弹窗内当场提交 Google OAuth 凭据(全站共享,只需填一次)
+// 普通用户:在绑定弹窗内当场提交自己的 Google OAuth 凭据(保存在个人账号下,与系统设置无关)
 export async function accountSaveGoogleCreds(ctx: Ctx): Promise<Response> {
-  await requireSession(ctx);
+  const user = await requireSession(ctx);
   const { client_id, client_secret } = ctx.body || {};
   if (!client_id || typeof client_id !== 'string' || !client_id.trim()) {
     return fail('请填写 Client ID');
@@ -375,8 +397,8 @@ export async function accountSaveGoogleCreds(ctx: Ctx): Promise<Response> {
   if (!client_secret || typeof client_secret !== 'string' || !client_secret.trim()) {
     return fail('请填写 Client Secret');
   }
-  await saveGoogleCreds(ctx.env, client_id.trim(), client_secret.trim());
-  return ok(await googleConfigStatus(ctx.env));
+  await db.saveUserGoogleCreds(ctx.env, user.id, client_id.trim(), client_secret.trim());
+  return ok({ configured: true });
 }
 
 export async function adminSaveOAuthConfig(ctx: Ctx): Promise<Response> {

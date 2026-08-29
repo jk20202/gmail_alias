@@ -1,6 +1,6 @@
 // D1 数据访问层 - 封装所有 SQL 操作
 import type { Env, SafeUser, SafeMailAccount, MailAccountRaw, Alias, Webhook, UserAlias } from './types';
-import { sha256, randomHex, maskToken, nowISO, buildAliasFull, decrypt } from './utils';
+import { sha256, randomHex, maskToken, nowISO, buildAliasFull, decrypt, encrypt } from './utils';
 
 const SESSION_TTL_DAYS = 7;
 const LOG_RETENTION_DAYS = 30;
@@ -62,6 +62,16 @@ export async function ensureSchema(env: Env): Promise<void> {
     'ALTER TABLE mail_accounts ADD COLUMN imap_port INTEGER',
     'ALTER TABLE mail_accounts ADD COLUMN imap_user TEXT',
     'ALTER TABLE mail_accounts ADD COLUMN imap_pass TEXT',
+  ]) {
+    try { await env.DB.prepare(col).run(); } catch { /* 列已存在 */ }
+  }
+
+  // users 表增加 per-user Google OAuth 凭据(每个用户自行填写,与系统设置完全解耦)
+  // 这样普通用户在「绑定 Gmail」弹窗内即可填写 / 修改自己的 Client ID / Secret,
+  // 不会因一次填错而被全局配置卡死,也无需进入系统设置
+  for (const col of [
+    'ALTER TABLE users ADD COLUMN google_client_id TEXT',
+    'ALTER TABLE users ADD COLUMN google_client_secret TEXT',
   ]) {
     try { await env.DB.prepare(col).run(); } catch { /* 列已存在 */ }
   }
@@ -985,4 +995,36 @@ export async function setSetting(env: Env, key: string, value: string): Promise<
   await env.DB.prepare(
     'INSERT INTO settings(key, value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value'
   ).bind(key, value).run();
+}
+
+// ============ 用户级 Google OAuth 凭据(普通用户自行填写,与系统设置解耦) ============
+// 每个用户把自己的 Google 客户端凭据保存在自己的 users 行里;
+// 优先级高于环境变量与管理后台全局配置,因此不会因他人/全局填错而被卡死。
+export interface UserGoogleCreds { clientId: string; clientSecret: string; }
+
+export async function getUserGoogleCreds(env: Env, userId: string): Promise<UserGoogleCreds | null> {
+  const row = await env.DB.prepare(
+    'SELECT google_client_id, google_client_secret FROM users WHERE id = ?'
+  ).bind(userId).first<{ google_client_id: string | null; google_client_secret: string | null }>();
+  if (!row) return null;
+  let clientId = '';
+  let clientSecret = '';
+  if (row.google_client_id) {
+    try { clientId = await decrypt(row.google_client_id, env); } catch { clientId = ''; }
+  }
+  if (row.google_client_secret) {
+    try { clientSecret = await decrypt(row.google_client_secret, env); } catch { clientSecret = ''; }
+  }
+  if (!clientId) return null;
+  return { clientId, clientSecret };
+}
+
+export async function saveUserGoogleCreds(env: Env, userId: string, clientId: string, clientSecret: string): Promise<void> {
+  await env.DB.prepare(
+    'UPDATE users SET google_client_id = ?, google_client_secret = ? WHERE id = ?'
+  ).bind(
+    clientId ? await encrypt(clientId, env) : '',
+    clientSecret ? await encrypt(clientSecret, env) : '',
+    userId
+  ).run();
 }

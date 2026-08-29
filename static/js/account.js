@@ -158,6 +158,10 @@ function reauthAccount(id, provider) {
     openImapForm(acc ? { email: acc.email } : {});
     return;
   }
+  if (provider === 'gmail') {
+    openGoogleBindForm();
+    return;
+  }
   openBindModal(provider);
 }
 
@@ -198,11 +202,14 @@ function openBindModal(provider) {
   if (provider === 'imap') return openImapForm();
   const isGmail = provider === 'gmail';
   const title = isGmail ? '绑定 Gmail' : '绑定 Outlook / Hotmail';
+  const deviceDesc = isGmail
+    ? '复制弹出的授权码，到授权页输入完成绑定。无需在 Google 后台登记回调地址，最适配 Cloudflare 部署。绑定 Gmail 需在弹窗内填写你自己的 Google 客户端凭据（仅保存在你的账号下，与系统设置无关）。'
+    : '复制弹出的授权码，到授权页输入完成绑定。无需在微软后台登记回调地址，最适配 Cloudflare 部署。';
   const body = `
     <div class="bind-options">
       <div class="bind-option" onclick="startDeviceAuth('${provider}')">
         <div class="bind-option-title">⌨️ 设备码授权（推荐）</div>
-        <div class="bind-option-desc">复制弹出的授权码，到授权页输入完成绑定。无需在 Google / 微软后台登记任何回调地址，最适配 Cloudflare 部署。${isGmail ? '首次绑定会在弹窗内要求填写一次 Google 客户端凭据（全站共享）。' : ''}</div>
+        <div class="bind-option-desc">${deviceDesc}</div>
       </div>
       ${isGmail ? `
       <div class="bind-option" onclick="openImapForm()">
@@ -298,28 +305,15 @@ async function submitImapBind() {
 }
 
 /* ============ 设备码授权 ============ */
-async function startDeviceAuth(provider) {
-  if (provider === 'gmail' && !(await ensureGoogleCreds('device'))) return;
-  closeModal();
-  if (provider === 'outlook') return startMsDeviceFlow();
-  return startGoogleDeviceFlow();
-}
-
-// Gmail 绑定前确认凭据:已配置则直接继续;未配置则弹出填写框(普通用户无需进系统设置)
-async function ensureGoogleCreds(method) {
-  let configured = true;
+// Gmail 绑定:无论是否已经填过凭据,都直接打开可编辑的凭据表单(避免一次填错就被卡死)
+async function openGoogleBindForm() {
+  let prefill = { client_id: '', has_secret: false };
   try {
     const st = await api('/api/account/oauth/google/status');
-    configured = !!st.configured;
-  } catch (e) { configured = true; } // 兜底:放行,让原接口给出中文报错
-  if (configured) return true;
-  showGoogleCredsForm(method);
-  return false;
-}
-
-function showGoogleCredsForm(method) {
-  showModal('填写 Google OAuth 凭据', `
-    <p class="form-hint" style="margin:0 0 12px">绑定 Gmail 需要先在 Google Cloud 创建「桌面应用」类型的 OAuth 客户端。填写并保存后即可立即授权（凭据全站共享，只需填一次）。</p>
+    prefill = { client_id: st.client_id || '', has_secret: !!st.has_client_secret };
+  } catch (e) { /* 忽略,直接空白表单 */ }
+  showModal('绑定 Gmail（填写 Google 客户端凭据）', `
+    <p class="form-hint" style="margin:0 0 12px">绑定 Gmail 需要先在 Google Cloud 创建「桌面应用」类型的 OAuth 客户端。填写并保存后即可立即授权。凭据仅保存在<strong>你自己的账号</strong>下，与系统设置无关，可随时回来修改。</p>
     <div style="margin:0 0 12px">
       <a class="btn btn-ghost" href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px">↗ 打开 Google Cloud 凭据页（新标签页）</a>
     </div>
@@ -328,42 +322,41 @@ function showGoogleCredsForm(method) {
       <ol style="padding-left:18px;color:var(--text-light);font-size:13px;line-height:1.9;margin-top:8px">
         <li>在打开的页面左上，选好对应的 Google 项目（或新建一个）</li>
         <li>「OAuth 同意屏幕」：用户类型选<strong>外部</strong>，填写应用名称与支持邮箱，测试用户里加上你自己的 Gmail</li>
-        <li>「凭据 → 创建凭据 → OAuth 客户端 ID」：应用类型务必选<strong>桌面应用</strong></li>
-        <li>复制生成的 <b>Client ID</b> 与 <b>Client Secret</b>，粘贴到下方保存</li>
+        <li>「凭据 → 创建凭据 → OAuth 客户端 ID」：应用类型务必选<strong>桌面应用</strong>（注意：只有“桌面应用 / 电视等”才支持设备码授权，选“Web 应用”会报 invalid_client）</li>
+        <li>复制生成的 <b>Client ID</b> 与 <b>Client Secret</b>，粘贴到下方</li>
       </ol>
     </details>
     <div class="form-group">
       <label class="form-label">Client ID <span class="req">*</span></label>
-      <input type="text" id="gcClientId" class="form-control" placeholder="1234567890-xxxx.apps.googleusercontent.com">
+      <input type="text" id="gcClientId" class="form-control" placeholder="1234567890-xxxx.apps.googleusercontent.com" value="${esc(prefill.client_id)}">
     </div>
     <div class="form-group">
       <label class="form-label">Client Secret <span class="req">*</span></label>
       <input type="password" id="gcClientSecret" class="form-control" placeholder="GOCSPX-...">
+      ${prefill.has_secret ? '<p class="form-hint" style="margin-top:6px">已保存过 Client Secret，若未改动可留空。</p>' : ''}
     </div>`,
     `<button class="btn btn-secondary" onclick="closeModal()">取消</button>
-     <button class="btn" id="gcSaveBtn">保存并继续</button>`);
-  const btn = document.getElementById('gcSaveBtn');
-  if (btn) btn.onclick = () => submitGoogleCreds(method);
+     <button class="btn" id="gcBindBtn">获取授权码并绑定</button>`);
+  const btn = document.getElementById('gcBindBtn');
+  if (btn) btn.onclick = () => submitGoogleBind();
 }
 
-async function submitGoogleCreds(method) {
+async function submitGoogleBind() {
   const idEl = document.getElementById('gcClientId');
   const secEl = document.getElementById('gcClientSecret');
-  const id = idEl ? idEl.value.trim() : '';
+  const cid = idEl ? idEl.value.trim() : '';
   const secret = secEl ? secEl.value.trim() : '';
-  if (!id) { toast('请填写 Client ID', 'warning'); return; }
-  if (!secret) { toast('请填写 Client Secret', 'warning'); return; }
-  const btn = document.getElementById('gcSaveBtn');
-  if (btn) { btn.disabled = true; btn.textContent = '保存中...'; }
-  try {
-    await api('/api/account/oauth/google/creds', { method: 'POST', body: { client_id: id, client_secret: secret } });
-    toast('凭据已保存', 'success');
-    closeModal();
-    return startDeviceAuth('gmail');
-  } catch (err) {
-    toast(err.message, 'error');
-    if (btn) { btn.disabled = false; btn.textContent = '保存并继续'; }
-  }
+  if (!cid) { toast('请填写 Client ID', 'warning'); return; }
+  const btn = document.getElementById('gcBindBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '获取授权码中...'; }
+  // 直接带着本次填写的凭据发起设备码(后端会同时保存到你账号下)
+  await startGoogleDeviceFlow(cid, secret);
+}
+
+async function startDeviceAuth(provider) {
+  closeModal();
+  if (provider === 'outlook') return startMsDeviceFlow();
+  return openGoogleBindForm();
 }
 
 // 离开页面时停掉所有轮询
@@ -410,16 +403,20 @@ function afterBindSuccess() {
   if (typeof loadAvailableAccounts === 'function') loadAvailableAccounts();
 }
 
-async function startGoogleDeviceFlow() {
+async function startGoogleDeviceFlow(cid, secret) {
   let data;
   try {
-    data = await api('/api/account/oauth/google/device', { method: 'POST' });
+    data = await api('/api/account/oauth/google/device', {
+      method: 'POST',
+      body: { client_id: cid || undefined, client_secret: secret || undefined },
+    });
   } catch (err) {
     toast(err.message, 'error', 5000);
     setTimeout(() => showModal('Gmail 绑定失败', `
       <p style="margin-bottom:10px">${esc(err.message)}</p>
-      <p class="form-hint">若提示缺少凭据或凭据无效，请在「我的账户 → 绑定 Gmail」弹窗内重新填写正确的 Google 客户端 Client ID / Client Secret（普通用户也可在弹窗内填写，无需进系统设置），再重试设备码授权。</p>`,
-      `<button class="btn btn-secondary" onclick="closeModal()">知道了</button>`), 400);
+      <p class="form-hint">请在弹窗内核对并修改 Client ID / Client Secret 后重试。普通用户可直接在「绑定 Gmail」处填写自己的凭据，无需进入系统设置。</p>`,
+      `<button class="btn btn-secondary" onclick="closeModal()">知道了</button>
+       <button class="btn" onclick="openGoogleBindForm()">返回修改</button>`), 400);
     return;
   }
   const openUrl = data.verification_url_complete || data.verification_url || 'https://google.com/device';
