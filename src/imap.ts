@@ -29,6 +29,8 @@ class ImapConnection {
   private tagCounter = 0;
   private deadline = 0;          // 整体操作截止时间戳(ms),超时即抛错,避免 Worker 被平台 503 杀
   private readTimeoutMs = 12000; // 单次 socket 读取超时,卡死时快速失败
+  private len = 0;               // 缓冲中已写入的有效字节数(cap 为容量,二者分离以避免 O(n^2) 重分配)
+  private cap = 0;
 
   static async connect(cfg: ImapConnConfig): Promise<ImapConnection> {
     if (typeof connect !== 'function') {
@@ -45,10 +47,18 @@ class ImapConnection {
   }
 
   private async pushChunk(u: Uint8Array): Promise<void> {
-    const merged = new Uint8Array(this.buf.length + u.length);
-    merged.set(this.buf, 0);
-    merged.set(u, this.buf.length);
-    this.buf = merged;
+    // 几何增长缓冲:只在容量不足时翻倍分配,避免每收到一个分片就整段重拷贝(O(n^2) 在几百 KB 响应下吃掉数 ms CPU)
+    const need = this.len + u.length;
+    if (need > this.cap) {
+      let nc = this.cap || 1024;
+      while (nc < need) nc *= 2;
+      const nb = new Uint8Array(nc);
+      if (this.len) nb.set(this.buf.subarray(0, this.len), 0);
+      this.buf = nb;
+      this.cap = nc;
+    }
+    this.buf.set(u, this.len);
+    this.len += u.length;
   }
 
   private async readChunk(): Promise<boolean> {
@@ -74,8 +84,8 @@ class ImapConnection {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       if (this.deadline && Date.now() > this.deadline) throw new Error('IMAP 连接超时(超过 25s)');
-      if (this.buf.length && this.buf.indexOf(0x0a) >= 0) {
-        const text = this.dec.decode(this.buf);
+      if (this.len > 0 && this.buf.subarray(0, this.len).indexOf(0x0a) >= 0) {
+        const text = this.dec.decode(this.buf.subarray(0, this.len));
         if (/\* (OK|PREAUTH)/i.test(text)) return;
       }
       const more = await this.readChunk();
@@ -97,20 +107,21 @@ class ImapConnection {
     const tagBytes = this.enc.encode('\n' + tag + ' ');
     const start = Date.now();
     while (true) {
+      const data = this.buf.subarray(0, this.len);
       // 只扫描缓冲尾部(标签响应总是在响应末尾),避免大响应下每次从 0 全量重扫(O(n^2) 吃掉 CPU 限额)
-      const from = Math.max(0, this.buf.length - 512);
-      const idx = this.indexOf(this.buf, tagBytes, from);
+      const from = Math.max(0, data.length - 512);
+      const idx = this.indexOf(data, tagBytes, from);
       if (idx >= 0) {
-        const rest = this.buf.subarray(idx + tagBytes.length, idx + tagBytes.length + 8);
+        const rest = data.subarray(idx + tagBytes.length, idx + tagBytes.length + 8);
         const word = this.dec.decode(rest).toUpperCase();
         if (word.startsWith('OK') || word.startsWith('NO') || word.startsWith('BAD')) {
-          return this.buf;
+          return data;
         }
       }
       if (Date.now() - start > timeoutMs) throw new Error('IMAP 读取超时');
       if (this.deadline && Date.now() > this.deadline) throw new Error('IMAP 操作超时(超过 25s)');
       const more = await this.readChunk();
-      if (!more) return this.buf;
+      if (!more) return this.buf.subarray(0, this.len);
     }
   }
 
@@ -456,7 +467,7 @@ export async function fetchImapEmails(env: Env, accountId: string, params: Fetch
     // 真正的 to/时间/关键字过滤交给 emailService 在 JS 端完成。
     const total = await conn.statusMessages();
     if (total <= 0) return [];
-    const window = Math.min(Math.max((params.limit || 10) * 3, 30), 80);
+    const window = Math.min(Math.max((params.limit || 10) * 3, 30), 50);
     const seqStart = Math.max(1, total - window + 1);
     const map = await conn.fetchBySequence(`${seqStart}:*`, 'UID FLAGS BODY.PEEK[HEADER]');
     const emails: Email[] = [];
