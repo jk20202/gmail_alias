@@ -1,13 +1,29 @@
 /* ============================================================
  * account.js — 我的账户页
+ *   · 基本信息 / API Key
+ *   · 修改密码弹窗
+ *   · 邮箱绑定弹窗: 跳转授权(推荐) / 设备码 / 应用密码(说明)
  * ============================================================ */
 
 async function initAccountPage() {
   fillAccountInfo();
   await loadMyAccounts();
+  // 监听 OAuth 跳转授权成功后子窗口 postMessage
+  window.addEventListener('message', onOAuthMessage);
 }
 
-// 填充基本信息(从 State.user 读取)
+function onOAuthMessage(e) {
+  if (!e.data || typeof e.data !== 'object') return;
+  if (e.data.type === 'oauth_bind_success') {
+    toast((e.data.email || '邮箱') + ' 绑定成功', 'success');
+    loadMyAccounts();
+    if (typeof loadAvailableAccounts === 'function') loadAvailableAccounts();
+  } else if (e.data.type === 'oauth_bind_failed') {
+    toast(e.data.message || '绑定失败', 'error', 5000);
+  }
+}
+
+// 填充基本信息
 function fillAccountInfo() {
   const u = State.user;
   if (!u) return;
@@ -17,23 +33,49 @@ function fillAccountInfo() {
     : '<span class="badge badge-gray">普通用户</span>';
   document.getElementById('accCreatedAt').textContent = fmtTime(u.created_at);
   document.getElementById('apiKeyText').textContent = u.api_key;
-  // 复制 API Key 按钮
   const copyBtn = document.getElementById('btnCopyApiKey');
   if (copyBtn) copyBtn.onclick = () => copyText(u.api_key);
-  // 别名区域
-  const aliasBox = document.getElementById('accAliasSection');
-  if (u.alias) {
-    aliasBox.innerHTML = `
-      <div class="info-item" style="flex-direction:column; align-items:stretch">
-        <span class="label" style="margin-bottom:6px">当前别名</span>
-        <div class="apikey-box"><span class="mono" style="flex:1">${esc(u.alias.full)}</span><button class="copy-icon-btn" title="复制别名地址" onclick="copyText('${esc(u.alias.full)}')"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button></div>
-        <div class="form-hint">标签: ${esc(u.alias.label)} · 更新于 ${fmtTime(u.alias.updated_at)}</div>
-      </div>`;
-  } else {
-    aliasBox.innerHTML = '';
-  }
 }
 
+/* ============ 修改密码弹窗 ============ */
+function openChangePasswordModal() {
+  showModal('修改密码', `
+    <div class="form-group">
+      <label class="form-label">原密码 <span class="req">*</span></label>
+      <input type="password" id="modalOldPassword" class="form-control" placeholder="请输入当前密码">
+    </div>
+    <div class="form-group">
+      <label class="form-label">新密码 <span class="req">*</span></label>
+      <input type="password" id="modalNewPassword" class="form-control" placeholder="至少 6 个字符">
+    </div>
+    <div class="form-group">
+      <label class="form-label">确认新密码 <span class="req">*</span></label>
+      <input type="password" id="modalConfirmPassword" class="form-control" placeholder="再次输入新密码">
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">取消</button>
+     <button class="btn" id="modalSavePasswordBtn">保存修改</button>`);
+  const btn = document.getElementById('modalSavePasswordBtn');
+  if (btn) btn.onclick = () => doChangePassword();
+}
+
+async function doChangePassword() {
+  const oldPassword = document.getElementById('modalOldPassword').value;
+  const newPassword = document.getElementById('modalNewPassword').value;
+  const confirmPassword = document.getElementById('modalConfirmPassword').value;
+  if (!oldPassword) { toast('请输入原密码', 'warning'); return; }
+  if (!newPassword || newPassword.length < 6) { toast('新密码至少 6 个字符', 'warning'); return; }
+  if (newPassword !== confirmPassword) { toast('两次输入的新密码不一致', 'warning'); return; }
+  try {
+    await api('/api/auth/change_password', {
+      method: 'POST',
+      body: { old_password: oldPassword, new_password: newPassword }
+    });
+    toast('密码修改成功', 'success');
+    closeModal();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+/* ============ 邮箱列表 ============ */
 async function loadMyAccounts() {
   const box = document.getElementById('myAccounts');
   if (!box) return;
@@ -41,7 +83,7 @@ async function loadMyAccounts() {
     const list = await api('/api/account/mail_accounts');
     State.mailAccounts = list || [];
     if (!list.length) {
-      box.innerHTML = '<div class="mail-empty">尚未绑定任何邮箱,点击上方按钮开始绑定</div>';
+      box.innerHTML = '<div class="mail-empty">尚未绑定任何邮箱，点击上方按钮开始绑定</div>';
       return;
     }
     box.innerHTML = `<div class="table-wrap"><table class="table">
@@ -68,9 +110,7 @@ async function loadMyAccounts() {
         </tr>`).join('')}</tbody>
     </table></div>`;
     list.forEach(a => probeAuthStatus(a.id));
-  } catch (err) {
-    box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
-  }
+  } catch (err) { box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`; }
 }
 
 async function probeAuthStatus(id) {
@@ -78,9 +118,8 @@ async function probeAuthStatus(id) {
   if (!cell) return;
   try {
     const data = await api('/api/account/mail_accounts/' + id + '/status');
-    if (data && data.ok) {
-      cell.innerHTML = '<span class="badge badge-success">已授权</span>';
-    } else {
+    if (data && data.ok) { cell.innerHTML = '<span class="badge badge-success">已授权</span>'; }
+    else {
       cell.innerHTML = '<span class="badge badge-danger">未授权</span>';
       const btn = document.getElementById('acc-reauth-' + id);
       if (btn) btn.textContent = '继续授权';
@@ -93,7 +132,7 @@ async function probeAuthStatus(id) {
 }
 
 function reauthAccount(id, provider) {
-  startOAuth(provider);
+  openBindModal(provider);
 }
 
 async function togglePublic(id, isPublic) {
@@ -101,7 +140,7 @@ async function togglePublic(id, isPublic) {
     await api('/api/account/mail_accounts/' + id + '/public', { method: 'PUT', body: { is_public: isPublic } });
     toast(isPublic ? '已设为公开,其他用户可使用此邮箱' : '已设为私有', 'success');
     loadMyAccounts();
-    loadAvailableAccounts();
+    if (typeof loadAvailableAccounts === 'function') loadAvailableAccounts();
   } catch (err) { toast(err.message, 'error'); loadMyAccounts(); }
 }
 
@@ -117,40 +156,61 @@ async function regenApiKey() {
   });
 }
 
-async function changeMyPassword() {
-  const oldPassword = document.getElementById('oldPassword').value;
-  const newPassword = document.getElementById('newPassword').value;
-  const confirmPassword = document.getElementById('confirmPassword').value;
-  if (!oldPassword) { toast('请输入原密码', 'warning'); return; }
-  if (!newPassword || newPassword.length < 6) { toast('新密码至少 6 个字符', 'warning'); return; }
-  if (newPassword !== confirmPassword) { toast('两次输入的新密码不一致', 'warning'); return; }
-  try {
-    await api('/api/auth/change_password', {
-      method: 'POST',
-      body: { old_password: oldPassword, new_password: newPassword }
-    });
-    toast('密码修改成功', 'success');
-    document.getElementById('oldPassword').value = '';
-    document.getElementById('newPassword').value = '';
-    document.getElementById('confirmPassword').value = '';
-  } catch (err) { toast(err.message, 'error'); }
-}
-
 async function deleteAccount(id, email) {
   confirmDialog(`确认删除邮箱 ${email}？关联的别名也会被清除`, async () => {
     try {
       await api('/api/account/mail_accounts/' + id, { method: 'DELETE' });
       toast('已删除邮箱', 'success');
       loadMyAccounts();
-      loadAvailableAccounts();
+      if (typeof loadAvailableAccounts === 'function') loadAvailableAccounts();
     } catch (err) { toast(err.message, 'error'); }
   });
 }
 
-// 统一的授权入口: Gmail / Outlook 都走 Device Code Flow
-// (Device Code 不需要在 Google / 微软后台登记回调地址,部署在任意域名都不会
-//  出现 redirect_uri_mismatch / invalid_client 之类的跳转报错)
-async function startOAuth(provider) {
+/* ============ 绑定方式弹窗 ============ */
+function openBindModal(provider) {
+  const isGmail = provider === 'gmail';
+  const title = isGmail ? '绑定 Gmail' : '绑定 Outlook / Hotmail';
+  const body = `
+    <div class="bind-options">
+      <div class="bind-option" onclick="startRedirectAuth('${provider}')">
+        <div class="bind-option-title">🌐 跳转授权（推荐）</div>
+        <div class="bind-option-desc">自动打开 Google / 微软授权页，授权完成后自动关闭窗口。可重复绑定多个账号。</div>
+      </div>
+      <div class="bind-option" onclick="startDeviceAuth('${provider}')">
+        <div class="bind-option-title">⌨️ 设备码授权</div>
+        <div class="bind-option-desc">复制弹出的授权码，到授权页输入完成绑定。适合网络代理不稳定的环境。</div>
+      </div>
+      ${isGmail ? `
+      <div class="bind-option" onclick="showAppPasswordInfo()">
+        <div class="bind-option-title">🔑 应用密码 (App Password)</div>
+        <div class="bind-option-desc">使用 Gmail 生成的 16 位应用密码。当前版本仅支持 OAuth 方式收取邮件，应用密码方式暂未接入。</div>
+      </div>` : ''}
+    </div>`;
+  showModal(title, body, '<button class="btn btn-secondary" onclick="closeModal()">取消</button>');
+}
+
+function showAppPasswordInfo() {
+  showModal('应用密码绑定（暂不支持）', `
+    <p>应用密码（App Password）是 Gmail 为开启两步验证的账号提供的 16 位专用密码，通常用于 IMAP / SMTP 客户端。</p>
+    <p class="form-hint" style="margin-top:10px">当前系统基于 Gmail API 通过 OAuth 收取邮件，尚未接入 IMAP 应用密码方式。如需使用应用密码，请后续关注更新。</p>`,
+    '<button class="btn btn-secondary" onclick="closeModal()">知道了</button>');
+}
+
+/* ============ 跳转授权 ============ */
+let _oauthPopup = null;
+async function startRedirectAuth(provider) {
+  try {
+    const data = await api('/api/account/oauth/start?provider=' + provider);
+    closeModal();
+    _oauthPopup = window.open(data.auth_url, 'oauth_' + provider, 'width=600,height=700,scrollbars=yes');
+    if (!_oauthPopup) toast('弹窗被浏览器拦截，请允许弹窗后重试', 'error');
+  } catch (err) { toast(err.message, 'error', 5000); }
+}
+
+/* ============ 设备码授权 ============ */
+async function startDeviceAuth(provider) {
+  closeModal();
   if (provider === 'outlook') return startMsDeviceFlow();
   return startGoogleDeviceFlow();
 }
@@ -205,7 +265,6 @@ async function startGoogleDeviceFlow() {
     data = await api('/api/account/oauth/google/device', { method: 'POST' });
   } catch (err) {
     toast(err.message, 'error', 5000);
-    // 未配置凭据时,引导管理员去系统设置页
     if (State.user && State.user.is_admin) {
       setTimeout(() => showModal('需要先配置 Google OAuth 凭据', `
         <p style="margin-bottom:10px">绑定 Gmail 前，需要在 Google Cloud 创建「桌面应用」类型的 OAuth 客户端，并把 Client ID / Client Secret 填到系统设置里。</p>

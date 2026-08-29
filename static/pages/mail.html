@@ -1,116 +1,44 @@
 <div class="section">
-  <div class="card">
-    <div class="card-header">
-      <h3>
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-        别名邮箱
-      </h3>
-      <span class="sub" id="aliasQuota">加载中...</span>
-    </div>
-    <div class="card-body">
-      <div class="alias-toolbar">
-        <div class="form-group" style="flex:2; min-width:200px; margin-bottom:0">
-          <label class="form-label">主邮箱</label>
-          <select id="aliasAccount" class="form-control" style="height:38px"><option value="">加载中...</option></select>
+  <div class="card mail-layout">
+    <div class="card-header mail-header">
+      <h3>邮件列表 <span id="mailCount" class="badge badge-gray">0</span></h3>
+      <div class="mail-header-tools">
+        <div class="search-wrap" style="max-width:360px">
+          <span class="search-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </span>
+          <input type="text" id="qSearch" class="form-control" placeholder="搜索发件人 / 标题 / 正文 / 附件名" autocomplete="off">
+          <button class="search-clear" id="qSearchClear" onclick="clearSearch()" title="清空">&times;</button>
         </div>
-        <div class="form-group" style="flex:2; min-width:180px; margin-bottom:0">
-          <label class="form-label">别名标签</label>
-          <div style="display:flex; gap:8px">
-            <input type="text" id="aliasLabel" class="form-control" placeholder="如 newsletter" style="height:38px">
-            <button class="dice-btn" title="随机生成" onclick="genRandomLabel()" aria-label="随机生成别名标签">
-              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zM8 17a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm0-7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm4 3.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM16 17a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm0-7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/>
-              </svg>
-            </button>
-          </div>
-        </div>
-        <div class="form-group" style="flex:0 0 auto; margin-bottom:0">
-          <label class="form-label" style="visibility:hidden">占位</label>
-          <button class="btn" style="height:38px" onclick="createAlias()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            创建别名
-          </button>
-        </div>
-      </div>
-      <p class="form-hint" style="margin-top:8px">
-        每个别名有效期 1 小时，到期自动停止收件（仍保留在下方历史列表中，可随时恢复启用）。收藏的别名会永久保留在历史列表中。
-      </p>
-      <div class="divider"></div>
-      <div id="activeAliasList" class="alias-grid"><div class="loading"><span class="spinner"></span></div></div>
-    </div>
-  </div>
-</div>
-
-<div class="section">
-  <div class="card">
-    <div class="card-header"><h3>查询条件</h3><span class="sub">留空搜索词可查询该时间范围内的全部邮件</span></div>
-    <div class="card-body">
-      <div class="form-row" style="align-items:flex-end">
-        <div class="form-group" style="flex:3; min-width:240px">
-          <label class="form-label">搜索</label>
-          <div class="search-wrap">
-            <span class="search-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            </span>
-            <input type="text" id="qSearch" class="form-control" placeholder="模糊搜索：发件人 / 收件人 / 标题 / 正文 / 关键词 / 附件名" autocomplete="off">
-            <button class="search-clear" id="qSearchClear" onclick="clearSearch()" title="清空">&times;</button>
-          </div>
-          <div class="form-hint">一个搜索框搞定：输入任意关键词即可在发件人、标题、正文、附件名中模糊匹配</div>
-        </div>
-        <div class="form-group" style="flex:1; min-width:170px">
-          <label class="form-label">查询范围</label>
-          <select id="qScope" class="form-control" onchange="onScopeChange()"><option value="all">全部生效别名</option></select>
-        </div>
-        <div class="form-group" style="flex:1; min-width:160px">
-          <label class="form-label">开始时间</label>
-          <input type="datetime-local" id="qStart" class="form-control">
-        </div>
-        <div class="form-group" style="flex:1; min-width:160px">
-          <label class="form-label">结束时间</label>
-          <input type="datetime-local" id="qEnd" class="form-control">
-        </div>
-        <div class="form-group" style="flex:0 0 auto">
-          <label class="switch" style="height:38px">
-            <input type="checkbox" id="qUnread">
-            <span class="track"></span>
-            <span>仅未读</span>
-          </label>
-        </div>
-      </div>
-      <div class="row-gap" style="margin-top:14px">
-        <button class="btn" onclick="fetchMails()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          查询邮件
-        </button>
-        <button class="btn btn-secondary" onclick="resetMailQuery()">重置条件</button>
+        <label class="switch">
+          <input type="checkbox" id="qUnread" onchange="onUnreadChange()">
+          <span class="track"></span>
+          <span>仅未读</span>
+        </label>
         <label class="switch">
           <input type="checkbox" id="qAutoFetch" onchange="toggleAutoFetch()">
           <span class="track"></span>
-          <span>自动收件 (15s)</span>
+          <span>自动收件</span>
         </label>
-        <span id="autoFetchStatus" class="form-hint" style="margin:0"></span>
+        <button class="btn" id="createAliasHeaderBtn" onclick="openCreateAliasModal()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          创建别名
+        </button>
       </div>
     </div>
-  </div>
-</div>
 
-<div class="section">
-  <div class="card">
-    <div class="card-header">
-      <h3>邮件列表 <span id="mailCount" class="badge badge-gray">0</span></h3>
-      <div class="row-gap" style="font-size:12.5px; color:var(--text-light)">
-        <label for="pageSizeSel" style="margin-right:4px">每页</label>
-        <select id="pageSizeSel" class="form-control" style="width:auto; padding:4px 8px; height:30px" onchange="onPageSizeChange()">
-          <option value="10">10 条</option>
-          <option value="20" selected>20 条</option>
-          <option value="50">50 条</option>
-          <option value="100">100 条</option>
-        </select>
+    <div class="card-body mail-body">
+      <div class="mail-sidebar" id="mailSidebar">
+        <div class="mail-sidebar-head">
+          <span class="sub" id="aliasQuota">加载中...</span>
+        </div>
+        <div id="activeAliasList" class="alias-list"><div class="loading"><span class="spinner"></span></div></div>
       </div>
-    </div>
-    <div class="card-body">
-      <div id="mailList"><div class="mail-empty">请设置查询条件后点击「查询邮件」</div></div>
-      <div id="mailPagination"></div>
+
+      <div class="mail-main" id="mailMain">
+        <div id="mailList"><div class="mail-empty">请选择左侧别名查看收件</div></div>
+        <div id="mailLoader" class="mail-loader hidden"><span class="spinner"></span> 加载更多邮件...</div>
+      </div>
     </div>
   </div>
 </div>

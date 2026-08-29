@@ -328,6 +328,83 @@ select.form-control { cursor: pointer; }
 .mail-body .actions { margin-top: 12px; display: flex; gap: 8px; }
 .mail-empty { text-align: center; padding: 40px 20px; color: var(--text-lighter); font-size: 14px; }
 
+/* ============ 新版邮件查询页: 左右分栏 ============ */
+.mail-layout { display: flex; flex-direction: column; }
+.mail-layout > .card-body { padding: 0; overflow: hidden; }
+.mail-header { align-items: center; gap: 16px; flex-wrap: nowrap; }
+.mail-header h3 { white-space: nowrap; }
+.mail-header-tools {
+  flex: 1; min-width: 0; display: flex; align-items: center; justify-content: flex-end;
+  gap: 12px; flex-wrap: wrap;
+}
+.mail-header-tools .search-wrap { max-width: 320px; min-width: 180px; flex: 1; }
+.mail-header-tools .search-wrap .form-control { height: 36px; }
+.mail-header-tools .switch { font-size: 13px; color: var(--text-light); white-space: nowrap; }
+.mail-header-tools .btn { height: 36px; }
+
+.mail-body {
+  display: flex; min-height: 0; height: calc(100vh - var(--topbar-h) - 132px);
+}
+.mail-sidebar {
+  width: 26%; min-width: 220px; max-width: 320px; border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; background: #fbfcfe;
+}
+.mail-sidebar-head {
+  padding: 12px 14px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.mail-sidebar-head .sub { font-size: 12px; }
+.mail-sidebar .alias-list {
+  flex: 1; overflow-y: auto; padding: 10px;
+}
+.mail-main {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; overflow-y: auto;
+  background: var(--card-bg);
+}
+.mail-main #mailList { flex: 1; min-height: 0; }
+.mail-main .mail-empty { padding: 60px 20px; }
+
+/* 左侧别名行(紧凑) */
+.alias-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: #fff; cursor: pointer; transition: background .15s, border-color .15s, box-shadow .15s;
+  margin-bottom: 8px;
+}
+.alias-row:hover { background: var(--bg-hover); border-color: var(--border-strong); }
+.alias-row.selected { border-color: var(--primary); background: var(--primary-light); box-shadow: var(--shadow-sm); }
+.alias-row.expired { opacity: .7; }
+.alias-row .ar-info { flex: 1; min-width: 0; }
+.alias-row .ar-addr {
+  font-family: var(--mono); font-size: 12.5px; word-break: break-all; font-weight: 550;
+  line-height: 1.35; color: var(--text);
+}
+.alias-row .ar-bar { height: 3px; border-radius: 999px; background: var(--bg-hover); margin-top: 7px; overflow: hidden; }
+.alias-row .ar-bar > i { display: block; height: 100%; background: var(--success); border-radius: 999px; transition: width .3s ease; }
+.alias-row.selected .ar-bar > i { background: var(--primary); }
+.alias-row .ar-actions {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 4px;
+}
+.alias-row .ar-actions .star-btn { padding: 4px; }
+.alias-row .ar-actions .copy-icon-btn { color: var(--text-lighter); }
+
+/* 加载更多提示 */
+.mail-loader { text-align: center; padding: 16px; color: var(--text-light); font-size: 13px; }
+.mail-loader.hidden { display: none; }
+.mail-loader .spinner { width: 18px; height: 18px; margin-right: 8px; }
+
+@media (max-width: 900px) {
+  .mail-header { flex-wrap: wrap; }
+  .mail-header-tools { justify-content: flex-start; width: 100%; }
+  .mail-body { flex-direction: column; height: auto; min-height: 520px; }
+  .mail-sidebar { width: 100%; max-width: none; border-right: none; border-bottom: 1px solid var(--border); max-height: 220px; }
+}
+@media (max-width: 768px) {
+  .mail-header-tools .search-wrap { max-width: none; width: 100%; }
+  .mail-header-tools .switch span:last-child { display: none; }
+}
+
+
 /* 搜索框 */
 .search-wrap { position: relative; flex: 1; min-width: 220px; }
 .search-wrap .search-icon {
@@ -430,6 +507,41 @@ select.form-control { cursor: pointer; }
 .account-mail-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px dashed var(--border); }
 .account-mail-row:last-child { border-bottom: none; }
 .account-mail-row .email-text { flex: 1; min-width: 160px; word-break: break-all; }
+
+/* ============ 账户页美化 ============ */
+.account-info-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+}
+.account-info-grid .info-item { flex-direction: column; align-items: flex-start; gap: 4px; }
+.account-info-grid .info-item .label { font-size: 12px; color: var(--text-light); margin-bottom: 0; }
+.account-info-grid .info-item .value { font-size: 14px; font-weight: 600; }
+
+.apikey-box {
+  margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border);
+}
+.apikey-label { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.apikey-label .label { margin-bottom: 0; }
+.apikey-label .form-hint { margin: 0; }
+.apikey-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; background: #f8fafc; border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.apikey-row .mono { flex: 1; min-width: 0; word-break: break-all; font-size: 13px; }
+
+.security-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+}
+.security-row .label { margin-bottom: 0; }
+
+/* 绑定方式选项 */
+.bind-options { display: flex; flex-direction: column; gap: 10px; }
+.bind-option {
+  padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: #fff; cursor: pointer; transition: background .15s, border-color .15s, box-shadow .15s;
+}
+.bind-option:hover { background: var(--bg-hover); border-color: var(--primary); box-shadow: var(--shadow-sm); }
+.bind-option-title { font-weight: 650; font-size: 14px; margin-bottom: 4px; }
+.bind-option-desc { font-size: 12.5px; color: var(--text-light); line-height: 1.5; }
 
 /* ============ API 文档 ============ */
 .doc-section { margin-bottom: 28px; }

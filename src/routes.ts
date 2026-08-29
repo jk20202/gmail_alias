@@ -446,7 +446,7 @@ export async function oauthCallback(ctx: Ctx): Promise<Response> {
   if (!code || !state) return renderOAuthResult(false, '缺少 code 或 state 参数');
   try {
     const result = await handleOAuthCallback(ctx.env, code, state);
-    return renderOAuthResult(true, `已成功绑定 ${escapeHtml(result.email)}`);
+    return renderOAuthResult(true, `已成功绑定 ${escapeHtml(result.email)}`, result.email);
   } catch (e) {
     return renderOAuthResult(false, '授权流程异常,请重新发起');
   }
@@ -458,12 +458,18 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-function renderOAuthResult(success: boolean, message: string): Response {
+function renderOAuthResult(success: boolean, message: string, email = ''): Response {
   // message 已转义,可安全插入 HTML
+  const postMsg = success
+    ? `{type:'oauth_bind_success',email:'${escapeHtml(email)}'}`
+    : `{type:'oauth_bind_failed',message:'${escapeHtml(message)}'}`;
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>OAuth 绑定结果</title>
   <style>body{font-family:sans-serif;padding:40px;text-align:center;color:${success ? '#16a34a' : '#dc2626'};}</style></head>
   <body><h2>${success ? '绑定成功' : '绑定失败'}</h2><p>${message}</p>
-  <script>setTimeout(()=>window.close(),3000);</script></body></html>`;
+  <script>
+    try { if(window.opener) window.opener.postMessage(${postMsg}, '*'); } catch(e) {}
+    setTimeout(()=>window.close(),3000);
+  </script></body></html>`;
   return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 }
 
@@ -628,25 +634,27 @@ function clamp(n: number, min: number, max: number): number {
 
 export async function webFetchEmails(ctx: Ctx): Promise<Response> {
   const user = await requireSession(ctx);
-  const params: FetchParams = { limit: 50, ...ctx.body };
+  const params: FetchParams = { limit: 10, ...ctx.body };
   // silent=true: 自动收件模式,不记录日志
   const silent = ctx.body?.silent === true;
   const q = typeof ctx.body?.q === 'string' ? ctx.body.q.trim() : '';
-  const page = Math.max(1, parseInt(String(ctx.body?.page || '1'), 10) || 1);
-  const pageSize = clamp(parseInt(String(ctx.body?.page_size || '20'), 10) || 20, 5, 100);
+  const offset = Math.max(0, parseInt(String(ctx.body?.offset || '0'), 10) || 0);
+  const limit = clamp(parseInt(String(ctx.body?.limit || '10'), 10) || 10, 5, 50);
 
   const activeAliases = await db.listActiveAliases(ctx.env, user.id);
 
-  interface Target { accountId: string; to?: string; aliasId?: string; aliasFull?: string; }
+  interface Target { accountId: string; to?: string; aliasId?: string; aliasFull?: string; aliasCreated?: string; }
   let targets: Target[] = [];
   let scopeLabel = '';
+  let aliasCreatedAt: string | undefined;
 
   if (params.alias_id) {
     const a = await db.getAliasRowById(ctx.env, user.id, params.alias_id);
     if (!a) return fail('别名不存在');
     if (a.status !== 'active') return fail('该别名已过期,请在历史别名中恢复启用');
-    targets = [{ accountId: a.mail_account_id, to: a.full, aliasId: a.id, aliasFull: a.full }];
+    targets = [{ accountId: a.mail_account_id, to: a.full, aliasId: a.id, aliasFull: a.full, aliasCreated: a.created_at }];
     scopeLabel = a.full;
+    aliasCreatedAt = a.created_at;
   } else if (ctx.body?.all_aliases === false) {
     // 管理员整箱查询
     if (!user.is_admin) return fail('仅管理员可查询整箱邮件', 403);
@@ -655,7 +663,7 @@ export async function webFetchEmails(ctx: Ctx): Promise<Response> {
     scopeLabel = '(整箱)';
   } else if (activeAliases.length > 0) {
     targets = activeAliases.map(a => ({
-      accountId: a.mail_account_id, to: a.full, aliasId: a.id, aliasFull: a.full,
+      accountId: a.mail_account_id, to: a.full, aliasId: a.id, aliasFull: a.full, aliasCreated: a.created_at,
     }));
     scopeLabel = `(全部 ${activeAliases.length} 个别名)`;
   } else if (user.is_admin && params.mail_account_id) {
@@ -665,8 +673,14 @@ export async function webFetchEmails(ctx: Ctx): Promise<Response> {
     return fail('暂无生效中的别名,请先创建别名邮箱');
   }
 
-  // 抓取上限:随页码增长,但不超过 FETCH_CAP_MAX(保护 Gmail / Graph 配额)
-  const fetchCap = clamp(page * pageSize, FETCH_CAP_MIN, FETCH_CAP_MAX);
+  // 如果指定了别名且前端未传时间范围,默认查询该别名创建(激活)时间至今的邮件,
+  // 续期不改变 created_at,因此旧邮件也包含在内
+  if (aliasCreatedAt && !params.start_time) {
+    params.start_time = aliasCreatedAt;
+  }
+
+  // 抓取上限:随 offset 增长,但不超过 FETCH_CAP_MAX(保护 Gmail / Graph 配额)
+  const fetchCap = clamp(offset + limit, FETCH_CAP_MIN, FETCH_CAP_MAX);
   const perTarget = clamp(Math.ceil(fetchCap / targets.length), 20, fetchCap);
 
   const merged: Array<Email & { alias?: string }> = [];
@@ -698,7 +712,8 @@ export async function webFetchEmails(ctx: Ctx): Promise<Response> {
   }
 
   merged.sort((a, b) => String(b.date_iso || '').localeCompare(String(a.date_iso || '')));
-  const emails = merged.slice(0, fetchCap);
+  const emails = merged.slice(offset, offset + limit);
+  const hasMore = merged.length >= fetchCap;
 
   // 命中邮件的别名刷新「最后使用时间」(带 60 秒节流,避免自动收件疯狂写库)
   if (touched.length) {
@@ -716,25 +731,24 @@ export async function webFetchEmails(ctx: Ctx): Promise<Response> {
   }
 
   return ok({
-    total: emails.length,
-    // true 表示已达抓取上限,后面可能还有邮件,缩小时间范围或用搜索词更精确
-    truncated: merged.length >= fetchCap,
+    total: merged.length,
+    offset,
+    limit,
+    has_more: hasMore,
     emails,
     query: {
       email: '',
       to: scopeLabel,
       q,
-      sender: params.sender,
-      subject: params.subject,
-      keyword: params.keyword,
       unseen: params.unseen,
       start_time: params.start_time,
       end_time: params.end_time,
-      limit: fetchCap,
-      page,
-      page_size: pageSize,
+      limit,
+      offset,
     },
-    aliases: activeAliases.map(a => ({ id: a.id, full: a.full, label: a.label, remain_ms: a.remain_ms || 0 })),
+    aliases: activeAliases.map(a => ({
+      id: a.id, full: a.full, label: a.label, remain_ms: a.remain_ms || 0, created_at: a.created_at,
+    })),
     errors,
   });
 }

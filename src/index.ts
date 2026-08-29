@@ -1,6 +1,10 @@
 // Worker 入口 - 路由分发 + 错误处理 + CORS + 静态资源托管
 import type { Env } from './types';
 import { initDB, ensureSchema } from './db';
+
+// Worker isolate 级别一次性初始化标记:避免每次 fetch 都重复 initDB + ensureSchema(KV 往返),
+// 显著降低历史别名等接口的"冷启动"感知延迟
+let dbReady = false;
 import * as routes from './routes';
 import { HTTPError, type Ctx } from './routes';
 import { getActiveWebhookAccountIds } from './db';
@@ -113,9 +117,14 @@ function matchRoute(method: string, pathname: string): RouteEntry | null {
 // Worker fetch handler
 export default {
   async fetch(req: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
-    // 1. 初始化数据库(默认管理员)+ 一次性 schema 迁移(多别名表等)
-    try { await initDB(env); } catch (e) { console.error('INIT_DB_ERR', e); }
-    try { await ensureSchema(env); } catch (e) { console.error('ENSURE_SCHEMA_ERR', e); }
+    // 1. 每个 Worker isolate 只执行一次数据库初始化 + schema 迁移
+    //    避免每次请求都产生 KV / D1 冷启动往返,解决历史别名等接口"卡顿/转圈"问题
+    if (!dbReady) {
+      try { await initDB(env); dbReady = true; }
+      catch (e) { console.error('INIT_DB_ERR', e); }
+      try { await ensureSchema(env); }
+      catch (e) { console.error('ENSURE_SCHEMA_ERR', e); }
+    }
     // 2. CORS 预检
     if (req.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: CORS_HEADERS });

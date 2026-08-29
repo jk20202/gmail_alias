@@ -1,24 +1,26 @@
 /* ============================================================
- * mail.js — 邮件查询页
- *   · 多别名管理(最多 5 个同时生效 / 1 小时有效期 / 收藏 / 历史)
- *   · 单一模糊搜索框(发件人·收件人·标题·正文·附件)
- *   · 常规分页(可切换每页条数),不再有「数量上限」输入框
- *   · 进入页面即恢复默认: 当天 00:00 ~ 23:59,不做任何本地缓存
+ * mail.js — 邮件查询页(新版)
+ *   · 左右分栏: 左侧别名列表, 右侧邮件列表
+ *   · 点击别名实时切换收件; 查询范围 = 该别名存活期间(created_at ~ now)
+ *   · 动态加载: 默认 10 条, 滚动到底部自动加载更多
+ *   · 搜索 / 仅未读 / 自动收件 集中在邮件列表板块标题栏
+ *   · 创建别名改为弹窗
  * ============================================================ */
 
-// 兼容:清理旧版本遗留的查询缓存(曾导致开始/结束时间被固定在某一天)
-try {
-  localStorage.removeItem('mail_alias_mail_query');
-  localStorage.removeItem('mail_alias_mail_results');
-} catch { /* ignore */ }
+// 兼容:清理旧版本遗留的查询缓存
+const CLEANED_LS_KEYS = ['mail_alias_mail_query', 'mail_alias_mail_results'];
+try { CLEANED_LS_KEYS.forEach(k => localStorage.removeItem(k)); } catch { /* ignore */ }
 
 const MailState = {
-  page: 1,
-  pageSize: 20,
-  emails: [],
-  truncated: false,
   aliases: [],          // 生效中的别名
-  scope: 'all',         // all | a:<aliasId> | mb:<accountId>
+  selectedAliasId: null,
+  emails: [],
+  offset: 0,            // 无限滚动偏移
+  hasMore: false,
+  loadingMore: false,
+  q: '',
+  unseen: false,
+  autoFetch: true,
   historyOpen: false,
   history: { page: 1, keyword: '', total: 0, totalPages: 1, list: [] },
 };
@@ -29,15 +31,17 @@ let _mailSearchTimer = null;
 
 /* ============ 页面初始化 ============ */
 async function initMailPage() {
-  // 每次进入都恢复默认,不做任何条件缓存
   resetMailState();
   await loadAvailableAccounts();
   await loadAliases();
-  applyDefaultTimeRange();
   bindSearchBox();
-  await fetchMails();
-  loadAliasHistory(1, true);   // 预取条数用于标题展示(面板默认折叠)
-  if (document.getElementById('qAutoFetch')?.checked) startAutoFetch();
+  bindInfiniteScroll();
+  // 预取历史条数(面板默认折叠)
+  loadAliasHistory(1, true);
+  // 默认开启自动收件
+  const cb = document.getElementById('qAutoFetch');
+  if (cb) cb.checked = true;
+  startAutoFetch();
 }
 
 function cleanupMailPage() {
@@ -47,141 +51,88 @@ function cleanupMailPage() {
 }
 
 function resetMailState() {
-  MailState.page = 1;
-  MailState.pageSize = 20;
+  MailState.selectedAliasId = null;
   MailState.emails = [];
-  MailState.truncated = false;
-  MailState.scope = 'all';
+  MailState.offset = 0;
+  MailState.hasMore = false;
+  MailState.loadingMore = false;
+  MailState.q = '';
+  MailState.unseen = false;
   MailState.history.page = 1;
   MailState.history.keyword = '';
-  const cb = document.getElementById('qAutoFetch');
-  if (cb) cb.checked = true;      // 默认开启自动收件
+  MailState.historyOpen = false;
 }
 
-/* ============ 时间工具 ============ */
-function pad2(n) { return String(n).padStart(2, '0'); }
-
-// 当天 00:00(dt-local 格式)
-function todayStartDT() {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T00:00`;
-}
-// 当天 23:59(dt-local 格式)
-function todayEndDT() {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T23:59`;
-}
-
-function applyDefaultTimeRange() {
-  const s = document.getElementById('qStart');
-  const e = document.getElementById('qEnd');
-  if (s) s.value = todayStartDT();
-  if (e) e.value = todayEndDT();
-  const unread = document.getElementById('qUnread');
-  if (unread) unread.checked = false;
-  const search = document.getElementById('qSearch');
-  if (search) search.value = '';
-  const clear = document.getElementById('qSearchClear');
-  if (clear) clear.style.display = 'none';
-}
-
-/* ============ 搜索框(防抖自动查询) ============ */
-function bindSearchBox() {
-  const input = document.getElementById('qSearch');
-  if (!input) return;
-  input.oninput = () => {
-    const clear = document.getElementById('qSearchClear');
-    if (clear) clear.style.display = input.value ? 'block' : 'none';
-    if (_mailSearchTimer) clearTimeout(_mailSearchTimer);
-    _mailSearchTimer = setTimeout(() => {
-      MailState.page = 1;
-      fetchMails();
-    }, 450);
-  };
-}
-
-function clearSearch() {
-  const input = document.getElementById('qSearch');
-  if (input) input.value = '';
-  const clear = document.getElementById('qSearchClear');
-  if (clear) clear.style.display = 'none';
-  MailState.page = 1;
-  fetchMails();
-}
-
-// 重置查询条件(时间回到当天,清空搜索与筛选)
-function resetMailQuery() {
-  applyDefaultTimeRange();
-  MailState.page = 1;
-  MailState.emails = [];
-  MailState.truncated = false;
-  renderMailList();
-  renderMailPagination();
-  toast('查询条件已重置为当天', 'info');
-  fetchMails();
-}
-
-/* ============ 可用邮箱 / 查询范围 ============ */
+/* ============ 可用邮箱 / 创建别名弹窗 ============ */
 async function loadAvailableAccounts() {
-  const sel = document.getElementById('aliasAccount');
-  if (!sel) return;
   try {
     const list = await api('/api/account/mail_accounts/available');
     State.availableAccounts = list || [];
-    if (!list.length) {
-      sel.innerHTML = '<option value="">无可用的邮箱，请先到「我的账户」绑定</option>';
-    } else {
-      sel.innerHTML = list.map(a =>
-        `<option value="${esc(a.id)}">${esc(a.email)} (${esc(a.provider)}${a.is_own ? '' : ' · 公开'})</option>`
-      ).join('');
-    }
-  } catch (err) {
-    sel.innerHTML = '<option value="">加载失败</option>';
-    toast(err.message, 'error');
+  } catch (err) { console.warn('available accounts', err); }
+}
+
+function openCreateAliasModal() {
+  const accounts = State.availableAccounts || [];
+  if (!accounts.length) {
+    return showModal('创建别名', '<p>暂无可用的主邮箱，请先到「我的账户」绑定邮箱。</p><p>绑定成功后刷新本页即可创建别名。</p>', '<button class="btn btn-secondary" onclick="closeModal()">关闭</button>');
+  }
+  const listAtQuota = MailState.aliases.length >= (State.aliasMax || 5);
+  const body = `
+    <div class="form-group">
+      <label class="form-label">主邮箱</label>
+      <select id="modalAliasAccount" class="form-control" style="height:40px">
+        ${accounts.map(a => `<option value="${esc(a.id)}">${esc(a.email)} (${esc(a.provider)})</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">别名标签</label>
+      <div style="display:flex; gap:8px">
+        <input type="text" id="modalAliasLabel" class="form-control" placeholder="如 newsletter" style="height:40px">
+        <button class="dice-btn" title="随机生成" onclick="genRandomLabelForModal()" aria-label="随机生成别名标签">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zM8 17a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm0-7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm4 3.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM16 17a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm0-7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+    ${listAtQuota ? '<p class="text-danger">已到达别名上限，创建前请先停用或删除一个别名。</p>' : '<p class="form-hint">每个别名有效期 1 小时，到期自动停止收件（可在历史列表中恢复）。</p>'}
+  `;
+  showModal('创建别名', body,
+    `<button class="btn btn-secondary" onclick="closeModal()">取消</button>
+     <button class="btn" id="modalCreateAliasBtn" ${listAtQuota ? 'disabled' : ''}>创建</button>`);
+  const createBtn = document.getElementById('modalCreateAliasBtn');
+  if (createBtn) {
+    createBtn.onclick = () => {
+      const accountId = document.getElementById('modalAliasAccount').value;
+      const label = document.getElementById('modalAliasLabel').value.trim();
+      doCreateAlias(accountId, label);
+    };
   }
 }
 
-function onScopeChange() {
-  const sel = document.getElementById('qScope');
-  if (!sel) return;
-  MailState.scope = sel.value;
-  MailState.page = 1;
-  fetchMails();
+async function genRandomLabelForModal() {
+  try {
+    const data = await api('/api/account/alias/random_label');
+    const el = document.getElementById('modalAliasLabel');
+    if (el) el.value = data.label;
+  } catch (err) { toast(err.message, 'error'); }
 }
 
-function rebuildScopeOptions() {
-  const sel = document.getElementById('qScope');
-  if (!sel) return;
-  const opts = [`<option value="all">全部生效别名${MailState.aliases.length ? ` (${MailState.aliases.length})` : ''}</option>`];
-  for (const a of MailState.aliases) {
-    opts.push(`<option value="a:${esc(a.id)}">${esc(a.full)}</option>`);
-  }
-  if (State.user && State.user.is_admin) {
-    for (const acc of (State.user.mail_accounts || [])) {
-      opts.push(`<option value="mb:${esc(acc.id)}">整箱 · ${esc(acc.email)}</option>`);
-    }
-  }
-  // 若当前选择的是某个未生效的别名(从历史列表点「查看收件」进来),补一个临时选项
-  if (MailState.scope.indexOf('a:') === 0) {
-    const id = MailState.scope.slice(2);
-    const inActive = MailState.aliases.some(a => a.id === id);
-    const hist = (MailState.history.list || []).find(a => a.id === id);
-    if (!inActive && hist) {
-      opts.splice(1, 0, `<option value="a:${esc(id)}">${esc(hist.full)}（未启用）</option>`);
-    } else if (!inActive && !hist) {
-      MailState.scope = 'all';
-    }
-  }
-  sel.innerHTML = opts.join('');
-  if (opts.some(o => o.indexOf(`value="${MailState.scope}"`) >= 0)) {
-    sel.value = MailState.scope;
-  } else {
-    sel.value = 'all';
-    MailState.scope = 'all';
-  }
+async function doCreateAlias(mailAccountId, label) {
+  if (!mailAccountId) { toast('请选择主邮箱', 'warning'); return; }
+  if (!label) { toast('请输入别名标签', 'warning'); return; }
+  try {
+    const alias = await api('/api/account/aliases', { method: 'POST', body: { mail_account_id: mailAccountId, label } });
+    toast('别名创建成功: ' + (alias ? alias.full : ''), 'success');
+    closeModal();
+    await loadAliases();
+    await loadAliasHistory(MailState.history.page);
+    // 如果创建后只有 1 个别名，自动选中
+    if (MailState.aliases.length === 1) selectAlias(alias.id);
+  } catch (err) { toast(err.message, 'error', 3600); }
 }
 
-/* ============ 别名: 生效列表 ============ */
+/* ============ 别名: 生效列表(左侧) ============ */
 async function loadAliases() {
   const box = document.getElementById('activeAliasList');
   if (!box) return;
@@ -192,11 +143,12 @@ async function loadAliases() {
     State.aliasMax = data.max || 5;
     State.aliasTtlMs = data.ttl_ms || 3600000;
     renderActiveAliases();
-    rebuildScopeOptions();
     updateUserAliasTag(MailState.aliases.length);
-  } catch (err) {
-    box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
-  }
+    // 默认选中第一个
+    if (!MailState.selectedAliasId && MailState.aliases.length) {
+      selectAlias(MailState.aliases[0].id);
+    }
+  } catch (err) { box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`; }
 }
 
 function updateUserAliasTag(count) {
@@ -207,72 +159,55 @@ function updateUserAliasTag(count) {
 
 function renderActiveAliases() {
   const box = document.getElementById('activeAliasList');
+  const quota = document.getElementById('aliasQuota');
   if (!box) return;
   const list = MailState.aliases;
   const max = State.aliasMax || 5;
-  const quota = document.getElementById('aliasQuota');
   if (quota) {
-    quota.innerHTML = `生效中 <strong>${list.length}</strong> / ${max} 个` +
-      (list.length >= max ? ' · <span class="text-danger">已达上限</span>' : '');
+    quota.innerHTML = `生效中 <strong>${list.length}</strong> / ${max}` +
+      (list.length >= max ? ' · <span class="text-danger">满</span>' : '');
   }
   if (!list.length) {
-    box.innerHTML = '<div class="mail-empty" style="grid-column:1/-1">暂无效中的别名，请选择一个主邮箱并创建别名</div>';
+    box.innerHTML = '<div class="mail-empty">暂无效中的别名，点击右上角「创建别名」添加。</div>';
     return;
   }
   box.innerHTML = list.map(a => {
     const pct = Math.max(0, Math.min(100, ((a.remain_ms || 0) / (State.aliasTtlMs || 3600000)) * 100));
+    const isSel = a.id === MailState.selectedAliasId;
     return `
-    <div class="alias-card is-active">
-      <div class="ac-top">
-        <div style="flex:1; min-width:0">
-          <div class="ac-addr">${esc(a.full)}</div>
-          <div class="ac-sub">主邮箱 ${esc(a.email || '-')} · 剩余 ${fmtRemain(a.remain_ms)}</div>
-        </div>
+    <div class="alias-row ${isSel ? 'selected' : ''} ${a.remain_ms <= 0 ? 'expired' : ''}" onclick="selectAlias('${esc(a.id)}')">
+      <div class="ar-info">
+        <div class="ar-addr">${esc(a.full)}</div>
+        <div class="ar-bar"><i style="width:${pct.toFixed(1)}%"></i></div>
+      </div>
+      <div class="ar-actions" onclick="event.stopPropagation()">
         ${starButton(a.id, a.is_favorite, 'toggleAliasFavorite')}
         <button class="copy-icon-btn" title="复制别名地址" onclick="copyText('${esc(a.full)}')">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
         </button>
       </div>
-      <div class="ac-bar"><i style="width:${pct.toFixed(1)}%"></i></div>
-      <div class="ac-actions">
-        <button class="btn btn-secondary btn-xs" onclick="focusAlias('${esc(a.id)}')">只看此别名</button>
-        <button class="btn btn-secondary btn-xs" onclick="renewAlias('${esc(a.id)}')">续期 1 小时</button>
-        <button class="btn btn-secondary btn-xs" onclick="deactivateAlias('${esc(a.id)}')">停用</button>
-      </div>
     </div>`;
   }).join('');
+}
+
+function selectAlias(id) {
+  MailState.selectedAliasId = id;
+  renderActiveAliases();
+  // 滚动到顶部
+  const main = document.getElementById('mailMain');
+  if (main) main.scrollTop = 0;
+  // 重置邮件列表并加载
+  MailState.emails = [];
+  MailState.offset = 0;
+  MailState.hasMore = false;
+  renderMailList();
+  fetchMails();
 }
 
 function starButton(id, on, fnName) {
   return `<button class="star-btn ${on ? 'on' : ''}" title="${on ? '取消收藏' : '收藏'}" onclick="${fnName}('${esc(id)}', ${on ? 'false' : 'true'})" aria-label="收藏">
     <svg viewBox="0 0 24 24" fill="${on ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
   </button>`;
-}
-
-async function genRandomLabel() {
-  try {
-    const data = await api('/api/account/alias/random_label');
-    const el = document.getElementById('aliasLabel');
-    if (el) el.value = data.label;
-  } catch (err) { toast(err.message, 'error'); }
-}
-
-async function createAlias() {
-  const mailAccountId = document.getElementById('aliasAccount').value;
-  const label = document.getElementById('aliasLabel').value.trim();
-  if (!mailAccountId) { toast('请选择主邮箱', 'warning'); return; }
-  if (!label) { toast('请输入别名标签', 'warning'); return; }
-  try {
-    const alias = await api('/api/account/aliases', { method: 'POST', body: { mail_account_id: mailAccountId, label } });
-    toast('别名创建成功: ' + (alias ? alias.full : ''), 'success');
-    document.getElementById('aliasLabel').value = '';
-    await loadAliases();
-    await loadAliasHistory(MailState.history.page);
-    MailState.page = 1;
-    await fetchMails();
-  } catch (err) {
-    toast(err.message, 'error', 3600);
-  }
 }
 
 async function renewAlias(id) {
@@ -284,14 +219,15 @@ async function renewAlias(id) {
 }
 
 async function deactivateAlias(id) {
-  try {
-    await api('/api/account/aliases/' + id + '/deactivate', { method: 'POST' });
-    toast('已停用该别名,已移入历史列表', 'success');
-    await loadAliases();
-    await loadAliasHistory(MailState.history.page);
-    MailState.page = 1;
-    await fetchMails();
-  } catch (err) { toast(err.message, 'error'); }
+  confirmDialog('停用后该别名不再收件，但可在历史列表中恢复。确认停用？', async () => {
+    try {
+      await api('/api/account/aliases/' + id + '/deactivate', { method: 'POST' });
+      toast('已停用该别名', 'success');
+      if (MailState.selectedAliasId === id) MailState.selectedAliasId = null;
+      await loadAliases();
+      await loadAliasHistory(MailState.history.page);
+    } catch (err) { toast(err.message, 'error'); }
+  });
 }
 
 async function toggleAliasFavorite(id, favorite) {
@@ -301,13 +237,6 @@ async function toggleAliasFavorite(id, favorite) {
     await loadAliases();
     if (MailState.historyOpen) await loadAliasHistory(MailState.history.page);
   } catch (err) { toast(err.message, 'error'); }
-}
-
-function focusAlias(id) {
-  MailState.scope = 'a:' + id;
-  rebuildScopeOptions();
-  MailState.page = 1;
-  fetchMails();
 }
 
 /* ============ 历史别名(折叠面板) ============ */
@@ -352,9 +281,7 @@ async function loadAliasHistory(page, silent = false) {
     const cnt = document.getElementById('historyCount');
     if (cnt) cnt.textContent = `共 ${data.total || 0} 个`;
     renderAliasHistory();
-  } catch (err) {
-    box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
-  }
+  } catch (err) { box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`; }
 }
 
 function renderAliasHistory() {
@@ -362,11 +289,7 @@ function renderAliasHistory() {
   const pager = document.getElementById('historyPagination');
   if (!box) return;
   const list = MailState.history.list;
-  if (!list.length) {
-    box.innerHTML = '<div class="mail-empty">暂无历史别名</div>';
-    if (pager) pager.innerHTML = '';
-    return;
-  }
+  if (!list.length) { box.innerHTML = '<div class="mail-empty">暂无历史别名</div>'; if (pager) pager.innerHTML = ''; return; }
   box.innerHTML = '<div class="alias-grid">' + list.map(a => {
     const active = a.status === 'active';
     return `
@@ -390,10 +313,7 @@ function renderAliasHistory() {
       </div>
     </div>`;
   }).join('') + '</div>';
-
-  if (pager) {
-    pager.innerHTML = pagerHtml(MailState.history.page, MailState.history.totalPages, MailState.history.total, 'loadAliasHistory', '个');
-  }
+  if (pager) pager.innerHTML = pagerHtml(MailState.history.page, MailState.history.totalPages, MailState.history.total, 'loadAliasHistory', '个');
 }
 
 async function toggleHistoryFavorite(id, favorite) {
@@ -411,11 +331,8 @@ async function restoreAlias(id) {
     toast('已恢复启用: ' + (alias ? alias.full : ''), 'success');
     await loadAliases();
     await loadAliasHistory(MailState.history.page);
-    MailState.page = 1;
-    await fetchMails();
-  } catch (err) {
-    toast(err.message, 'error', 3600);
-  }
+    selectAlias(alias.id);
+  } catch (err) { toast(err.message, 'error', 3600); }
 }
 
 async function deleteAliasItem(id) {
@@ -423,15 +340,24 @@ async function deleteAliasItem(id) {
     try {
       await api('/api/account/aliases/' + id, { method: 'DELETE' });
       toast('已删除', 'success');
+      if (MailState.selectedAliasId === id) MailState.selectedAliasId = null;
       await loadAliases();
       await loadAliasHistory(MailState.history.page);
-      MailState.page = 1;
-      await fetchMails();
     } catch (err) { toast(err.message, 'error'); }
   });
 }
 
-/* ============ 分页组件 ============ */
+function focusAlias(id) {
+  // 从历史列表点击「查看收件」:若未生效先恢复
+  const hist = (MailState.history.list || []).find(a => a.id === id);
+  if (hist && hist.status !== 'active') {
+    restoreAlias(id).catch(() => {});
+    return;
+  }
+  selectAlias(id);
+}
+
+/* ============ 分页组件(仅历史别名保留) ============ */
 function pagerHtml(page, totalPages, total, fnName, unit) {
   const u = unit || '封';
   return `<div class="pagination">
@@ -452,56 +378,87 @@ function pagerJump(fnName, totalPages) {
   if (!page || page < 1) { toast('请输入有效页码', 'warning'); return; }
   if (page > totalPages) { toast('页码超出范围, 最大 ' + totalPages + ' 页', 'warning'); return; }
   if (fnName === 'loadAliasHistory') loadAliasHistory(page);
-  else gotoMailPage(page);
 }
 
-/* ============ 查询邮件 ============ */
-function buildFetchBody(silent) {
-  const q = (document.getElementById('qSearch')?.value || '').trim();
-  const start = document.getElementById('qStart')?.value;
-  const end = document.getElementById('qEnd')?.value;
-  const unread = document.getElementById('qUnread')?.checked === true;
+/* ============ 搜索 / 仅未读 ============ */
+function bindSearchBox() {
+  const input = document.getElementById('qSearch');
+  const clear = document.getElementById('qSearchClear');
+  if (!input) return;
+  input.oninput = () => {
+    if (clear) clear.style.display = input.value ? 'block' : 'none';
+    if (_mailSearchTimer) clearTimeout(_mailSearchTimer);
+    _mailSearchTimer = setTimeout(() => {
+      MailState.q = input.value.trim();
+      MailState.offset = 0;
+      MailState.emails = [];
+      fetchMails();
+    }, 450);
+  };
+}
 
+function clearSearch() {
+  const input = document.getElementById('qSearch');
+  if (input) input.value = '';
+  const clear = document.getElementById('qSearchClear');
+  if (clear) clear.style.display = 'none';
+  MailState.q = '';
+  MailState.offset = 0;
+  MailState.emails = [];
+  fetchMails();
+}
+
+function onUnreadChange() {
+  const cb = document.getElementById('qUnread');
+  MailState.unseen = cb ? cb.checked : false;
+  MailState.offset = 0;
+  MailState.emails = [];
+  fetchMails();
+}
+
+/* ============ 查询邮件(动态加载) ============ */
+function buildFetchBody(silent = false, isLoadMore = false) {
+  const alias = (MailState.aliases || []).find(a => a.id === MailState.selectedAliasId);
   const body = {
-    q,
-    page: MailState.page,
-    page_size: MailState.pageSize,
+    q: MailState.q,
+    offset: MailState.offset,
+    limit: 10,
+    unseen: MailState.unseen ? true : undefined,
     silent: silent ? true : undefined,
   };
-  if (unread) body.unseen = true;
-  if (start) body.start_time = new Date(start).toISOString();
-  if (end) {
-    // 结束时间补齐到该分钟末尾,避免 23:59 被解释成 23:59:00 漏掉最后一分钟
-    body.end_time = new Date(end + ':59').toISOString();
-  }
-
-  const scope = MailState.scope || 'all';
-  if (scope === 'all') {
+  if (alias) {
+    body.alias_id = alias.id;
+    // 查询范围: 从别名创建(激活)时间起,一直到当前;续期不改变 created_at,因此旧邮件仍在范围内
+    if (alias.created_at) body.start_time = alias.created_at;
+  } else {
     body.all_aliases = true;
-  } else if (scope.indexOf('a:') === 0) {
-    body.alias_id = scope.slice(2);
-  } else if (scope.indexOf('mb:') === 0) {
-    body.all_aliases = false;
-    body.mail_account_id = scope.slice(3);
+    // 无选中别名时回退到当天
+    const d = new Date();
+    body.start_time = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T00:00:00.000Z`;
   }
   return body;
 }
 
 async function fetchMails(silent = false) {
-  if (!silent) {
+  if (!silent && !MailState.loadingMore) {
     const list = document.getElementById('mailList');
-    if (list) list.innerHTML = '<div class="loading"><span class="spinner"></span> 正在查询...</div>';
+    if (list) list.innerHTML = '<div class="loading"><span class="spinner"></span> 正在加载邮件...</div>';
   }
   try {
     const data = await api('/api/web/email/fetch', { method: 'POST', body: buildFetchBody(silent) });
-    if (silent) silentMergeMails(data.emails || []);
-    else {
-      MailState.emails = data.emails || [];
-      MailState.truncated = !!data.truncated;
+    const newEmails = data.emails || [];
+    MailState.hasMore = data.has_more !== false; // 默认认为还有,直到服务端明确没有
+    if (silent) {
+      silentMergeMails(newEmails);
+    } else {
+      if (MailState.loadingMore) MailState.emails = MailState.emails.concat(newEmails);
+      else MailState.emails = newEmails;
+      MailState.offset = MailState.emails.length;
       renderMailList();
-      renderMailPagination();
+      // 内容未撑满容器且有更多数据时自动补载,避免空屏/无滚动条
+      setTimeout(maybeLoadMore, 50);
     }
-    // 同步服务端返回的剩余有效期(用于进度条)
+    // 同步服务端返回的剩余有效期
     if (Array.isArray(data.aliases)) {
       const byId = {};
       for (const a of data.aliases) byId[a.id] = a;
@@ -512,32 +469,56 @@ async function fetchMails(silent = false) {
     if (!silent) {
       const list = document.getElementById('mailList');
       if (list) list.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
-      const pager = document.getElementById('mailPagination');
-      if (pager) pager.innerHTML = '';
       const cnt = document.getElementById('mailCount');
       if (cnt) cnt.textContent = '0';
     }
+  } finally {
+    MailState.loadingMore = false;
+    const loader = document.getElementById('mailLoader');
+    if (loader) loader.classList.add('hidden');
   }
 }
 
-// 静默合并:按 id 去重后插到前面,保持当前页码不变
 function silentMergeMails(newEmails) {
   if (!newEmails || !newEmails.length) return;
   const old = MailState.emails || [];
   const oldIds = new Set(old.map(m => m.id));
   const fresh = newEmails.filter(m => !oldIds.has(m.id));
-  if (!fresh.length) {
-    renderMailList();
-    return;
+  if (!fresh.length) return;
+  // 如果当前是选中别名,且新邮件命中该别名,才合并;否则不干扰
+  if (MailState.selectedAliasId) {
+    const hit = fresh.filter(m => m.alias_id === MailState.selectedAliasId || m.alias === (MailState.aliases.find(a => a.id === MailState.selectedAliasId)?.full));
+    if (!hit.length) return;
   }
   MailState.emails = [...fresh, ...old];
   renderMailList();
-  renderMailPagination();
-  const statusEl = document.getElementById('autoFetchStatus');
-  if (statusEl) {
-    statusEl.textContent = `自动收件: 新增 ${fresh.length} 封`;
-    setTimeout(() => { const s = document.getElementById('autoFetchStatus'); if (s) s.textContent = ''; }, 3000);
-  }
+  toast(`自动收件: 新增 ${fresh.length} 封`, 'info', 2200);
+}
+
+/* ============ 无限滚动 ============ */
+function bindInfiniteScroll() {
+  const main = document.getElementById('mailMain');
+  if (!main) return;
+  main.addEventListener('scroll', () => {
+    if (MailState.loadingMore || !MailState.hasMore) return;
+    const nearBottom = main.scrollHeight - main.scrollTop - main.clientHeight < 80;
+    if (nearBottom) loadMoreMails();
+  });
+}
+
+function loadMoreMails() {
+  if (MailState.loadingMore || !MailState.hasMore) return;
+  MailState.loadingMore = true;
+  const loader = document.getElementById('mailLoader');
+  if (loader) loader.classList.remove('hidden');
+  fetchMails(false);
+}
+
+function maybeLoadMore() {
+  const main = document.getElementById('mailMain');
+  if (!main || !MailState.hasMore || MailState.loadingMore) return;
+  const underfilled = main.scrollHeight <= main.clientHeight + 80;
+  if (underfilled) loadMoreMails();
 }
 
 function renderMailList() {
@@ -548,26 +529,18 @@ function renderMailList() {
   if (cnt) cnt.textContent = String(all.length);
   if (!all.length) {
     list.className = '';
-    list.innerHTML = '<div class="mail-empty">没有符合条件的邮件</div>';
+    list.innerHTML = '<div class="mail-empty">该别名暂无邮件</div>';
     return;
   }
-  const size = MailState.pageSize;
-  const totalPages = Math.max(1, Math.ceil(all.length / size));
-  if (MailState.page > totalPages) MailState.page = totalPages;
-  const start = (MailState.page - 1) * size;
-  const pageItems = all.slice(start, start + size);
-
   list.className = 'mail-list';
-  list.innerHTML = pageItems.map((m, idx) => {
-    const i = start + idx;
+  list.innerHTML = all.map((m, i) => {
     const atts = (m.attachments || []).filter(Boolean);
     return `
-    <div class="mail-item ${m.unread ? 'unread' : ''}" id="mail-${i}">
-      <div class="mail-head" onclick="viewMailDetail(${i})" title="点击查看完整邮件">
+    <div class="mail-item ${m.unread ? 'unread' : ''}" id="mail-${i}" onclick="viewMailDetail(${i})">
+      <div class="mail-head" title="点击查看完整邮件">
         ${m.unread ? '<span class="unread-dot"></span>' : ''}
         <span class="from">${esc(m.from || '(未知发件人)')}</span>
         <span class="subject">${esc(m.subject || '(无主题)')}</span>
-        ${m.alias ? `<span class="alias-chip" title="命中别名 ${esc(m.alias)}">${esc(m.alias)}</span>` : ''}
         ${atts.length ? `<span class="att-chip" title="${esc(atts.join('、'))}">📎 ${atts.length}</span>` : ''}
         <span class="date">${esc(m.date || '')}</span>
       </div>
@@ -575,51 +548,21 @@ function renderMailList() {
   }).join('');
 }
 
-function renderMailPagination() {
-  const pager = document.getElementById('mailPagination');
-  if (!pager) return;
-  const total = (MailState.emails || []).length;
-  if (!total) { pager.innerHTML = ''; return; }
-  const totalPages = Math.max(1, Math.ceil(total / MailState.pageSize));
-  pager.innerHTML = pagerHtml(MailState.page, totalPages, total, 'gotoMailPage', '封') +
-    (MailState.truncated
-      ? '<div class="form-hint" style="text-align:center; margin-top:8px">已达单次抓取上限，更早或被过滤的邮件请缩小时间范围或使用搜索词</div>'
-      : '');
-}
-
-function gotoMailPage(page) {
-  MailState.page = Math.max(1, page);
-  renderMailList();
-  renderMailPagination();
-}
-
-function onPageSizeChange() {
-  const sel = document.getElementById('pageSizeSel');
-  if (!sel) return;
-  MailState.pageSize = parseInt(sel.value, 10) || 20;
-  MailState.page = 1;
-  // 每页条数变化后可能需要更多数据,重新向服务端取一次
-  fetchMails();
-}
-
 /* ============ 自动收件 ============ */
 function toggleAutoFetch() {
   const cb = document.getElementById('qAutoFetch');
-  if (cb && cb.checked) startAutoFetch();
+  MailState.autoFetch = cb ? cb.checked : false;
+  if (MailState.autoFetch) startAutoFetch();
   else stopAutoFetch();
 }
 
 function startAutoFetch() {
   stopAutoFetch();
-  const statusEl = document.getElementById('autoFetchStatus');
-  if (statusEl) statusEl.textContent = '自动收件已开启';
   _mailAutoTimer = setInterval(() => fetchMails(true), 15000);
 }
 
 function stopAutoFetch() {
   if (_mailAutoTimer) { clearInterval(_mailAutoTimer); _mailAutoTimer = null; }
-  const statusEl = document.getElementById('autoFetchStatus');
-  if (statusEl) statusEl.textContent = '';
 }
 
 /* ============ 邮件详情弹窗 ============ */
@@ -630,47 +573,24 @@ function viewMailDetail(i) {
   const bodyContent = m.html
     ? `<iframe sandbox="allow-same-origin" srcdoc="${esc(m.html)}" style="width:100%;min-height:420px;border:1px solid var(--border);border-radius:8px"></iframe>`
     : `<div class="mail-detail-body">${esc(m.body || '(无正文)')}</div>`;
-
-  const footer = `
-    ${m.html ? `<button class="btn btn-secondary" onclick="toggleMailView(${i})">切换纯文本</button>` : ''}
-    <button class="btn btn-secondary" onclick="closeModal()">关闭</button>
-  `;
-
-  showModal(
-    m.subject || '(无主题)',
-    `<div class="mail-detail">
-       <div class="mail-detail-meta">
-         <div><strong>发件人:</strong> ${esc(m.from || '-')}</div>
-         <div><strong>收件人:</strong> ${esc(m.to || '-')}</div>
-         ${m.alias ? `<div><strong>命中别名:</strong> <span class="badge badge-primary">${esc(m.alias)}</span></div>` : ''}
-         <div><strong>时间:</strong> ${esc(m.date || '-')}</div>
-         <div><strong>附件:</strong> ${atts.length ? esc(atts.join('、')) : '无'}</div>
-         <div><strong>状态:</strong> ${m.unread ? '<span class="badge badge-primary">未读</span>' : '<span class="badge badge-gray">已读</span>'}</div>
-       </div>
-       <hr class="divider">
-       <div id="mailDetailBody">${bodyContent}</div>
-     </div>`,
-    footer,
-    true
-  );
-
-  // 未读邮件打开即标记已读(静默,不弹提示)
+  const footer = `${m.html ? `<button class="btn btn-secondary" onclick="toggleMailView(${i})">切换纯文本</button>` : ''}<button class="btn btn-secondary" onclick="closeModal()">关闭</button>`;
+  showModal(m.subject || '(无主题)', `<div class="mail-detail">
+    <div class="mail-detail-meta">
+      <div><strong>发件人:</strong> ${esc(m.from || '-')}</div>
+      <div><strong>收件人:</strong> ${esc(m.to || '-')}</div>
+      <div><strong>时间:</strong> ${esc(m.date || '-')}</div>
+      <div><strong>附件:</strong> ${atts.length ? esc(atts.join('、')) : '无'}</div>
+      <div><strong>状态:</strong> ${m.unread ? '<span class="badge badge-primary">未读</span>' : '<span class="badge badge-gray">已读</span>'}</div>
+    </div><hr class="divider"><div id="mailDetailBody">${bodyContent}</div>
+  </div>`, footer, true);
   if (m.unread) markMailRead(i, true);
 }
 
-// 标记已读
 async function markMailRead(i, autoMark = false) {
   const m = MailState.emails[i];
   if (!m) return;
-  let accountId;
-  if (MailState.scope.indexOf('mb:') === 0) accountId = MailState.scope.slice(3);
-  else if (MailState.scope.indexOf('a:') === 0) {
-    const a = (MailState.aliases || []).find(x => x.id === MailState.scope.slice(2));
-    accountId = a ? a.mail_account_id : undefined;
-  } else {
-    const hit = (MailState.aliases || []).find(x => x.full === m.alias);
-    accountId = hit ? hit.mail_account_id : undefined;
-  }
+  const alias = (MailState.aliases || []).find(a => a.id === MailState.selectedAliasId);
+  const accountId = alias ? alias.mail_account_id : undefined;
   try {
     await api('/api/web/email/mark_read', {
       method: 'POST',
@@ -684,9 +604,7 @@ async function markMailRead(i, autoMark = false) {
       if (dot) dot.remove();
     }
     if (!autoMark) toast('已标记已读', 'success');
-  } catch (err) {
-    if (!autoMark) toast(err.message, 'error');
-  }
+  } catch (err) { if (!autoMark) toast(err.message, 'error'); }
 }
 
 function toggleMailView(i) {

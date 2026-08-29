@@ -112,6 +112,7 @@ export interface FetchParams {
   start_time?: string;
   end_time?: string;
   limit: number;
+  offset?: number;             // 无限滚动偏移量(0-based)
   mail_account_id?: string;    // Web 调用可选指定
   alias_id?: string;           // 指定查询某个别名
   all_aliases?: boolean;       // 聚合查询当前用户全部生效别名
