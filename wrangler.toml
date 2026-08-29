@@ -45,8 +45,7 @@ ADMIN_PASSWORD = "请修改为你的强密码"
 [triggers]
 crons = ["* * * * *"]
 
-# 提高 Worker CPU 时间上限:IMAP 收信(Gmail 全量 UID 列表/邮件头解析)在大邮箱下 CPU 占用较高,
-# 默认限额(约 50ms)容易被冲破触发 error 1102(CPU 超限 503)。IMAP 连接本身走 socket 异步 I/O 不占 CPU,
-# 此上限仅为解析留余量;配合 imap.ts 的 SINCE 收敛与尾部扫描,常规收信远低于此值。
-[limits]
-cpu_ms = 30000
+# 注意: 不要随意加 [limits] cpu_ms。当前套餐在 wrangler deploy / Workers Builds 阶段会拒收
+# limits 配置导致部署失败(已踩坑: cpu_ms=30000 让 GitHub Actions 与 Cloudflare Workers Builds 双双失败)。
+# CPU 超限(1102)的解决靠代码侧:imap.ts 已对 IMAP 搜索加 SINCE 收敛 + 尾部扫描 + 读取超时,
+# 把单请求 CPU 压到套餐默认限额内。若后续升级到支持 limits 的付费套餐,可在此加回 cpu_ms 留余量。
