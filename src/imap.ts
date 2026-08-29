@@ -56,7 +56,7 @@ class ImapConnection {
   }
 
   // 读取服务器问候语(以 "* OK" 或 "* PREAUTH" 开头的一行)
-  private async drainGreeting(timeoutMs = 8000): Promise<void> {
+  private async drainGreeting(timeoutMs = 6000): Promise<void> {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       if (this.buf.length && this.buf.indexOf(0x0a) >= 0) {
@@ -78,7 +78,7 @@ class ImapConnection {
   }
 
   // 读取直到出现标签为 tag 的响应行(OK/NO/BAD)
-  private async readUntil(tag: string, timeoutMs = 20000): Promise<Uint8Array> {
+  private async readUntil(tag: string, timeoutMs = 15000): Promise<Uint8Array> {
     const tagBytes = this.enc.encode('\n' + tag + ' ');
     const start = Date.now();
     while (true) {
@@ -143,13 +143,13 @@ class ImapConnection {
     return uids;
   }
 
-  // 按 UID 批量拉取整封邮件(BODY.PEEK[] 不修改已读标记)
-  async fetchUids(uids: number[]): Promise<Map<number, { raw: Uint8Array; flags: string[] }>> {
+  // 按 UID 批量拉取(默认整封 BODY.PEEK[];列表场景传 'UID FLAGS BODY.PEEK[HEADER]' 只拉头部,极大降低负载)
+  async fetchUids(uids: number[], spec = 'UID FLAGS BODY.PEEK[]'): Promise<Map<number, { raw: Uint8Array; flags: string[] }>> {
     const map = new Map<number, { raw: Uint8Array; flags: string[] }>();
     if (!uids.length) return map;
     const tag = this.nextTag();
     const list = uids.join(',');
-    const res = await this.command(tag, `${tag} UID FETCH ${list} (UID FLAGS BODY.PEEK[])`, 30000);
+    const res = await this.command(tag, `${tag} UID FETCH ${list} (${spec})`, 15000);
     if (res.tagged !== 'OK') throw new Error('IMAP 拉取失败: ' + (res.text || ''));
     for (const item of parseFetchBlocks(res.raw)) {
       if (item.uid != null && item.raw) map.set(item.uid, { raw: item.raw, flags: item.flags });
@@ -399,7 +399,8 @@ function decodeRfc2047(s: string): string {
 
 // ============ 对外接口 ============
 
-// 拉取邮件(返回已解析的原始 Email 列表,不含统一过滤)
+// 列表场景:只拉邮件头(From/To/Subject/Date/已读),不拉正文,避免大批量完整邮件撑爆 Worker 的 CPU/时长上限。
+// 完整正文在「邮件详情」打开时由 fetchImapEmailDetail 按需拉取。
 export async function fetchImapEmails(env: Env, accountId: string, params: FetchParams): Promise<Email[]> {
   const cfg = await getImapAccountById(env, accountId);
   if (!cfg) throw new Error('该邮箱未配置 IMAP(应用密码)信息');
@@ -413,14 +414,15 @@ export async function fetchImapEmails(env: Env, accountId: string, params: Fetch
     const criteria = params.unseen === true ? 'UNSEEN' : 'ALL';
     let uids = await conn.searchUids(criteria);
     if (!uids.length) return [];
-    // UID 升序,取末尾 N 封(最新)
-    const cap = Math.min(Math.max(params.limit || 50, 20) * 2, 80);
+    // UID 升序,取末尾 N 封(最新);控制总量,降低负载
+    const cap = Math.min(Math.max(params.limit || 50, 20), 30);
     if (uids.length > cap) uids = uids.slice(uids.length - cap);
 
-    const map = await conn.fetchUids(uids);
+    // 只拉头部(BODY.PEEK[HEADER]),不拉正文
+    const map = await conn.fetchUids(uids, 'UID FLAGS BODY.PEEK[HEADER]');
     const emails: Email[] = [];
     for (const [uid, val] of map) {
-      const parsed = parseMime(val.raw);
+      const parsed = parseImapHeaders(val.raw);
       emails.push({
         id: `imap:${cfg.id}:${uid}`,
         from: parsed.from,
@@ -428,8 +430,8 @@ export async function fetchImapEmails(env: Env, accountId: string, params: Fetch
         subject: parsed.subject,
         date: parsed.date,
         date_iso: parsed.dateIso,
-        body: parsed.body,
-        html: parsed.html,
+        body: '',
+        html: '',
         unread: !val.flags.includes('\\Seen'),
         attachments: parsed.attachments,
         provider: 'imap',
@@ -440,6 +442,57 @@ export async function fetchImapEmails(env: Env, accountId: string, params: Fetch
     try { await conn.logout(); } catch { /* ignore */ }
     try { await conn.close(); } catch { /* ignore */ }
   }
+}
+
+// 详情场景:按需拉取单封完整邮件(含正文/HTML/附件),供前端「邮件详情」打开时调用
+export async function fetchImapEmailDetail(env: Env, accountId: string, uid: number): Promise<Email> {
+  const cfg = await getImapAccountById(env, accountId);
+  if (!cfg) throw new Error('该邮箱未配置 IMAP(应用密码)信息');
+  const conn = await ImapConnection.connect(cfg);
+  try {
+    await conn.login(cfg.username, cfg.password);
+    await conn.selectInbox();
+    const map = await conn.fetchUids([uid], 'UID FLAGS BODY.PEEK[]');
+    const val = map.get(uid);
+    if (!val) throw new Error('未找到该邮件或已删除');
+    const parsed = parseMime(val.raw);
+    return {
+      id: `imap:${cfg.id}:${uid}`,
+      from: parsed.from,
+      to: parsed.to,
+      subject: parsed.subject,
+      date: parsed.date,
+      date_iso: parsed.dateIso,
+      body: parsed.body,
+      html: parsed.html,
+      unread: !val.flags.includes('\\Seen'),
+      attachments: parsed.attachments,
+      provider: 'imap',
+    };
+  } finally {
+    try { await conn.logout(); } catch { /* ignore */ }
+    try { await conn.close(); } catch { /* ignore */ }
+  }
+}
+
+// 仅解析邮件头(用于列表,避免加载正文)
+function parseImapHeaders(raw: Uint8Array): { from: string; to: string; subject: string; date: string; dateIso: string; attachments: string[] } {
+  const headerText = new TextDecoder('utf-8').decode(raw);
+  const h = parseHeaders(headerText.replace(/\r\n[ \t]/g, '').replace(/\n[ \t]/g, ''));
+  const from = decodeRfc2047(h['from'] || '');
+  const to = decodeRfc2047(h['to'] || '');
+  const subject = decodeRfc2047(h['subject'] || '');
+  const dateRaw = h['date'] || '';
+  let dateIso = ''; let date = '';
+  if (dateRaw) {
+    const dt = new Date(dateRaw);
+    if (!isNaN(dt.getTime())) { dateIso = dt.toISOString(); date = formatShanghaiTime(dateIso); }
+    else date = dateRaw;
+  }
+  // 头部无法可靠列出附件名,仅在 Content-Type 显式带附件时给一个提示
+  const ct = (h['content-type'] || '').toLowerCase();
+  const attachments = /multipart\/mixed|multipart\/related/i.test(ct) ? ['(含附件)'] : [];
+  return { from, to, subject, date, dateIso, attachments };
 }
 
 // 标记已读(按发件人 + 主题匹配)

@@ -607,9 +607,24 @@ function stopAutoFetch() {
 }
 
 /* ============ 邮件详情弹窗 ============ */
-function viewMailDetail(i) {
+async function viewMailDetail(i) {
   const m = MailState.emails[i];
   if (!m) return;
+  // IMAP 列表只拉了头部(轻量),打开详情时若缺正文则按需拉取单封完整邮件
+  if (m.provider === 'imap' && !m.body && !m.html) {
+    showModal(m.subject || '(无主题)', '<div class="loading"><span class="spinner"></span> 正在加载邮件正文...</div>',
+      '<button class="btn btn-secondary" onclick="closeModal()">关闭</button>', true);
+    try {
+      const accountId = String(m.id.split(':')[1] || '');
+      const uid = parseInt(String(m.id.split(':')[2] || ''), 10);
+      const data = await api('/api/web/email/detail', { method: 'POST', body: { mail_account_id: accountId, uid } });
+      if (data && data.email) Object.assign(m, data.email);
+    } catch (e) {
+      closeModal();
+      toast(e.message, 'error');
+      return;
+    }
+  }
   const atts = (m.attachments || []).filter(Boolean);
   const bodyContent = m.html
     ? `<iframe sandbox="allow-same-origin" srcdoc="${esc(m.html)}" style="width:100%;min-height:420px;border:1px solid var(--border);border-radius:8px"></iframe>`

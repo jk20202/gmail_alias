@@ -76,9 +76,17 @@ async function api(path, opts = {}) {
     showLoginView();
     throw new Error('会话已过期，请重新登录');
   }
+  // 先读原始文本再解析:解析失败时抛出含 HTTP 状态码与响应片段的可读错误,
+  // 便于定位"响应解析失败"(通常是 Worker 被平台以非 JSON 500 杀掉,如 IMAP 抓取超时/超配额)
+  const text = await res.text();
   let data;
-  try { data = await res.json(); }
-  catch { throw new Error('响应解析失败'); }
+  try { data = JSON.parse(text); }
+  catch {
+    throw new Error(`响应解析失败(HTTP ${res.status}): ${text ? text.slice(0, 200) : '空响应或非 JSON'}`);
+  }
+  if (!data || typeof data !== 'object' || data.code === undefined) {
+    throw new Error(`响应格式异常(HTTP ${res.status}): ${text.slice(0, 200)}`);
+  }
   if (data.code !== 0) {
     throw new Error(data.msg || '请求失败');
   }

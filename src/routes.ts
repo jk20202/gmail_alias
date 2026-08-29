@@ -8,7 +8,7 @@ import {
 import { fetchEmails, markEmailsRead } from './emailService';
 import { sha256, randomLabel, encrypt } from './utils';
 import { pollAndPush, sendTestEvent } from './webhook';
-import { testImapConnection, checkImapAuth } from './imap';
+import { testImapConnection, checkImapAuth, fetchImapEmailDetail } from './imap';
 
 // 路由上下文
 export interface Ctx {
@@ -916,6 +916,26 @@ export async function webMarkRead(ctx: Ctx): Promise<Response> {
     return ok({ marked: count });
   } catch (e) {
     return fail('标记已读失败,请稍后重试', 500);
+  }
+}
+
+// ============ Web 邮件详情(按需拉取单封完整正文) ============
+// IMAP 列表只拉头部(轻量),打开详情时再调此接口拉取该封完整邮件(含正文/HTML/附件)。
+export async function webEmailDetail(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const { mail_account_id, uid } = ctx.body;
+  if (!mail_account_id) return fail('缺少 mail_account_id');
+  if (uid === undefined || uid === null || uid === '') return fail('缺少 uid');
+  const account = await db.getMailAccountRaw(ctx.env, user.id, String(mail_account_id));
+  if (!account) return fail('无权操作该邮箱', 403);
+  if (account.provider !== 'imap') return fail('该邮箱类型不支持按需加载详情(正文已在列表中)');
+  const nUid = parseInt(String(uid), 10);
+  if (isNaN(nUid)) return fail('uid 格式错误');
+  try {
+    const email = await fetchImapEmailDetail(ctx.env, String(mail_account_id), nUid);
+    return ok({ email });
+  } catch (e) {
+    return fail('加载邮件详情失败: ' + ((e as Error).message || '未知错误'), 500);
   }
 }
 
