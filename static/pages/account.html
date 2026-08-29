@@ -6,9 +6,10 @@
     <div class="card-header"><h3>基本信息</h3></div>
     <div class="card-body" id="accountInfoBody">
       <div class="account-info-grid">
-        <div class="info-item">
+        <div class="info-item" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap">
           <span class="label">用户名</span>
           <span class="value" id="accUsername"></span>
+          <button class="btn btn-secondary btn-sm" onclick="openChangePasswordModal()">修改密码</button>
         </div>
         <div class="info-item">
           <span class="label">角色</span>
@@ -29,13 +30,6 @@
           <button class="btn btn-secondary btn-sm" id="btnCopyApiKey">复制</button>
           <button class="btn btn-danger btn-sm" onclick="regenApiKey()">重新生成</button>
         </div>
-      </div>
-      <div class="security-row" style="margin-top:18px">
-        <div>
-          <div class="label">登录密码</div>
-          <div class="form-hint">建议定期更换密码，保障账户安全</div>
-        </div>
-        <button class="btn btn-secondary" onclick="openChangePasswordModal()">修改密码</button>
       </div>
     </div>
   </div>

@@ -27,6 +27,8 @@ class ImapConnection {
   private enc = new TextEncoder();
   private buf = new Uint8Array(0);
   private tagCounter = 0;
+  private deadline = 0;          // 整体操作截止时间戳(ms),超时即抛错,避免 Worker 被平台 503 杀
+  private readTimeoutMs = 12000; // 单次 socket 读取超时,卡死时快速失败
 
   static async connect(cfg: ImapConnConfig): Promise<ImapConnection> {
     if (typeof connect !== 'function') {
@@ -37,6 +39,7 @@ class ImapConnection {
     conn.socket = socket;
     conn.reader = socket.readable.getReader();
     conn.writer = socket.writable.getWriter();
+    conn.deadline = Date.now() + 25000;
     await conn.drainGreeting();
     return conn;
   }
@@ -49,16 +52,28 @@ class ImapConnection {
   }
 
   private async readChunk(): Promise<boolean> {
-    const { value, done } = await this.reader.read();
-    if (done) return false;
-    if (value && value.length) await this.pushChunk(value);
-    return true;
+    let timer: any;
+    const timeoutP = new Promise<never>((_, rej) => {
+      timer = setTimeout(() => rej(new Error('IMAP 读取超时(连接无响应)')), this.readTimeoutMs);
+    });
+    try {
+      const r: any = await Promise.race([this.reader.read(), timeoutP]);
+      clearTimeout(timer);
+      const { value, done } = r;
+      if (done) return false;
+      if (value && value.length) await this.pushChunk(value);
+      return true;
+    } catch (e) {
+      clearTimeout(timer);
+      throw e;
+    }
   }
 
   // 读取服务器问候语(以 "* OK" 或 "* PREAUTH" 开头的一行)
   private async drainGreeting(timeoutMs = 6000): Promise<void> {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
+      if (this.deadline && Date.now() > this.deadline) throw new Error('IMAP 连接超时(超过 25s)');
       if (this.buf.length && this.buf.indexOf(0x0a) >= 0) {
         const text = this.dec.decode(this.buf);
         if (/\* (OK|PREAUTH)/i.test(text)) return;
@@ -82,7 +97,9 @@ class ImapConnection {
     const tagBytes = this.enc.encode('\n' + tag + ' ');
     const start = Date.now();
     while (true) {
-      const idx = this.indexOf(this.buf, tagBytes, 0);
+      // 只扫描缓冲尾部(标签响应总是在响应末尾),避免大响应下每次从 0 全量重扫(O(n^2) 吃掉 CPU 限额)
+      const from = Math.max(0, this.buf.length - 512);
+      const idx = this.indexOf(this.buf, tagBytes, from);
       if (idx >= 0) {
         const rest = this.buf.subarray(idx + tagBytes.length, idx + tagBytes.length + 8);
         const word = this.dec.decode(rest).toUpperCase();
@@ -91,6 +108,7 @@ class ImapConnection {
         }
       }
       if (Date.now() - start > timeoutMs) throw new Error('IMAP 读取超时');
+      if (this.deadline && Date.now() > this.deadline) throw new Error('IMAP 操作超时(超过 25s)');
       const more = await this.readChunk();
       if (!more) return this.buf;
     }
@@ -181,6 +199,15 @@ class ImapConnection {
 // IMAP 引号(双引号包裹,转义内部 " 与 \)
 function imapQuote(s: string): string {
   return '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+}
+
+// IMAP 日期格式 DD-Mon-YYYY(用于 SEARCH SINCE),按 UTC 取值避免时区偏差
+function imapDate(iso: string): string | null {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${day}-${mon}-${d.getUTCFullYear()}`;
 }
 
 // ============ FETCH 响应字节级解析 ============
@@ -410,8 +437,13 @@ export async function fetchImapEmails(env: Env, accountId: string, params: Fetch
     await conn.login(cfg.username, cfg.password);
     await conn.selectInbox();
 
-    // 搜索条件: unseen 优先;否则取最近若干封(JS 端再做时间/关键字过滤)
-    const criteria = params.unseen === true ? 'UNSEEN' : 'ALL';
+    // 搜索条件: unseen 优先;有起始时间时按 SINCE 收敛(只查该别名创建以来的邮件),
+    // 避免 Gmail 全量 UID 列表撑爆 Worker 的 CPU/时长上限;JS 端再做时间/关键字过滤
+    const criteriaParts: string[] = [];
+    if (params.unseen === true) criteriaParts.push('UNSEEN');
+    const since = imapDate(params.start_time || '');
+    if (since) criteriaParts.push(`SINCE ${since}`);
+    const criteria = criteriaParts.length ? criteriaParts.join(' ') : 'ALL';
     let uids = await conn.searchUids(criteria);
     if (!uids.length) return [];
     // UID 升序,取末尾 N 封(最新);控制总量,降低负载
