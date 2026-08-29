@@ -172,7 +172,7 @@ export async function handleOAuthCallback(env: Env, code: string, state: string)
     // 重新授权:仅更新 token,保留 id / is_public 等属性
     await updateMailAccountToken(env, existing.id, encAccess, encRefresh, expiresAt);
   } else {
-    await addMailAccount(env, stateData.user_id, stateData.provider, email, encAccess, encRefresh, expiresAt, false);
+    await addMailAccount(env, stateData.user_id, stateData.provider, email, encAccess, encRefresh, expiresAt, false, undefined);
   }
 
   return {
@@ -472,6 +472,7 @@ export interface GoogleDeviceSession {
   interval: number;
   client_id: string;          // 本次会话绑定的凭据(用户在弹窗内填写的,不再依赖全局配置)
   client_secret: string;
+  alias_template?: string;    // 本次会话绑定的别名规则(随会话带入落库,避免被全局/缺省覆盖)
 }
 
 export interface DeviceStartResult {
@@ -482,7 +483,8 @@ export interface DeviceStartResult {
 }
 
 export async function startGoogleDeviceFlow(
-  env: Env, userId: string, explicitCreds?: { clientId: string; clientSecret: string } | null
+  env: Env, userId: string, explicitCreds?: { clientId: string; clientSecret: string } | null,
+  aliasTemplate?: string | null
 ): Promise<DeviceStartResult> {
   // 优先用用户本次在弹窗内填写的凭据;否则回退到(用户级 → 环境变量 → 全局)配置
   const creds = explicitCreds && explicitCreds.clientId
@@ -522,6 +524,7 @@ export async function startGoogleDeviceFlow(
     interval: data.interval || 5,
     client_id: creds.clientId,
     client_secret: creds.clientSecret,
+    alias_template: aliasTemplate || '',
   };
   await env.KV.put(`gdevice:${userId}`, JSON.stringify(session), {
     expirationTtl: Math.max(60, data.expires_in || 1800),
@@ -535,7 +538,7 @@ export async function startGoogleDeviceFlow(
 }
 
 // 把 Google 换到的 token 落库(新绑定则新增,重复授权则更新 token)
-async function persistGoogleAccount(env: Env, userId: string, tokenResp: TokenResponse): Promise<string> {
+async function persistGoogleAccount(env: Env, userId: string, tokenResp: TokenResponse, aliasTemplate?: string | null): Promise<string> {
   const email = await getGoogleEmail(tokenResp.access_token);
   const encAccess = await encrypt(tokenResp.access_token, env);
   const encRefresh = tokenResp.refresh_token ? await encrypt(tokenResp.refresh_token, env) : '';
@@ -547,7 +550,7 @@ async function persistGoogleAccount(env: Env, userId: string, tokenResp: TokenRe
       env, existing.id, encAccess, encRefresh || existing.refresh_token, expiresAt
     );
   } else {
-    await addMailAccount(env, userId, 'gmail', email, encAccess, encRefresh, expiresAt, false);
+    await addMailAccount(env, userId, 'gmail', email, encAccess, encRefresh, expiresAt, false, aliasTemplate || undefined);
   }
   return email;
 }
@@ -586,7 +589,7 @@ export async function pollGoogleDeviceFlow(
       const email = await persistGoogleAccount(env, userId, {
         ...data,
         refresh_token: data.refresh_token || '',
-      });
+      }, session.alias_template || undefined);
       await env.KV.delete(`gdevice:${userId}`);
       return { status: 'success', email };
     } catch (e) {

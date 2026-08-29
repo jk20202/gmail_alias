@@ -1,6 +1,6 @@
 // D1 数据访问层 - 封装所有 SQL 操作
 import type { Env, SafeUser, SafeMailAccount, MailAccountRaw, Alias, Webhook, UserAlias } from './types';
-import { sha256, randomHex, maskToken, nowISO, buildAliasFull, decrypt, encrypt } from './utils';
+import { sha256, randomHex, maskToken, nowISO, buildAliasFull, decrypt, encrypt, splitEmail, isAliasUnsupportedDomain } from './utils';
 
 const SESSION_TTL_DAYS = 7;
 const LOG_RETENTION_DAYS = 30;
@@ -17,7 +17,7 @@ export const ALIAS_HISTORY_PAGE_SIZE = 10;
 // 因此这里做运行时的一次性迁移(用 KV 记录版本号,避免每次请求都跑 DDL)
 // 注意: 每次新增列 / 表,必须 +1 本版本号,否则 ensureSchema 会因 KV 已记录旧版本而直接返回,
 // 导致新迁移(如 users.google_client_id)在生产环境永远不执行。
-const SCHEMA_VERSION = '3';
+const SCHEMA_VERSION = '4';
 
 export async function ensureSchema(env: Env): Promise<void> {
   try {
@@ -78,6 +78,13 @@ export async function ensureSchema(env: Env): Promise<void> {
     try { await env.DB.prepare(col).run(); } catch { /* 列已存在 */ }
   }
 
+  // mail_accounts 增加「别名规则模板」(per-account 别名生成规则,支持 {local}/{domain}/{label})
+  // 不同邮箱服务商别名形式不同: 微软 / 2925 用加号,部分自建域名用 catch-all;
+  // 该列允许每个绑定账号单独配置,打破此前全局硬编码 "+" 的限制。
+  try {
+    await env.DB.prepare('ALTER TABLE mail_accounts ADD COLUMN alias_template TEXT').run();
+  } catch { /* 列已存在 */ }
+
   // 迁移旧版单别名数据 -> user_aliases(给 1 小时有效期,避免一升级就全部过期)
   // 注意:时间统一用 JS 生成的 ISO 字符串,不能用 SQLite 的 datetime('now')(格式不同会导致比较失效)
   try {
@@ -108,6 +115,7 @@ interface MailAccountRow {
   is_public: number; created_at: string;
   imap_host?: string | null; imap_port?: number | null;
   imap_user?: string | null; imap_pass?: string | null;
+  alias_template?: string | null;
 }
 interface AliasRow {
   user_id: string; mail_account_id: string; label: string;
@@ -438,14 +446,15 @@ export async function adminListAllAccounts(env: Env): Promise<Array<SafeMailAcco
 // 新增账号(OAuth 绑定后调用)
 export async function addMailAccount(
   env: Env, userId: string, provider: 'gmail' | 'outlook', email: string,
-  accessToken: string, refreshToken: string, expiresAt: string, isPublic = false
+  accessToken: string, refreshToken: string, expiresAt: string, isPublic = false,
+  aliasTemplate?: string | null
 ): Promise<void> {
   const prefix = provider === 'gmail' ? 'g' : 'm';
   const id = prefix + randomHex(4);
   await env.DB.prepare(
-    `INSERT INTO mail_accounts(id, user_id, provider, email, access_token, refresh_token, token_expires_at, is_public)
-     VALUES(?,?,?,?,?,?,?,?)`
-  ).bind(id, userId, provider, email, accessToken, refreshToken, expiresAt, isPublic ? 1 : 0).run();
+    `INSERT INTO mail_accounts(id, user_id, provider, email, access_token, refresh_token, token_expires_at, is_public, alias_template)
+     VALUES(?,?,?,?,?,?,?,?,?)`
+  ).bind(id, userId, provider, email, accessToken, refreshToken, expiresAt, isPublic ? 1 : 0, aliasTemplate || null).run();
 }
 
 export async function updateMailAccountToken(
@@ -471,9 +480,11 @@ export interface ImapConfig {
 
 // 新增或更新 IMAP 账号(按 user_id + provider('imap') + email upsert)
 // imap_pass 为已加密字符串; access_token/refresh_token/token_expires_at 对 IMAP 无意义,留空
+// aliasTemplate: 该账号的别名生成规则(留空则用默认加号形式)
 export async function addImapAccount(
   env: Env, userId: string, email: string,
-  imapHost: string, imapPort: number, imapUser: string, encPass: string, isPublic = false
+  imapHost: string, imapPort: number, imapUser: string, encPass: string, isPublic = false,
+  aliasTemplate?: string | null
 ): Promise<string> {
   const existing = await env.DB.prepare(
     'SELECT * FROM mail_accounts WHERE user_id = ? AND provider = ? AND email = ?'
@@ -481,19 +492,19 @@ export async function addImapAccount(
   if (existing) {
     await env.DB.prepare(
       `UPDATE mail_accounts
-          SET imap_host = ?, imap_port = ?, imap_user = ?, imap_pass = ?, is_public = ?
+          SET imap_host = ?, imap_port = ?, imap_user = ?, imap_pass = ?, is_public = ?, alias_template = ?
         WHERE id = ?`
-    ).bind(imapHost, imapPort, imapUser, encPass, isPublic ? 1 : 0, existing.id).run();
+    ).bind(imapHost, imapPort, imapUser, encPass, isPublic ? 1 : 0, aliasTemplate || null, existing.id).run();
     return existing.id;
   }
   const id = 'i' + randomHex(4);
   await env.DB.prepare(
     `INSERT INTO mail_accounts
-       (id, user_id, provider, email, access_token, refresh_token, token_expires_at, is_public, imap_host, imap_port, imap_user, imap_pass)
-     VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`
+       (id, user_id, provider, email, access_token, refresh_token, token_expires_at, is_public, imap_host, imap_port, imap_user, imap_pass, alias_template)
+     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`
   ).bind(
     id, userId, 'imap', email, '', '', '', isPublic ? 1 : 0,
-    imapHost, imapPort, imapUser, encPass
+    imapHost, imapPort, imapUser, encPass, aliasTemplate || null
   ).run();
   return id;
 }
@@ -574,7 +585,13 @@ export async function setAlias(env: Env, userId: string, mailAccountId: string, 
   ).bind(mailAccountId, userId).first<MailAccountRow>();
   if (!account) return { alias: null, err: '未找到指定的邮箱或无权使用' };
 
-  const full = buildAliasFull(account.email, label);
+  // 不支持别名收信的域名(QQ/163 等): 绑定可读信,但禁止创建别名
+  const accDomain = splitEmail(account.email).domain;
+  if (isAliasUnsupportedDomain(accDomain)) {
+    return { alias: null, err: '该邮箱域名不支持别名收信,无法创建别名(仅可读取该收件箱)' };
+  }
+
+  const full = buildAliasFull(account.email, label, account.alias_template || null);
   if (!full) return { alias: null, err: '别名生成失败,邮箱格式错误' };
 
   await env.DB.prepare(
@@ -594,7 +611,7 @@ export async function clearAlias(env: Env, userId: string): Promise<void> {
 export async function adminSetAlias(env: Env, userId: string, mailAccountId: string, label: string): Promise<{ alias: Alias | null; err?: string }> {
   const account = await env.DB.prepare('SELECT * FROM mail_accounts WHERE id = ?').bind(mailAccountId).first<MailAccountRow>();
   if (!account) return { alias: null, err: '未找到指定的邮箱' };
-  const full = buildAliasFull(account.email, label);
+  const full = buildAliasFull(account.email, label, account.alias_template || null);
   if (!full) return { alias: null, err: '别名生成失败,邮箱格式错误' };
   await env.DB.prepare(
     `INSERT INTO aliases(user_id, mail_account_id, label, full, updated_at) VALUES(?,?,?,?,?)
@@ -696,7 +713,13 @@ export async function createUserAlias(
   ).bind(mailAccountId, userId).first<MailAccountRow>();
   if (!account) return { alias: null, err: '未找到指定的邮箱或无权使用' };
 
-  const full = buildAliasFull(account.email, label);
+  // 不支持别名收信的域名(QQ/163 等): 绑定可读信,但禁止创建别名
+  const accDomain = splitEmail(account.email).domain;
+  if (isAliasUnsupportedDomain(accDomain)) {
+    return { alias: null, err: '该邮箱域名不支持别名收信,无法创建别名(仅可读取该收件箱)' };
+  }
+
+  const full = buildAliasFull(account.email, label, account.alias_template || null);
   if (!full) return { alias: null, err: '别名生成失败,邮箱格式错误' };
 
   await expireStaleAliases(env, userId);

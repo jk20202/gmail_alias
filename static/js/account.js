@@ -273,6 +273,7 @@ async function openGmailAppPasswordForm() {
       <label class="form-label">应用密码 <span class="req">*</span></label>
       <input type="password" id="imapPass" class="form-control" placeholder="16 位应用密码">
     </div>
+    ${aliasRuleFieldHTML('imapAliasTpl', '{local}+{label}@gmail.com')}
     <div class="form-group" style="margin-top:4px">
       <label class="switch" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
         <input type="checkbox" id="imapPublic">
@@ -293,6 +294,7 @@ async function openGmailAppPasswordForm() {
     });
     userEl.addEventListener('input', () => { userEl.dataset.touched = '1'; });
   }
+  wireAliasPreview('imapEmail', 'imapAliasTpl', 'imapAliasTplPreview');
   const btn = document.getElementById('imapBindBtn');
   if (btn) btn.onclick = () => submitImapBind();
 }
@@ -301,7 +303,7 @@ async function openGmailAppPasswordForm() {
 function openImapForm(prefill) {
   prefill = prefill || {};
   showModal('绑定 IMAP / 应用密码', `
-    <p class="form-hint" style="margin:0 0 12px">使用应用密码（App Password）通过 IMAP 协议收信。无需 OAuth，适合 Gmail / Outlook / QQ / 163 等支持 IMAP 的邮箱。当前仅支持收信，不支持发信。</p>
+    <p class="form-hint" style="margin:0 0 12px">使用应用密码（App Password）通过 IMAP 协议收信。无需 OAuth，适合 Gmail / Outlook / QQ / 163 等支持 IMAP 的邮箱。当前仅支持收信，不支持发信。注意：QQ / 163 等部分邮箱不支持别名收信（加号地址收不到），绑定后仅能读取该收件箱，无法用于无限别名。</p>
     <div class="form-group">
       <label class="form-label">邮箱地址 <span class="req">*</span></label>
       <input type="text" id="imapEmail" class="form-control" placeholder="you@example.com" value="${esc(prefill.email || '')}">
@@ -322,6 +324,7 @@ function openImapForm(prefill) {
       <label class="form-label">应用密码 <span class="req">*</span></label>
       <input type="password" id="imapPass" class="form-control" placeholder="16 位应用密码">
     </div>
+    ${aliasRuleFieldHTML('imapAliasTpl', '{local}+{label}@{domain}')}
     <div class="form-group" style="margin-top:4px">
       <label class="switch" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
         <input type="checkbox" id="imapPublic" ${prefill.is_public ? 'checked' : ''}>
@@ -340,6 +343,7 @@ function openImapForm(prefill) {
     </details>`,
     `<button class="btn btn-secondary" onclick="closeModal()">取消</button>
      <button class="btn" id="imapBindBtn">连接并绑定</button>`);
+  wireAliasPreview('imapEmail', 'imapAliasTpl', 'imapAliasTplPreview');
   const btn = document.getElementById('imapBindBtn');
   if (btn) btn.onclick = () => submitImapBind();
 }
@@ -347,6 +351,45 @@ function openImapForm(prefill) {
 function getImapField(id) {
   const e = document.getElementById(id);
   return e ? e.value.trim() : '';
+}
+
+// ============ 别名规则模板辅助 ============
+// 每个邮箱可单独配置别名生成规则(打破全局硬编码 "+" 的限制):
+//   {local} 邮箱前缀, {domain} 域名, {label} 别名标签
+// 微软 / 2925 用 "{local}+{label}@{domain}";自建域名 catch-all 用 "{label}@{domain}"
+// 这些免费邮箱域名的加号子地址 / 通配域名都无法投递到同一收件箱,绑定后只能读信,禁止建别名
+const UNSUPPORTED_ALIAS_DOMAINS = ['qq.com','163.com','126.com','yeah.net','foxmail.com','sina.com','sina.cn','sohu.com','aliyun.com','139.com','189.cn','tom.com'];
+function aliasRuleFieldHTML(id, defaultTpl) {
+  return `
+    <div class="form-group">
+      <label class="form-label">别名规则模板</label>
+      <input type="text" id="${id}" class="form-control" value="${esc(defaultTpl)}" placeholder="{local}+{label}@{domain}">
+      <p class="form-hint" style="margin-top:6px">占位符：<code>{local}</code> 邮箱前缀、<code>{domain}</code> 域名、<code>{label}</code> 别名标签。微软 / 2925 用 <code>{local}+{label}@{domain}</code>；自建域名通配用 <code>{label}@{domain}</code>。留空则用默认加号形式。</p>
+      <p class="form-hint" id="${id}Preview" style="margin-top:6px"></p>
+    </div>`;
+}
+// 绑定别名规则实时预览。emailId 为空时用 fixedDomain 作为域名(如 Gmail OAuth 绑定前尚不知邮箱)
+function wireAliasPreview(emailId, tplId, previewId, fixedDomain) {
+  const emailEl = emailId ? document.getElementById(emailId) : null;
+  const tplEl = document.getElementById(tplId);
+  const prevEl = document.getElementById(previewId);
+  const update = () => {
+    if (!tplEl || !prevEl) return;
+    const email = emailEl ? emailEl.value.trim() : '';
+    const tpl = tplEl.value.trim() || '{local}+{label}@{domain}';
+    const m = /^(.*)@([^@]+)$/.exec(email);
+    const local = m ? m[1] : 'you';
+    const domain = m ? m[2] : (fixedDomain || 'domain.com');
+    const sample = tpl.replace(/\{local\}/g, local).replace(/\{domain\}/g, domain).replace(/\{label\}/g, '标签');
+    let html = '示例别名：<b>' + esc(sample) + '</b>';
+    if (UNSUPPORTED_ALIAS_DOMAINS.includes(domain.toLowerCase())) {
+      html += ' <span style="color:#dc2626">⚠ 该域名不支持别名收信，绑定后仅可读取收件箱，无法创建别名。</span>';
+    }
+    prevEl.innerHTML = html;
+  };
+  if (emailEl) emailEl.addEventListener('input', update);
+  if (tplEl) tplEl.addEventListener('input', update);
+  update();
 }
 
 async function submitImapBind() {
@@ -357,6 +400,7 @@ async function submitImapBind() {
   const user = getImapField('imapUser').replace(/\s+/g, '');
   const pass = getImapField('imapPass').replace(/\s+/g, '');
   const isPublic = document.getElementById('imapPublic') && document.getElementById('imapPublic').checked;
+  const aliasTpl = getImapField('imapAliasTpl');
   if (!email || !host || !user || !pass) { toast('请填写邮箱、服务器、用户名与应用密码', 'warning'); return; }
   const btn = document.getElementById('imapBindBtn');
   if (btn) { btn.disabled = true; btn.textContent = '连接测试中...'; }
@@ -370,6 +414,7 @@ async function submitImapBind() {
         imap_user: user,
         imap_pass: pass,
         is_public: !!isPublic,
+        alias_template: aliasTpl || undefined,
       },
     });
     toast('IMAP 邮箱绑定成功', 'success');
@@ -412,9 +457,11 @@ async function openGoogleBindForm() {
       <label class="form-label">Client Secret <span class="req">*</span></label>
       <input type="password" id="gcClientSecret" class="form-control" placeholder="GOCSPX-...">
       ${prefill.has_secret ? '<p class="form-hint" style="margin-top:6px">已保存过 Client Secret，若未改动可留空。</p>' : ''}
-    </div>`,
+    </div>
+    ${aliasRuleFieldHTML('gcAliasTpl', '{local}+{label}@gmail.com')}`,
     `<button class="btn btn-secondary" onclick="closeModal()">取消</button>
      <button class="btn" id="gcBindBtn">获取授权码并绑定</button>`);
+  wireAliasPreview(null, 'gcAliasTpl', 'gcAliasTplPreview', 'gmail.com');
   const btn = document.getElementById('gcBindBtn');
   if (btn) btn.onclick = () => submitGoogleBind();
 }
@@ -422,13 +469,15 @@ async function openGoogleBindForm() {
 async function submitGoogleBind() {
   const idEl = document.getElementById('gcClientId');
   const secEl = document.getElementById('gcClientSecret');
+  const tplEl = document.getElementById('gcAliasTpl');
   const cid = idEl ? idEl.value.trim() : '';
   const secret = secEl ? secEl.value.trim() : '';
+  const tpl = tplEl ? tplEl.value.trim() : '';
   if (!cid) { toast('请填写 Client ID', 'warning'); return; }
   const btn = document.getElementById('gcBindBtn');
   if (btn) { btn.disabled = true; btn.textContent = '获取授权码中...'; }
-  // 直接带着本次填写的凭据发起设备码(后端会同时保存到你账号下)
-  await startGoogleDeviceFlow(cid, secret);
+  // 直接带着本次填写的凭据发起设备码(后端会同时保存到你账号下);别名规则一并带入
+  await startGoogleDeviceFlow(cid, secret, tpl);
 }
 
 async function startDeviceAuth(provider) {
@@ -481,12 +530,12 @@ function afterBindSuccess() {
   if (typeof loadAvailableAccounts === 'function') loadAvailableAccounts();
 }
 
-async function startGoogleDeviceFlow(cid, secret) {
+async function startGoogleDeviceFlow(cid, secret, tpl) {
   let data;
   try {
     data = await api('/api/account/oauth/google/device', {
       method: 'POST',
-      body: { client_id: cid || undefined, client_secret: secret || undefined },
+      body: { client_id: cid || undefined, client_secret: secret || undefined, alias_template: tpl || undefined },
     });
   } catch (err) {
     toast(err.message, 'error', 5000);

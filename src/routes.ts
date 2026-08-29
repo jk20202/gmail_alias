@@ -348,8 +348,10 @@ export async function accountGoogleDeviceStart(ctx: Ctx): Promise<Response> {
     await db.saveUserGoogleCreds(ctx.env, user.id, cid, secretToSave);
     explicitCreds = { clientId: cid, clientSecret: secretToSave };
   }
+  // 别名规则模板(可空): 随设备码会话带入,落库到该 Gmail 账号,使 Gmail 可用非 "+" 的别名形式
+  const aliasTpl = typeof body.alias_template === 'string' ? body.alias_template.trim() : '';
   try {
-    const data = await startGoogleDeviceFlow(ctx.env, user.id, explicitCreds);
+    const data = await startGoogleDeviceFlow(ctx.env, user.id, explicitCreds, aliasTpl || null);
     return ok({ ...data, provider: 'gmail' });
   } catch (e) {
     return fail((e as Error).message);
@@ -618,6 +620,8 @@ export async function accountBindImap(ctx: Ctx): Promise<Response> {
   const imapPass = typeof body.imap_pass === 'string' ? body.imap_pass.trim() : '';
   const portRaw = parseInt(String(body.imap_port || '993'), 10);
   const isPublic = body.is_public === true;
+  // 别名规则模板(可空): 每个邮箱可单独配置别名生成规则,如 "{local}+{label}@{domain}" / "{label}@{domain}"
+  const aliasTemplate = typeof body.alias_template === 'string' ? body.alias_template.trim() : '';
 
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return fail('请填写有效的邮箱地址');
   if (!imapHost) return fail('请填写 IMAP 服务器地址');
@@ -633,7 +637,7 @@ export async function accountBindImap(ctx: Ctx): Promise<Response> {
   } catch (e) {
     return fail('IMAP 连接测试失败：' + (e as Error).message);
   }
-  const accountId = await db.addImapAccount(ctx.env, user.id, email, imapHost, portRaw, imapUser, encPass, isPublic);
+  const accountId = await db.addImapAccount(ctx.env, user.id, email, imapHost, portRaw, imapUser, encPass, isPublic, aliasTemplate || null);
   await db.addLog(ctx.env, user.id, user.username, email, 'bind_imap', `绑定了 IMAP 邮箱 ${email}`);
   return ok({ id: accountId, provider: 'imap', email });
 }

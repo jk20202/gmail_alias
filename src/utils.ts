@@ -154,11 +154,35 @@ export function splitEmail(email: string): { prefix: string; label: string | nul
   return { prefix, label: label || null, domain };
 }
 
-// 构建别名全地址
-export function buildAliasFull(email: string, label: string): string {
+// 常用「不支持别名收信」的免费邮箱域名(QQ/163 等):
+// 这类邮箱的加号子地址 / 通配域名都无法投递到同一收件箱,绑定后只能读取该收件箱,
+// 因此禁止在其下创建别名(见 db.createUserAlias 的服务端拦截,以及前端绑定表单的警告)。
+export const ALIAS_UNSUPPORTED_DOMAINS = [
+  'qq.com', '163.com', '126.com', 'yeah.net', 'foxmail.com',
+  'sina.com', 'sina.cn', 'sohu.com', 'aliyun.com', '139.com', '189.cn', 'tom.com',
+];
+export function isAliasUnsupportedDomain(domain: string): boolean {
+  return ALIAS_UNSUPPORTED_DOMAINS.includes((domain || '').toLowerCase());
+}
+
+// 别名规则模板: 支持占位符
+//   {local}  = 邮箱本地部分(如 me)
+//   {domain} = 域名(如 gmail.com)
+//   {label}  = 别名标签(用户填的随机串)
+// 例: 微软 / 2925 用 "{local}+{label}@{domain}"; 自建域名 catch-all 用 "{label}@{domain}"
+export function renderAliasTemplate(tpl: string, local: string, domain: string, label: string): string {
+  return tpl
+    .replace(/\{local\}/g, local)
+    .replace(/\{domain\}/g, domain)
+    .replace(/\{label\}/g, label);
+}
+
+// 构建别名全地址。template 为空时回退为加号形式(向后兼容旧数据)。
+export function buildAliasFull(email: string, label: string, template?: string | null): string {
   const { prefix, domain } = splitEmail(email);
   if (!prefix || !domain) return '';
-  return `${prefix}+${label}@${domain}`;
+  const tpl = template && template.trim() ? template.trim() : '{local}+{label}@{domain}';
+  return renderAliasTemplate(tpl, prefix, domain, label);
 }
 
 // HTML 转纯文本
