@@ -17,7 +17,7 @@ export const ALIAS_HISTORY_PAGE_SIZE = 10;
 // 因此这里做运行时的一次性迁移(用 KV 记录版本号,避免每次请求都跑 DDL)
 // 注意: 每次新增列 / 表,必须 +1 本版本号,否则 ensureSchema 会因 KV 已记录旧版本而直接返回,
 // 导致新迁移(如 users.google_client_id)在生产环境永远不执行。
-const SCHEMA_VERSION = '4';
+const SCHEMA_VERSION = '5';
 
 export async function ensureSchema(env: Env): Promise<void> {
   try {
@@ -85,6 +85,11 @@ export async function ensureSchema(env: Env): Promise<void> {
     await env.DB.prepare('ALTER TABLE mail_accounts ADD COLUMN alias_template TEXT').run();
   } catch { /* 列已存在 */ }
 
+  // mail_accounts 增加「用户备注」列(编辑弹窗里给邮箱加备注用,如"工作邮箱/主收信箱")
+  try {
+    await env.DB.prepare('ALTER TABLE mail_accounts ADD COLUMN notes TEXT').run();
+  } catch { /* 列已存在 */ }
+
   // 迁移旧版单别名数据 -> user_aliases(给 1 小时有效期,避免一升级就全部过期)
   // 注意:时间统一用 JS 生成的 ISO 字符串,不能用 SQLite 的 datetime('now')(格式不同会导致比较失效)
   try {
@@ -116,6 +121,7 @@ interface MailAccountRow {
   imap_host?: string | null; imap_port?: number | null;
   imap_user?: string | null; imap_pass?: string | null;
   alias_template?: string | null;
+  notes?: string | null;
 }
 interface AliasRow {
   user_id: string; mail_account_id: string; label: string;
@@ -149,6 +155,11 @@ function toSafeMailAccount(row: MailAccountRow): SafeMailAccount {
     token_masked: provider === 'imap'
       ? (row.imap_pass ? '应用密码' : '')
       : maskToken(row.access_token || ''),
+    // 别名规则模板 / 备注 / IMAP 连接(供前端编辑弹窗预填;不含密码)
+    alias_template: row.alias_template || null,
+    notes: row.notes || '',
+    imap_host: row.imap_host || null,
+    imap_port: row.imap_port || null,
   };
 }
 
@@ -540,6 +551,22 @@ export async function updateMailAccount(env: Env, userId: string, accountId: str
     await env.DB.prepare('UPDATE mail_accounts SET is_public = ? WHERE id = ? AND user_id = ?')
       .bind(isPublic ? 1 : 0, accountId, userId).run();
   }
+}
+
+// 更新邮箱的「别名规则模板 / 备注」等配置(不涉及重新授权)
+// 仅改这两项时前端走 PATCH,无需重走连接/授权流程
+export async function updateMailAccountConfig(
+  env: Env, userId: string, accountId: string,
+  opts: { aliasTemplate?: string | null; notes?: string | null },
+): Promise<void> {
+  const sets: string[] = [];
+  const binds: any[] = [];
+  if (opts.aliasTemplate !== undefined) { sets.push('alias_template = ?'); binds.push(opts.aliasTemplate || null); }
+  if (opts.notes !== undefined) { sets.push('notes = ?'); binds.push(opts.notes || null); }
+  if (!sets.length) return;
+  binds.push(accountId, userId);
+  await env.DB.prepare(`UPDATE mail_accounts SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`)
+    .bind(...binds).run();
 }
 
 export async function adminUpdateMailAccount(env: Env, accountId: string, isPublic?: boolean): Promise<void> {

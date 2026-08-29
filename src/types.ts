@@ -41,6 +41,10 @@ export interface SafeMailAccount {
   is_public: boolean;
   created_at: string;
   token_masked: string;       // 仅前4后4
+  alias_template?: string | null;  // 别名生成规则模板({local}/{domain}/{label})
+  notes?: string;                  // 用户备注
+  imap_host?: string | null;       // IMAP 连接信息(仅 IMAP 账号有,供编辑预填,不含密码)
+  imap_port?: number | null;
 }
 
 // 邮箱账号(含原始 token,内部用)

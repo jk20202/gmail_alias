@@ -108,15 +108,20 @@ function renderMyAccounts(list, box) {
   }
   box.innerHTML = `<div class="table-wrap"><table class="table">
     <thead><tr>
-      <th>邮箱</th><th>类型</th><th>Plus寻址</th><th>授权状态</th><th>是否公开</th><th>操作</th>
+      <th>邮箱</th>
+      <th title="绑定的协议/方式：IMAP（应用密码）或 OAuth（授权登录）">类型</th>
+      <th title="Plus 寻址（加号别名）：在邮箱本地名后加 +标签（如 me+shop@域名）也会收进同一邮箱，是无限别名的基础">Plus 寻址</th>
+      <th title="连接 / 授权是否有效">授权状态</th>
+      <th>是否公开</th>
+      <th>操作</th>
     </tr></thead>
     <tbody>${list.map(a => `
       <tr>
-        <td><span class="mono">${esc(a.email)}</span></td>
+        <td><span class="mono">${esc(a.email)}</span>${a.notes ? `<div class="row-note">${esc(a.notes)}</div>` : ''}</td>
         <td>${a.provider === 'imap'
           ? '<span class="badge" style="background:#7c3aed;color:#fff">IMAP</span>'
-          : `<span class="badge ${a.provider === 'gmail' ? 'badge-primary' : 'badge-warning'}">${esc(a.provider)}</span>`}</td>
-        <td><span class="badge badge-success">✓ 启用</span></td>
+          : '<span class="badge badge-primary">OAuth</span>'}</td>
+        <td>${plusAddrBadge(a)}</td>
         <td id="acc-status-${esc(a.id)}"><span class="badge badge-gray">检测中...</span></td>
         <td>
           <label class="switch" style="display:inline-flex; align-items:center; gap:6px; cursor:pointer">
@@ -126,12 +131,25 @@ function renderMyAccounts(list, box) {
           </label>
         </td>
         <td>
-          <button class="btn btn-secondary btn-sm" id="acc-reauth-${esc(a.id)}" onclick="reauthAccount('${esc(a.id)}','${esc(a.provider)}')">重新授权</button>
+          <button class="btn btn-secondary btn-sm" onclick="openEditAccount('${esc(a.id)}')">编辑</button>
           <button class="btn btn-danger btn-sm" onclick="deleteAccount('${esc(a.id)}','${esc(a.email)}')">删除</button>
         </td>
       </tr>`).join('')}</tbody>
   </table></div>`;
   list.forEach(a => probeAuthStatus(a.id));
+}
+
+// Plus 寻址(加号别名)状态徽章: 动态反映该邮箱是否支持别名收信
+function plusAddrBadge(a) {
+  const domain = (a.email.split('@')[1] || '').toLowerCase();
+  if (UNSUPPORTED_ALIAS_DOMAINS.includes(domain)) {
+    return '<span class="badge badge-danger" title="该域名不支持 + 别名收信，绑定后仅能读取收件箱，无法用于无限别名">✗ 不支持</span>';
+  }
+  const tpl = a.alias_template || '';
+  if (/\{label\}@\{domain\}/.test(tpl) && !/\{local\}\+/.test(tpl)) {
+    return '<span class="badge badge-success" title="独立域名通配别名（catch-all），如 标签@域名">✓ 通配别名</span>';
+  }
+  return '<span class="badge badge-success" title="加号别名（Plus 寻址），如 前缀+标签@域名">✓ 加号别名</span>';
 }
 
 async function probeAuthStatus(id) {
@@ -150,19 +168,6 @@ async function probeAuthStatus(id) {
     const btn = document.getElementById('acc-reauth-' + id);
     if (btn) btn.textContent = '继续授权';
   }
-}
-
-function reauthAccount(id, provider) {
-  if (provider === 'imap') {
-    const acc = (State.mailAccounts || []).find(a => a.id === id);
-    openImapForm(acc ? { email: acc.email } : {});
-    return;
-  }
-  if (provider === 'gmail') {
-    openGoogleBindForm();
-    return;
-  }
-  openBindModal(provider);
 }
 
 async function togglePublic(id, isPublic) {
@@ -301,15 +306,10 @@ function openImapForm(prefill) {
       <input type="number" id="imapPort" class="form-control" placeholder="993" value="${esc(prefill.imap_port || '993')}">
     </div>
     <div class="form-group">
-      <label class="form-label">IMAP 登录用户名 <span class="req">*</span></label>
-      <input type="text" id="imapUser" class="form-control" placeholder="通常就是你的完整邮箱" value="${esc(prefill.imap_user || '')}" autocomplete="off">
-      <p class="form-hint" style="margin-top:6px">绝大多数邮箱（含 Gmail / QQ / 163 / Outlook）此处填<strong>完整邮箱地址</strong>即可；仅少数企业邮箱登录 ID 与邮箱不同才需改。</p>
-    </div>
-    <div class="form-group">
       <label class="form-label">应用密码 <span class="req">*</span></label>
       <input type="password" id="imapPass" class="form-control" placeholder="16 位应用密码" autocomplete="new-password">
     </div>
-    ${aliasRuleFieldHTML('imapAliasTpl', '{local}+{label}@{domain}')}
+    ${aliasRuleFieldHTML('imapAliasTpl', prefill.alias_template || '{local}+{label}@{domain}')}
     <div class="form-group" style="margin-top:4px">
       <label class="switch" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
         <input type="checkbox" id="imapPublic" ${prefill.is_public ? 'checked' : ''}>
@@ -329,17 +329,6 @@ function openImapForm(prefill) {
     `<button class="btn btn-secondary" onclick="closeModal()">取消</button>
      <button class="btn" id="imapBindBtn">连接并绑定</button>`);
   wireAliasPreview('imapEmail', 'imapAliasTpl', 'imapAliasTplPreview');
-  // 用户名默认跟随邮箱输入,绝大多数邮箱此处就是完整邮箱,免去单独填写
-  const imapEmailEl = document.getElementById('imapEmail');
-  const imapUserEl = document.getElementById('imapUser');
-  if (imapEmailEl && imapUserEl) {
-    imapEmailEl.addEventListener('input', () => {
-      if (!imapUserEl.value || imapUserEl.dataset.touched !== '1') {
-        imapUserEl.value = imapEmailEl.value.trim();
-      }
-    });
-    imapUserEl.addEventListener('input', () => { imapUserEl.dataset.touched = '1'; });
-  }
   const btn = document.getElementById('imapBindBtn');
   if (btn) btn.onclick = () => submitImapBind();
 }
@@ -421,6 +410,88 @@ async function submitImapBind() {
   } catch (err) {
     toast(err.message, 'error', 6000);
     if (btn) { btn.disabled = false; btn.textContent = '连接并绑定'; }
+  }
+}
+
+/* ============ 编辑已绑定邮箱（合并「编辑」与「重新授权」） ============ */
+// 点击「编辑」打开:预填已有别名规则 / 备注,可直接保存(不改连接方式无需重新授权);
+// 若修改了连接方式(IMAP 服务器/密码,或重新 OAuth 授权),点「重新授权」走原绑定流程。
+async function openEditAccount(id) {
+  const acc = (State.mailAccounts || []).find(a => a.id === id);
+  if (!acc) { toast('未找到该邮箱', 'error'); return; }
+  const isImap = acc.provider === 'imap';
+  const domain = (acc.email.split('@')[1] || '').toLowerCase();
+  const defaultTpl = acc.alias_template || (isImap ? '{local}+{label}@{domain}' : '{local}+{label}@gmail.com');
+  const unsupported = UNSUPPORTED_ALIAS_DOMAINS.includes(domain);
+  const connInfo = isImap ? `
+    <div class="form-group">
+      <label class="form-label">当前 IMAP 连接</label>
+      <div class="readonly-box">${esc(acc.imap_host || '?')} : ${esc(String(acc.imap_port || '993'))}</div>
+      <p class="form-hint" style="margin-top:6px">要修改服务器、端口或密码，请点右下角「重新授权」重新连接并验证。</p>
+    </div>` : '';
+  showModal(`编辑邮箱 · ${esc(acc.email)}`, `
+    <p class="form-hint" style="margin:0 0 12px">可修改「别名生成方式」与「备注」。仅改这两项直接点 <b>保存</b> 即可，无需重新授权；若修改了连接方式（IMAP 服务器/密码或重新 OAuth 授权），请点 <b>重新授权</b>。</p>
+    ${aliasRuleFieldHTML('editAliasTpl', defaultTpl)}
+    ${connInfo}
+    <div class="form-group">
+      <label class="form-label">备注</label>
+      <input type="text" id="editNotes" class="form-control" value="${esc(acc.notes || '')}" placeholder="如：工作邮箱 / 主收信箱" autocomplete="off">
+    </div>
+    ${unsupported ? '<p class="form-hint" style="color:#dc2626">⚠ 该域名不支持别名收信，别名规则不生效，仅作记录保存。</p>' : ''}
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+    <button class="btn btn-outline" id="editReauthBtn">重新授权</button>
+    <button class="btn" id="editSaveBtn">保存</button>
+  `);
+  wireAliasPreview(null, 'editAliasTpl', 'editAliasTplPreview', domain);
+  const saveBtn = document.getElementById('editSaveBtn');
+  if (saveBtn) saveBtn.onclick = () => submitEditSave(id);
+  const reBtn = document.getElementById('editReauthBtn');
+  if (reBtn) reBtn.onclick = () => editReauth(acc);
+}
+
+// 仅保存「别名规则 / 备注」配置(不涉及重新授权)
+async function submitEditSave(id) {
+  const aliasTpl = getImapField('editAliasTpl');
+  const notes = getImapField('editNotes');
+  const btn = document.getElementById('editSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '保存中...'; }
+  try {
+    await api('/api/account/mail_accounts/' + id, {
+      method: 'PATCH',
+      body: {
+        alias_template: aliasTpl || undefined,
+        notes: notes || undefined,
+      },
+    });
+    toast('已保存', 'success');
+    closeModal();
+    loadMyAccounts(true);
+    if (typeof loadAvailableAccounts === 'function') loadAvailableAccounts();
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '保存'; }
+  }
+}
+
+// 「重新授权」：按协议走原绑定流程(预填已有信息,避免重填)
+function editReauth(acc) {
+  closeModal();
+  if (acc.provider === 'imap') {
+    openImapForm({
+      email: acc.email,
+      imap_host: acc.imap_host || '',
+      imap_port: acc.imap_port || '993',
+      alias_template: acc.alias_template || '',
+      is_public: acc.is_public,
+    });
+  } else if (acc.provider === 'gmail') {
+    openGoogleBindForm();
+  } else if (acc.provider === 'outlook') {
+    if (typeof startDeviceAuth === 'function') startDeviceAuth('outlook');
+  } else {
+    openBindModal(acc.provider);
   }
 }
 

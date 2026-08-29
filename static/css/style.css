@@ -125,6 +125,11 @@ select.form-control { cursor: pointer; }
 .badge-info { background: var(--info-light); color: var(--info); }
 .badge-gray { background: #f1f5f9; color: var(--text-light); }
 
+.btn-outline { background: #fff; color: var(--text); border: 1px solid var(--border-strong); }
+.btn-outline:hover { border-color: var(--primary); color: var(--primary); }
+.readonly-box { padding: 8px 12px; border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); font-family: var(--mono); font-size: 13px; color: var(--text); background: var(--bg-hover); }
+.row-note { font-size: 12px; color: var(--text-light); margin-top: 2px; }
+
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
 .table th { font-weight: 600; color: var(--text-light); background: #fafbfd; white-space: nowrap; }

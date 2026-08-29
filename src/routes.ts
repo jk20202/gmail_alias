@@ -593,6 +593,23 @@ export async function accountTogglePublic(ctx: Ctx): Promise<Response> {
   return ok(null);
 }
 
+// 更新自己邮箱的「别名规则模板 / 备注」配置(不涉及重新授权)
+// 路径 /api/account/mail_accounts/:id  (PATCH)
+export async function accountUpdateMailAccount(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const id = ctx.url.pathname.split('/').slice(-1)[0];
+  // 越权防护:校验邮箱归属(自己的)
+  const account = await db.getMailAccountRaw(ctx.env, user.id, id);
+  if (!account) return fail('无权操作该邮箱', 403);
+  const body = ctx.body || {};
+  const aliasTemplate = typeof body.alias_template === 'string' ? body.alias_template.trim() : undefined;
+  const notes = typeof body.notes === 'string' ? body.notes.trim() : undefined;
+  if (aliasTemplate === undefined && notes === undefined) return fail('没有需要更新的字段');
+  await db.updateMailAccountConfig(ctx.env, user.id, id, { aliasTemplate, notes });
+  await db.addLog(ctx.env, user.id, user.username, '', 'update_account', `邮箱 ${id} 更新别名规则/备注`);
+  return ok(null);
+}
+
 // 授权状态探测:校验 token 是否有效,前端列表「授权状态」列用
 // 路径 /api/account/mail_accounts/{id}/status, id 为倒数第二段
 export async function accountAuthStatus(ctx: Ctx): Promise<Response> {

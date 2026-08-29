@@ -69,6 +69,7 @@ const ROUTE_TABLE: RouteEntry[] = [
   buildRoute('POST', '/api/account/mail_accounts/imap', routes.accountBindImap),
   buildRoute('GET',  '/api/account/mail_accounts/:id/status', routes.accountAuthStatus),
   buildRoute('PUT',  '/api/account/mail_accounts/:id/public', routes.accountTogglePublic),
+  buildRoute('PATCH', '/api/account/mail_accounts/:id', routes.accountUpdateMailAccount),
   buildRoute('DELETE', '/api/account/mail_accounts/:id', routes.accountDeleteAccount),
   // 别名(多别名: 每用户最多 5 个同时生效,1 小时有效期,支持收藏与历史)
   buildRoute('GET',  '/api/account/aliases/limits',   routes.aliasLimits),
