@@ -188,6 +188,44 @@ export async function getUserById(env: Env, userId: string): Promise<SafeUser | 
   return row ? toSafeUser(env, row) : null;
 }
 
+// ---- 轻量用户查询(热路径优化) ----
+// toSafeUser() 内部有 3 次关联查询(mail_accounts / 主别名 / 别名计数),
+// 每个请求都跑会显著拖慢响应。绝大多数接口其实只需要 id / username / is_admin,
+// 因此这里提供一个不带关联数据的版本,并加 isolate 级内存缓存。
+export interface BasicUser {
+  id: string;
+  username: string;
+  is_admin: boolean;
+  disabled: boolean;
+  created_at: string;
+}
+
+const userCache = new Map<string, { user: BasicUser; ts: number }>();
+const USER_CACHE_TTL = 30_000; // 30 秒
+
+export async function getUserBasic(env: Env, userId: string): Promise<BasicUser | null> {
+  const hit = userCache.get(userId);
+  if (hit && Date.now() - hit.ts < USER_CACHE_TTL) return hit.user;
+  const row = await env.DB.prepare(
+    'SELECT id, username, is_admin, disabled, created_at FROM users WHERE id = ?'
+  ).bind(userId).first<{ id: string; username: string; is_admin: number; disabled: number; created_at: string }>();
+  if (!row) return null;
+  const user: BasicUser = {
+    id: row.id,
+    username: row.username,
+    is_admin: row.is_admin === 1,
+    disabled: row.disabled === 1,
+    created_at: row.created_at,
+  };
+  userCache.set(userId, { user, ts: Date.now() });
+  return user;
+}
+
+// 用户信息变更后调用,避免读到旧缓存
+export function invalidateUserCache(userId: string): void {
+  userCache.delete(userId);
+}
+
 export async function getUserByUsername(env: Env, username: string): Promise<UserRow | null> {
   return env.DB.prepare('SELECT * FROM users WHERE username = ?')
     .bind(username).first<UserRow>();
@@ -289,6 +327,20 @@ export async function getSessionUser(env: Env, token: string): Promise<SafeUser 
     await env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run();
   }
   return user;
+}
+
+// 热路径最轻量版:只把 session 解析成 userId,不做用户表查询。
+// KV 未命中时查一次 D1 并回填 KV(与会话有效期一致),后续请求即可零 D1 命中。
+export async function getSessionUserId(env: Env, token: string): Promise<string | null> {
+  if (!token) return null;
+  const cachedUserId = await env.KV.get(`sess:${token}`);
+  if (cachedUserId) return cachedUserId;
+  const row = await env.DB.prepare(
+    'SELECT user_id FROM sessions WHERE token = ? AND expires_at > ?'
+  ).bind(token, nowISO()).first<{ user_id: string }>();
+  if (!row) return null;
+  await env.KV.put(`sess:${token}`, row.user_id, { expirationTtl: SESSION_TTL_DAYS * 86400 });
+  return row.user_id;
 }
 
 export async function deleteSession(env: Env, token: string): Promise<void> {

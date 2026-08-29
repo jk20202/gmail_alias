@@ -80,6 +80,8 @@ const ROUTE_TABLE: RouteEntry[] = [
   buildRoute('POST', '/api/account/aliases/:id/favorite',    routes.aliasFavorite),
   buildRoute('DELETE', '/api/account/aliases/:id',           routes.aliasDelete),
   // OAuth (Gmail 走 Device Code;微软走 Device Code 轮询;Authorization Code 作为备用)
+  buildRoute('GET',  '/api/account/oauth/google/status',  routes.accountGoogleOAuthStatus),
+  buildRoute('POST', '/api/account/oauth/google/creds',    routes.accountSaveGoogleCreds),
   buildRoute('GET',  '/api/account/oauth/start', routes.accountOAuthStart),
   buildRoute('POST', '/api/account/oauth/google/device',        routes.accountGoogleDeviceStart),
   buildRoute('GET',  '/api/account/oauth/google/device/status', routes.accountGoogleDeviceStatus),

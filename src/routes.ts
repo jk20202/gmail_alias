@@ -20,7 +20,32 @@ export interface Ctx {
 }
 
 // ============ 中间件: 提取 session 用户 ============
+// 热路径优化: session -> userId(KV 缓存) -> 基础用户(isolate 内存缓存),
+// 不再每个请求都跑 toSafeUser() 里的 3 次关联查询(mail_accounts / 主别名 / 别名计数)。
+// 需要完整资料(含邮箱列表、别名)的接口请改用 requireSessionFull()。
 async function requireSession(ctx: Ctx): Promise<SafeUser> {
+  const auth = ctx.req.headers.get('Authorization') || '';
+  if (!auth.startsWith('Bearer ')) throw new HTTPError(401, '未登录或会话过期');
+  const token = auth.slice(7);
+  const userId = await db.getSessionUserId(ctx.env, token);
+  if (!userId) throw new HTTPError(401, '未登录或会话过期');
+  const basic = await db.getUserBasic(ctx.env, userId);
+  if (!basic) throw new HTTPError(401, '未登录或会话过期');
+  return {
+    id: basic.id,
+    username: basic.username,
+    api_key: '',
+    is_admin: basic.is_admin,
+    disabled: basic.disabled,
+    mail_accounts: [],
+    alias: null,
+    active_alias_count: 0,
+    created_at: basic.created_at,
+  };
+}
+
+// 需要完整用户资料(关联邮箱列表 / 别名)时使用
+async function requireSessionFull(ctx: Ctx): Promise<SafeUser> {
   const auth = ctx.req.headers.get('Authorization') || '';
   if (!auth.startsWith('Bearer ')) throw new HTTPError(401, '未登录或会话过期');
   const token = auth.slice(7);
@@ -145,7 +170,7 @@ export async function accountChangePassword(ctx: Ctx): Promise<Response> {
 }
 
 export async function authMe(ctx: Ctx): Promise<Response> {
-  const user = await requireSession(ctx);
+  const user = await requireSessionFull(ctx);
   return ok(user);
 }
 
@@ -264,7 +289,7 @@ export async function adminDeleteAccount(ctx: Ctx): Promise<Response> {
 
 // ============ Account 自助 ============
 export async function accountSelf(ctx: Ctx): Promise<Response> {
-  const user = await requireSession(ctx);
+  const user = await requireSessionFull(ctx);
   return ok(user);
 }
 
@@ -320,6 +345,30 @@ export async function adminGetOAuthConfig(ctx: Ctx): Promise<Response> {
   const status = await googleConfigStatus(ctx.env);
   const hasSecret = !!(await getGoogleCreds(ctx.env))?.clientSecret;
   return ok({ ...status, has_client_secret: hasSecret });
+}
+
+// 普通用户:查看 Google OAuth 凭据是否已配置(供绑定弹窗判断是否要现场填凭据)
+export async function accountGoogleOAuthStatus(ctx: Ctx): Promise<Response> {
+  await requireSession(ctx);
+  const status = await googleConfigStatus(ctx.env);
+  return ok(status);
+}
+
+// 普通用户:在绑定弹窗内当场提交 Google OAuth 凭据(全站共享,只需填一次)
+export async function accountSaveGoogleCreds(ctx: Ctx): Promise<Response> {
+  await requireSession(ctx);
+  const { client_id, client_secret } = ctx.body || {};
+  if (!client_id || typeof client_id !== 'string' || !client_id.trim()) {
+    return fail('请填写 Client ID');
+  }
+  if (!/^[0-9]+-[0-9a-z]+\.apps\.googleusercontent\.com$/i.test(client_id.trim())) {
+    return fail('Client ID 格式不正确,应形如 1234567890-xxxx.apps.googleusercontent.com');
+  }
+  if (!client_secret || typeof client_secret !== 'string' || !client_secret.trim()) {
+    return fail('请填写 Client Secret');
+  }
+  await saveGoogleCreds(ctx.env, client_id.trim(), client_secret.trim());
+  return ok(await googleConfigStatus(ctx.env));
 }
 
 export async function adminSaveOAuthConfig(ctx: Ctx): Promise<Response> {

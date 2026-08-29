@@ -110,12 +110,13 @@ function openCreateAliasModal() {
   }
 }
 
-async function genRandomLabelForModal() {
-  try {
-    const data = await api('/api/account/alias/random_label');
-    const el = document.getElementById('modalAliasLabel');
-    if (el) el.value = data.label;
-  } catch (err) { toast(err.message, 'error'); }
+// 随机别名标签:纯前端生成,不发网络请求(点骰子零延迟)
+function genRandomLabelForModal() {
+  const chars = 'abcdefghijkmnpqrstuvwxyz23456789'; // 去掉易混淆的 l/o/0/1
+  let s = '';
+  for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  const el = document.getElementById('modalAliasLabel');
+  if (el) el.value = s;
 }
 
 async function doCreateAlias(mailAccountId, label) {
@@ -185,9 +186,49 @@ function renderActiveAliases() {
         <button class="copy-icon-btn" title="复制别名地址" onclick="copyText('${esc(a.full)}')">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
         </button>
+        <button class="icon-btn warn" title="停用该别名（保留记录，可恢复）" onclick="deactivateAlias('${esc(a.id)}')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>
+        </button>
+        <button class="icon-btn danger" title="删除该别名" onclick="deleteAliasById('${esc(a.id)}','${esc(a.full)}')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+        </button>
       </div>
     </div>`;
   }).join('');
+}
+
+// 在生效列表中直接停用别名(保留历史,可恢复)
+async function deactivateAlias(id) {
+  try {
+    await api('/api/account/aliases/' + id + '/deactivate', { method: 'POST' });
+    toast('别名已停用，可在历史列表恢复', 'success');
+    await loadAliases();
+    if (MailState.selectedAliasId === id) resetMailView();
+    await loadAliasHistory(MailState.history.page);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+// 在生效列表中直接删除别名(不可恢复)
+async function deleteAliasById(id, full) {
+  confirmDialog(`确认删除别名 ${full}？删除后不可恢复`, async () => {
+    try {
+      await api('/api/account/aliases/' + id, { method: 'DELETE' });
+      toast('别名已删除', 'success');
+      await loadAliases();
+      if (MailState.selectedAliasId === id) resetMailView();
+      await loadAliasHistory(MailState.history.page);
+    } catch (err) { toast(err.message, 'error'); }
+  });
+}
+
+// 清空当前选中的邮件视图,回到空状态
+function resetMailView() {
+  MailState.selectedAliasId = '';
+  MailState.emails = [];
+  MailState.offset = 0;
+  MailState.hasMore = false;
+  renderMailList();
+  fetchMails();
 }
 
 function selectAlias(id) {

@@ -25,9 +25,11 @@ async function loadUsers() {
           <td>${u.alias ? '<span class="badge badge-success">' + esc(u.alias.full) + '</span>' : '-'}</td>
           <td>${fmtTime(u.created_at)}</td>
           <td>
-            <button class="btn btn-sm" onclick="showEditUserModal('${esc(u.id)}')">编辑</button>
-            ${u.is_admin ? '' : `<button class="btn ${u.disabled ? 'btn-secondary' : 'btn-warning'} btn-sm" onclick="toggleDisableUser('${esc(u.id)}', ${!u.disabled})">${u.disabled ? '启用' : '禁用'}</button>`}
-            ${u.is_admin ? '' : `<button class="btn btn-danger btn-sm" onclick="deleteUser('${esc(u.id)}','${esc(u.username)}')">删除</button>`}
+            <div class="actions">
+              <button class="btn btn-sm" onclick="showEditUserModal('${esc(u.id)}')">编辑</button>
+              ${u.is_admin ? '' : `<button class="btn ${u.disabled ? 'btn-secondary' : 'btn-warning'} btn-sm" onclick="toggleDisableUser('${esc(u.id)}', ${!u.disabled})">${u.disabled ? '启用' : '禁用'}</button>`}
+              ${u.is_admin ? '' : `<button class="btn btn-danger btn-sm" onclick="deleteUser('${esc(u.id)}','${esc(u.username)}')">删除</button>`}
+            </div>
           </td>
         </tr>`).join('')}</tbody>
     </table>`;

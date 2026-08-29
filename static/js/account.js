@@ -192,14 +192,15 @@ function openBindModal(provider) {
 
 function showAppPasswordInfo() {
   showModal('应用密码绑定（暂不支持）', `
-    <p>应用密码（App Password）是 Gmail 为开启两步验证的账号提供的 16 位专用密码，通常用于 IMAP / SMTP 客户端。</p>
-    <p class="form-hint" style="margin-top:10px">当前系统基于 Gmail API 通过 OAuth 收取邮件，尚未接入 IMAP 应用密码方式。如需使用应用密码，请后续关注更新。</p>`,
+    <p>应用密码（App Password）是 Gmail 为开启两步验证的账号提供的 16 位专用密码，仅用于 <b>IMAP / SMTP</b> 客户端。</p>
+    <p class="form-hint" style="margin-top:10px">当前系统通过 <b>Gmail API（OAuth 2.0）</b> 收取邮件，与应用密码走的 IMAP 通道完全不同。要在 Cloudflare Workers 上支持应用密码，需要额外实现一套完整的 IMAP 客户端（含 TLS、命令解析、收件轮询），工作量较大，且与现有 token 刷新机制不兼容。因此现阶段建议直接使用上方的「跳转授权 / 设备码」OAuth 方式绑定，体验一致且无需改代码。</p>`,
     '<button class="btn btn-secondary" onclick="closeModal()">知道了</button>');
 }
 
 /* ============ 跳转授权 ============ */
 let _oauthPopup = null;
 async function startRedirectAuth(provider) {
+  if (provider === 'gmail' && !(await ensureGoogleCreds('redirect'))) return;
   try {
     const data = await api('/api/account/oauth/start?provider=' + provider);
     closeModal();
@@ -210,9 +211,60 @@ async function startRedirectAuth(provider) {
 
 /* ============ 设备码授权 ============ */
 async function startDeviceAuth(provider) {
+  if (provider === 'gmail' && !(await ensureGoogleCreds('device'))) return;
   closeModal();
   if (provider === 'outlook') return startMsDeviceFlow();
   return startGoogleDeviceFlow();
+}
+
+// Gmail 绑定前确认凭据:已配置则直接继续;未配置则弹出填写框(普通用户无需进系统设置)
+async function ensureGoogleCreds(method) {
+  let configured = true;
+  try {
+    const st = await api('/api/account/oauth/google/status');
+    configured = !!st.configured;
+  } catch (e) { configured = true; } // 兜底:放行,让原接口给出中文报错
+  if (configured) return true;
+  showGoogleCredsForm(method);
+  return false;
+}
+
+function showGoogleCredsForm(method) {
+  showModal('填写 Google OAuth 凭据', `
+    <p class="form-hint" style="margin:0 0 12px">绑定 Gmail 需要先在 Google Cloud 创建「桌面应用」类型的 OAuth 客户端。填写并保存后即可立即授权（凭据全站共享，只需填一次）。</p>
+    <div class="form-group">
+      <label class="form-label">Client ID <span class="req">*</span></label>
+      <input type="text" id="gcClientId" class="form-control" placeholder="1234567890-xxxx.apps.googleusercontent.com">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Client Secret <span class="req">*</span></label>
+      <input type="password" id="gcClientSecret" class="form-control" placeholder="GOCSPX-...">
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">取消</button>
+     <button class="btn" id="gcSaveBtn">保存并继续</button>`);
+  const btn = document.getElementById('gcSaveBtn');
+  if (btn) btn.onclick = () => submitGoogleCreds(method);
+}
+
+async function submitGoogleCreds(method) {
+  const idEl = document.getElementById('gcClientId');
+  const secEl = document.getElementById('gcClientSecret');
+  const id = idEl ? idEl.value.trim() : '';
+  const secret = secEl ? secEl.value.trim() : '';
+  if (!id) { toast('请填写 Client ID', 'warning'); return; }
+  if (!secret) { toast('请填写 Client Secret', 'warning'); return; }
+  const btn = document.getElementById('gcSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '保存中...'; }
+  try {
+    await api('/api/account/oauth/google/creds', { method: 'POST', body: { client_id: id, client_secret: secret } });
+    toast('凭据已保存', 'success');
+    closeModal();
+    if (method === 'redirect') return startRedirectAuth('gmail');
+    return startDeviceAuth('gmail');
+  } catch (err) {
+    toast(err.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '保存并继续'; }
+  }
 }
 
 // 离开页面时停掉所有轮询
@@ -298,7 +350,8 @@ async function startMsDeviceFlow() {
     title: '绑定 Outlook / Hotmail',
     tip: '请在打开的页面中登录微软账号，并输入下面的授权码',
     user_code: data.user_code,
-    open_url: data.verification_url,
+    // 微软返回字段是 verification_uri(非 verification_url),容错两者
+    open_url: data.verification_uri || data.verification_url,
     expires_in: data.expires_in,
   });
   bindDevicePolling('/api/account/oauth/device/status', 'deviceTimer', afterBindSuccess);

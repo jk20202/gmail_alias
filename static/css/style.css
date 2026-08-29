@@ -76,6 +76,9 @@ button, input, select, textarea { font-family: inherit; }
 .btn-block { width: 100%; }
 .btn-ghost { background: transparent; color: var(--text-light); border-color: transparent; }
 .btn-ghost:hover { background: var(--bg-hover); color: var(--text); }
+/* 表格操作列:按钮统一对齐,等宽更整齐 */
+.table .actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.table .actions .btn { min-width: 56px; }
 .btn svg { width: 15px; height: 15px; flex: 0 0 auto; }
 
 .card {
@@ -490,6 +493,8 @@ select.form-control { cursor: pointer; }
 }
 .icon-btn:hover { background: var(--bg-hover); color: var(--text); }
 .icon-btn svg { width: 15px; height: 15px; }
+.icon-btn.danger:hover { color: #ef4444; border-color: #ef4444; background: rgba(239,68,68,.08); }
+.icon-btn.warn:hover { color: var(--warning); border-color: var(--warning); background: rgba(245,158,11,.08); }
 .dice-btn {
   width: 38px; height: 38px; flex: 0 0 38px;
   display: inline-flex; align-items: center; justify-content: center;
