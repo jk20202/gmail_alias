@@ -1,5 +1,5 @@
 // IMAP(应用密码)收信客户端 + 轻量 MIME 解析
-// 仅在 Worker 运行时(cloudflare:sockets 的 connect 全局)可用;本地 tsc 用 any 规避类型缺失。
+// 仅在 Worker 运行时(cloudflare:sockets 的 connect)可用;需 compatibility_date >= 2024-09-23(已在 wrangler.toml 配置)。
 // 设计要点:
 //   1) 全程以 Uint8Array 字节缓冲工作,IMAP 字面量 {N} 的 N 是字节数,避免 UTF-8 解码导致偏移错位。
 //   2) 解析 FETCH 响应时遇到 {N} 直接跳过 N 字节,括号配平不受信件正文里的 '(' ')' 影响。
@@ -8,8 +8,8 @@ import type { Env, Email, FetchParams } from './types';
 import { getImapAccountById } from './db';
 import { htmlToText, formatShanghaiTime } from './utils';
 
-/* global connect() (Cloudflare Sockets API) */
-const connect: (host: string, port: number, opts?: any) => any = (globalThis as any).connect;
+/* connect() from Cloudflare Sockets Runtime API (需 compatibility_date >= 2024-09-23) */
+import { connect } from 'cloudflare:sockets';
 
 export interface ImapConnConfig {
   host: string;
@@ -32,7 +32,7 @@ class ImapConnection {
     if (typeof connect !== 'function') {
       throw new Error('当前运行环境不支持 TCP 连接(connect),无法使用 IMAP');
     }
-    const socket = connect(cfg.host, cfg.port, { secureTransport: 'on', allowHalfOpen: false });
+    const socket = connect({ hostname: cfg.host, port: cfg.port }, { secureTransport: 'on', allowHalfOpen: false });
     const conn = new ImapConnection();
     conn.socket = socket;
     conn.reader = socket.readable.getReader();

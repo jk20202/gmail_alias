@@ -253,7 +253,7 @@ async function openGmailAppPasswordForm() {
     </div>
     <div class="form-group">
       <label class="form-label">Gmail 地址 <span class="req">*</span></label>
-      <input type="text" id="imapEmail" class="form-control" placeholder="you@gmail.com">
+      <input type="text" id="imapEmail" class="form-control" placeholder="you@gmail.com" autocomplete="off">
     </div>
     <div class="form-group">
       <label class="form-label">IMAP 服务器</label>
@@ -266,7 +266,7 @@ async function openGmailAppPasswordForm() {
     <p class="form-hint">IMAP 登录用户名即上方 Gmail 地址，无需单独填写；密码填 16 位应用密码。</p>
     <div class="form-group">
       <label class="form-label">应用密码 <span class="req">*</span></label>
-      <input type="password" id="imapPass" class="form-control" placeholder="16 位应用密码">
+      <input type="password" id="imapPass" class="form-control" placeholder="16 位应用密码" autocomplete="new-password">
     </div>
     ${aliasRuleFieldHTML('imapAliasTpl', '{local}+{label}@gmail.com')}
     <div class="form-group" style="margin-top:4px">
@@ -290,7 +290,7 @@ function openImapForm(prefill) {
     <p class="form-hint" style="margin:0 0 12px">使用应用密码（App Password）通过 IMAP 协议收信。无需 OAuth，适合 Gmail / Outlook / QQ / 163 等支持 IMAP 的邮箱。当前仅支持收信，不支持发信。注意：QQ / 163 等部分邮箱不支持别名收信（加号地址收不到），绑定后仅能读取该收件箱，无法用于无限别名。</p>
     <div class="form-group">
       <label class="form-label">邮箱地址 <span class="req">*</span></label>
-      <input type="text" id="imapEmail" class="form-control" placeholder="you@example.com" value="${esc(prefill.email || '')}">
+      <input type="text" id="imapEmail" class="form-control" placeholder="you@example.com" value="${esc(prefill.email || '')}" autocomplete="off">
     </div>
     <div class="form-group">
       <label class="form-label">IMAP 服务器 <span class="req">*</span></label>
@@ -302,12 +302,12 @@ function openImapForm(prefill) {
     </div>
     <div class="form-group">
       <label class="form-label">IMAP 登录用户名 <span class="req">*</span></label>
-      <input type="text" id="imapUser" class="form-control" placeholder="通常就是你的完整邮箱" value="${esc(prefill.imap_user || '')}">
+      <input type="text" id="imapUser" class="form-control" placeholder="通常就是你的完整邮箱" value="${esc(prefill.imap_user || '')}" autocomplete="off">
       <p class="form-hint" style="margin-top:6px">绝大多数邮箱（含 Gmail / QQ / 163 / Outlook）此处填<strong>完整邮箱地址</strong>即可；仅少数企业邮箱登录 ID 与邮箱不同才需改。</p>
     </div>
     <div class="form-group">
       <label class="form-label">应用密码 <span class="req">*</span></label>
-      <input type="password" id="imapPass" class="form-control" placeholder="16 位应用密码">
+      <input type="password" id="imapPass" class="form-control" placeholder="16 位应用密码" autocomplete="new-password">
     </div>
     ${aliasRuleFieldHTML('imapAliasTpl', '{local}+{label}@{domain}')}
     <div class="form-group" style="margin-top:4px">
@@ -448,11 +448,11 @@ async function openGoogleBindForm() {
     </details>
     <div class="form-group">
       <label class="form-label">Client ID <span class="req">*</span></label>
-      <input type="text" id="gcClientId" class="form-control" placeholder="1234567890-xxxx.apps.googleusercontent.com" value="${esc(prefill.client_id)}">
+      <input type="text" id="gcClientId" class="form-control" placeholder="1234567890-xxxx.apps.googleusercontent.com" value="${esc(prefill.client_id)}" autocomplete="off">
     </div>
     <div class="form-group">
       <label class="form-label">Client Secret <span class="req">*</span></label>
-      <input type="password" id="gcClientSecret" class="form-control" placeholder="GOCSPX-...">
+      <input type="password" id="gcClientSecret" class="form-control" placeholder="GOCSPX-..." autocomplete="new-password">
       ${prefill.has_secret ? '<p class="form-hint" style="margin-top:6px">已保存过 Client Secret，若未改动可留空。</p>' : ''}
     </div>
     ${aliasRuleFieldHTML('gcAliasTpl', '{local}+{label}@gmail.com')}`,
