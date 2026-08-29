@@ -1,6 +1,6 @@
 // Worker 入口 - 路由分发 + 错误处理 + CORS + 静态资源托管
 import type { Env } from './types';
-import { initDB } from './db';
+import { initDB, ensureSchema } from './db';
 import * as routes from './routes';
 import { HTTPError, type Ctx } from './routes';
 import { getActiveWebhookAccountIds } from './db';
@@ -65,12 +65,26 @@ const ROUTE_TABLE: RouteEntry[] = [
   buildRoute('GET',  '/api/account/mail_accounts/:id/status', routes.accountAuthStatus),
   buildRoute('PUT',  '/api/account/mail_accounts/:id/public', routes.accountTogglePublic),
   buildRoute('DELETE', '/api/account/mail_accounts/:id', routes.accountDeleteAccount),
-  // OAuth (Gmail 走 Authorization Code 回调;微软走 Device Code 轮询,无需回调)
+  // 别名(多别名: 每用户最多 5 个同时生效,1 小时有效期,支持收藏与历史)
+  buildRoute('GET',  '/api/account/aliases/limits',   routes.aliasLimits),
+  buildRoute('GET',  '/api/account/aliases/history',  routes.aliasHistory),
+  buildRoute('GET',  '/api/account/aliases',          routes.aliasListActive),
+  buildRoute('POST', '/api/account/aliases',          routes.aliasCreate),
+  buildRoute('POST', '/api/account/aliases/:id/restore',    routes.aliasRestore),
+  buildRoute('POST', '/api/account/aliases/:id/renew',       routes.aliasRenew),
+  buildRoute('POST', '/api/account/aliases/:id/deactivate',  routes.aliasDeactivate),
+  buildRoute('POST', '/api/account/aliases/:id/favorite',    routes.aliasFavorite),
+  buildRoute('DELETE', '/api/account/aliases/:id',           routes.aliasDelete),
+  // OAuth (Gmail 走 Device Code;微软走 Device Code 轮询;Authorization Code 作为备用)
   buildRoute('GET',  '/api/account/oauth/start', routes.accountOAuthStart),
+  buildRoute('POST', '/api/account/oauth/google/device',        routes.accountGoogleDeviceStart),
+  buildRoute('GET',  '/api/account/oauth/google/device/status', routes.accountGoogleDeviceStatus),
   buildRoute('POST', '/api/account/oauth/device',       routes.accountDeviceStart),
   buildRoute('GET',  '/api/account/oauth/device/status', routes.accountDeviceStatus),
   buildRoute('GET',  '/oauth/callback',          routes.oauthCallback),
-  // 别名
+  buildRoute('GET',  '/api/admin/oauth/config',  routes.adminGetOAuthConfig),
+  buildRoute('PUT',  '/api/admin/oauth/config',  routes.adminSaveOAuthConfig),
+  // 别名(兼容旧接口)
   buildRoute('POST', '/api/account/alias',       routes.accountSetAlias),
   buildRoute('GET',  '/api/account/alias/random_label', routes.accountRandomLabel),
   // 邮件查询
@@ -83,6 +97,7 @@ const ROUTE_TABLE: RouteEntry[] = [
   buildRoute('POST', '/api/webhooks',            routes.webhookCreate),
   buildRoute('DELETE', '/api/webhooks/:id',      routes.webhookDelete),
   buildRoute('POST', '/api/webhooks/:id/test',   routes.webhookTest),
+  buildRoute('POST', '/api/webhooks/:id/format', routes.webhookSetFormat),
   buildRoute('GET',  '/api/webhook/poll',        routes.webhookPoll),
 ];
 
@@ -98,8 +113,9 @@ function matchRoute(method: string, pathname: string): RouteEntry | null {
 // Worker fetch handler
 export default {
   async fetch(req: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
-    // 1. 初始化数据库(默认管理员)
-    try { await initDB(env); } catch { /* 已初始化则忽略 */ }
+    // 1. 初始化数据库(默认管理员)+ 一次性 schema 迁移(多别名表等)
+    try { await initDB(env); } catch (e) { console.error('INIT_DB_ERR', e); }
+    try { await ensureSchema(env); } catch (e) { console.error('ENSURE_SCHEMA_ERR', e); }
     // 2. CORS 预检
     if (req.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
@@ -154,6 +170,7 @@ export default {
   // 每分钟自动轮询所有有活跃 webhook 的邮箱账号,拉取新邮件并推送
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     try {
+      try { await ensureSchema(env); } catch { /* ignore */ }
       const accountIds = await getActiveWebhookAccountIds(env);
       if (accountIds.length === 0) return;
       // 并发轮询所有账号 (Cloudflare Workers 支持)

@@ -11,8 +11,14 @@ export async function fetchEmails(env: Env, accountId: string, params: FetchPara
     ? await fetchGmailEmails(token, params)
     : await fetchOutlookEmails(token, params);
 
+  let result = emails.map(e => ({
+    ...e,
+    // 正文与 HTML 兜底互补,保证模糊搜索不会漏
+    body: e.body || (e.html ? htmlToText(e.html) : ''),
+    attachments: Array.isArray(e.attachments) ? e.attachments : [],
+  }));
+
   // 统一过滤(两种 API 都可能返回多余数据,本地二次过滤保证准确)
-  let result = emails;
   if (params.to) {
     const toLower = params.to.toLowerCase();
     result = result.filter(e => e.to.toLowerCase().includes(toLower));
@@ -30,21 +36,32 @@ export async function fetchEmails(env: Env, accountId: string, params: FetchPara
       return true;
     }
   });
-  // 关键字
-  if (params.keyword) {
-    const kw = params.keyword.toLowerCase();
-    result = result.filter(e =>
-      e.subject.toLowerCase().includes(kw)
-      || e.body.toLowerCase().includes(kw)
-      || e.from.toLowerCase().includes(kw)
-      || e.to.toLowerCase().includes(kw)
-    );
+  // 关键字(兼容旧参数) + 统一模糊搜索 q
+  const kw = (params.q || params.keyword || '').trim().toLowerCase();
+  if (kw) {
+    result = result.filter(e => matchFuzzy(e, kw));
   }
   // 排序:时间倒序
   result.sort((a, b) => (b.date_iso || '').localeCompare(a.date_iso || ''));
   if (params.limit) result = result.slice(0, params.limit);
   // 标记 provider
   return result.map(e => ({ ...e, provider }));
+}
+
+// 全文模糊匹配: 发件人 / 收件人 / 主题 / 正文 / HTML / 附件名
+function matchFuzzy(e: Email, kw: string): boolean {
+  if (
+    e.subject.toLowerCase().includes(kw)
+    || e.body.toLowerCase().includes(kw)
+    || e.from.toLowerCase().includes(kw)
+    || e.to.toLowerCase().includes(kw)
+  ) return true;
+  if (e.html && e.html.toLowerCase().includes(kw)) return true;
+  const atts = e.attachments || [];
+  for (const a of atts) {
+    if (a && a.toLowerCase().includes(kw)) return true;
+  }
+  return false;
 }
 
 export async function markEmailsRead(env: Env, accountId: string, sender?: string, subject?: string): Promise<number> {
@@ -61,16 +78,18 @@ interface GmailMessage {
   payload?: {
     headers?: Array<{ name: string; value: string }>;
     parts?: Array<GmailMessagePart>;
-    body?: { data?: string; text?: string };
+    body?: { data?: string; text?: string; attachmentId?: string };
     mimeType?: string;
+    filename?: string;
   };
   snippet?: string;
 }
 interface GmailMessagePart {
   headers?: Array<{ name: string; value: string }>;
   parts?: Array<GmailMessagePart>;
-  body?: { data?: string; text?: string };
+  body?: { data?: string; text?: string; attachmentId?: string };
   mimeType?: string;
+  filename?: string;
 }
 
 // Gmail 搜索语法 (q 参数): from:xxx to:xxx subject:xxx is:unread after:1234567890
@@ -95,10 +114,12 @@ function buildGmailQuery(params: FetchParams): string {
 
 async function fetchGmailEmails(token: string, params: FetchParams): Promise<Email[]> {
   // 1. 搜索消息 ID 列表
+  //    有模糊搜索词时多拉一些候选,避免结果被 limit 截断导致搜不到
+  const wideFactor = (params.q || params.keyword) ? 5 : 3;
   const q = buildGmailQuery(params);
   const listUrl = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages');
   listUrl.searchParams.set('q', q);
-  listUrl.searchParams.set('maxResults', String(Math.min(params.limit * 3 || 100, 500)));
+  listUrl.searchParams.set('maxResults', String(Math.min((params.limit || 50) * wideFactor, 500)));
   const listResp = await fetch(listUrl, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -111,7 +132,7 @@ async function fetchGmailEmails(token: string, params: FetchParams): Promise<Ema
   if (messages.length === 0) return [];
 
   // 2. 批量拉取消息详情(并发,控制 5 个一批)
-  const ids = messages.map(m => m.id).slice(0, params.limit ? params.limit * 3 : 100);
+  const ids = messages.map(m => m.id).slice(0, Math.min((params.limit || 50) * wideFactor, 500));
   const batches: string[][] = [];
   for (let i = 0; i < ids.length; i += 5) batches.push(ids.slice(i, i + 5));
 
@@ -153,12 +174,34 @@ function parseGmailMessage(msg: GmailMessage): Email {
     } catch { dateDisplay = dateRaw; }
   }
 
-  // 解析 body (递归查找 text/plain 和 text/html)
+  // 解析 body (递归查找 text/plain 和 text/html) + 收集附件名
   let bodyText = '';
   let htmlText = '';
+  const attachments: string[] = [];
+  const pushAttachment = (name?: string): void => {
+    if (name && attachments.indexOf(name) === -1) attachments.push(name);
+  };
+  // 从 Content-Disposition / Content-Type 头里兜底取附件名
+  const nameFromHeaders = (part: GmailMessagePart): string => {
+    for (const h of part.headers || []) {
+      const hn = (h.name || '').toLowerCase();
+      if (hn !== 'content-disposition' && hn !== 'content-type') continue;
+      const m = /filename\*?\s*=\s*(?:UTF-8''|"?)([^";]+)"?/i.exec(h.value || '');
+      if (m && m[1]) {
+        try { return decodeURIComponent(m[1].trim()); } catch { return m[1].trim(); }
+      }
+    }
+    return '';
+  };
   const walk = (part?: GmailMessagePart): void => {
     if (!part) return;
     const mime = part.mimeType || '';
+    const fname = part.filename || nameFromHeaders(part);
+    if (fname) pushAttachment(fname);
+    else if (/^multipart\//.test(mime) === false && mime && mime !== 'text/plain' && mime !== 'text/html'
+      && (part.body?.attachmentId || /^application\//.test(mime) || /^image\//.test(mime))) {
+      pushAttachment('(未命名附件)');
+    }
     if (mime === 'text/plain' && part.body?.data && !bodyText) {
       bodyText = decodeBase64Url(part.body.data);
     } else if (mime === 'text/html' && part.body?.data && !htmlText) {
@@ -168,6 +211,7 @@ function parseGmailMessage(msg: GmailMessage): Email {
   };
   walk(msg.payload as GmailMessagePart | undefined);
   if (!bodyText && htmlText) bodyText = htmlToText(htmlText);
+  if (!bodyText && msg.snippet) bodyText = msg.snippet;
 
   return {
     id: msgId,
@@ -177,6 +221,7 @@ function parseGmailMessage(msg: GmailMessage): Email {
     body: bodyText,
     html: htmlText,
     unread: false, // Gmail API 不在消息体里返回未读,需用 labels 字段;此处先用 false
+    attachments,
   };
 }
 
@@ -249,6 +294,8 @@ interface GraphMessage {
   bodyPreview?: string;
   isRead?: boolean;
   internetMessageId?: string;
+  hasAttachments?: boolean;
+  attachments?: Array<{ name?: string }>;
 }
 
 // OData $filter 语法
@@ -277,28 +324,47 @@ function buildGraphSearch(params: FetchParams): string | undefined {
 }
 
 async function fetchOutlookEmails(token: string, params: FetchParams): Promise<Email[]> {
-  const url = new URL('https://graph.microsoft.com/v1.0/me/messages');
-  // 选字段减少流量
-  url.searchParams.set('$select', 'id,internetMessageId,from,toRecipients,subject,receivedDateTime,body,bodyPreview,isRead');
-  url.searchParams.set('$top', String(Math.min(params.limit || 50, 100)));
-  url.searchParams.set('$orderby', 'receivedDateTime desc');
-
-  const filter = buildGraphFilter(params);
-  if (filter) url.searchParams.set('$filter', filter);
-  // 注意: $search 和 $filter 不能同时用
-  const search = !filter ? buildGraphSearch(params) : undefined;
-  if (search) url.searchParams.set('$search', search);
+  // 有模糊搜索词时多拉候选,避免结果被 limit 截断
+  const wideFactor = (params.q || params.keyword) ? 3 : 1;
+  const top = Math.min(Math.max(params.limit || 50, 25) * wideFactor, 100);
+  // $expand 展开附件名(Graph 支持);失败时自动降级为不带 expand 的请求
+  const useExpand = true;
+  const build = (withExpand: boolean): URL => {
+    const u = new URL('https://graph.microsoft.com/v1.0/me/messages');
+    // 选字段减少流量
+    u.searchParams.set('$select', 'id,internetMessageId,from,toRecipients,subject,receivedDateTime,body,bodyPreview,isRead,hasAttachments');
+    if (withExpand) u.searchParams.set('$expand', 'attachments($select=id,name,size)');
+    u.searchParams.set('$top', String(top));
+    u.searchParams.set('$orderby', 'receivedDateTime desc');
+    const f = buildGraphFilter(params);
+    if (f) u.searchParams.set('$filter', f);
+    // 注意: $search 和 $filter 不能同时用
+    const s = !f ? buildGraphSearch(params) : undefined;
+    if (s) u.searchParams.set('$search', s);
+    return u;
+  };
 
   const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
-  if (search) headers['ConsistencyLevel'] = 'eventual';
-
-  const resp = await fetch(url, { headers });
+  let resp = await fetch(build(useExpand), { headers });
+  if (!resp.ok && useExpand) {
+    // 降级重试
+    const retry = build(false);
+    if (retry.searchParams.get('$search')) headers['ConsistencyLevel'] = 'eventual';
+    resp = await fetch(retry, { headers });
+  }
   if (!resp.ok) {
     const err = await resp.json() as { error?: { message?: string } };
     throw new Error(`Graph API error: ${err.error?.message || resp.status}`);
   }
   const data = await resp.json() as { value?: GraphMessage[] };
   return (data.value || []).map(parseGraphMessage);
+}
+
+// 附件名兜底:Graph 未返回 attachments 但标记了 hasAttachments
+function graphAttachments(msg: GraphMessage): string[] {
+  const names = (msg.attachments || []).map(a => a && a.name ? a.name : '').filter(Boolean);
+  if (!names.length && msg.hasAttachments) return ['(含附件)'];
+  return names;
 }
 
 function parseGraphMessage(msg: GraphMessage): Email {
@@ -322,6 +388,7 @@ function parseGraphMessage(msg: GraphMessage): Email {
       : htmlToText(msg.body?.content || ''),
     html: msg.body?.contentType === 'html' ? (msg.body.content || '') : '',
     unread: msg.isRead === false,
+    attachments: graphAttachments(msg),
   };
 }
 

@@ -3,10 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="别名邮箱管理系统 - 多别名邮箱、邮件聚合查询、Webhook 卡片推送">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <title>别名邮箱管理系统</title>
 <link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234f46e5'/><text x='16' y='23' font-size='19' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'>A</text></svg>">
 </head>
 <body>
 
@@ -16,33 +18,31 @@
     <div class="brand">
       <div class="logo">A</div>
       <h1>别名邮箱管理系统</h1>
-      <p>多邮箱别名 · 邮件查询 · Webhook 推送</p>
+      <p>多别名邮箱 · 邮件聚合查询 · Webhook 卡片推送</p>
     </div>
     <div id="loginError" class="login-error"></div>
     <div class="login-tabs">
       <button id="tabLogin" class="active" onclick="switchLoginTab('login')">登录</button>
       <button id="tabRegister" onclick="switchLoginTab('register')">注册</button>
     </div>
-    <!-- 登录表单 -->
     <form id="loginForm" onsubmit="doLogin(event); return false;">
       <div class="form-group">
-        <label class="form-label">用户名</label>
+        <label class="form-label" for="loginUsername">用户名</label>
         <input type="text" id="loginUsername" class="form-control" placeholder="请输入用户名" autocomplete="username" required>
       </div>
       <div class="form-group">
-        <label class="form-label">密码</label>
+        <label class="form-label" for="loginPassword">密码</label>
         <input type="password" id="loginPassword" class="form-control" placeholder="请输入密码" autocomplete="current-password" required>
       </div>
       <button type="submit" class="btn btn-block">登录</button>
     </form>
-    <!-- 注册表单 -->
     <form id="registerForm" class="hidden" onsubmit="doRegister(event); return false;">
       <div class="form-group">
-        <label class="form-label">用户名 <span class="req">*</span></label>
+        <label class="form-label" for="regUsername">用户名 <span class="req">*</span></label>
         <input type="text" id="regUsername" class="form-control" placeholder="至少 3 个字符" required>
       </div>
       <div class="form-group">
-        <label class="form-label">密码 <span class="req">*</span></label>
+        <label class="form-label" for="regPassword">密码 <span class="req">*</span></label>
         <input type="password" id="regPassword" class="form-control" placeholder="至少 6 个字符" required>
       </div>
       <button type="submit" class="btn btn-block">注册</button>
@@ -50,25 +50,46 @@
   </div>
 </div>
 
-<!-- ============ 主应用 ============ -->
+<!-- ============ 主应用: 左侧导航 + 右侧内容 ============ -->
 <div id="appView" class="app hidden">
-  <header class="app-header">
-    <div class="app-header-inner">
-      <div class="app-logo">
-        <span class="mark">A</span>
-        <span>别名邮箱管理</span>
-      </div>
-      <nav class="app-nav" id="appNav"></nav>
-      <div class="app-user">
-        <div class="meta">
-          <div class="name" id="navUsername"></div>
-          <div class="role" id="navRole"></div>
-        </div>
-        <button class="btn btn-secondary btn-sm" onclick="doLogout()">登出</button>
+  <div class="sidebar-mask" id="sidebarMask" onclick="toggleSidebar(false)"></div>
+
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <span class="mark">A</span>
+      <span>
+        <div class="name">别名邮箱</div>
+        <div class="slogan">Mail Alias System</div>
+      </span>
+    </div>
+    <nav class="sidebar-nav" id="appNav" aria-label="主导航"></nav>
+    <div class="sidebar-footer">
+      <div class="user-chip">
+        <span class="avatar" id="navAvatar">U</span>
+        <span class="u-meta">
+          <div class="u-name" id="navUsername"></div>
+          <div class="u-role" id="navRole"></div>
+        </span>
+        <button class="icon-btn" title="登出" onclick="doLogout()" aria-label="登出">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
       </div>
     </div>
-  </header>
-  <main class="app-main" id="appMain"></main>
+  </aside>
+
+  <div class="app-body">
+    <header class="topbar">
+      <button class="icon-btn sidebar-toggle" onclick="toggleSidebar(true)" aria-label="展开菜单">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <div>
+        <div class="t-title" id="topbarTitle">邮件查询</div>
+        <div class="t-desc" id="topbarDesc">聚合查询所有生效别名邮箱的收件</div>
+      </div>
+      <div class="t-actions" id="topbarActions"></div>
+    </header>
+    <main class="app-main" id="appMain"></main>
+  </div>
 </div>
 
 <div id="toastBox"></div>

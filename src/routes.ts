@@ -1,7 +1,10 @@
 // 所有 HTTP 路由处理 - 按模块分组,每个函数接收 ctx 返回 Response
-import type { Env, SafeUser, FetchParams } from './types';
+import type { Env, SafeUser, FetchParams, Email } from './types';
 import * as db from './db';
-import { buildAuthURL, handleOAuthCallback, checkAccountAuthStatus, startDeviceFlow, pollDeviceFlow } from './oauth';
+import {
+  buildAuthURL, handleOAuthCallback, checkAccountAuthStatus, startDeviceFlow, pollDeviceFlow,
+  startGoogleDeviceFlow, pollGoogleDeviceFlow, getGoogleCreds, saveGoogleCreds, googleConfigStatus,
+} from './oauth';
 import { fetchEmails, markEmailsRead } from './emailService';
 import { sha256, randomLabel } from './utils';
 import { pollAndPush, sendTestEvent } from './webhook';
@@ -279,13 +282,159 @@ export async function accountListAccounts(ctx: Ctx): Promise<Response> {
   return ok(accounts);
 }
 
-// 启动 OAuth 绑定
+// 启动 OAuth 绑定 (Authorization Code Flow)
+// Gmail 默认不再走这条链路(改用 Device Code),此处保留给自建应用使用
 export async function accountOAuthStart(ctx: Ctx): Promise<Response> {
   const user = await requireSession(ctx);
   const provider = ctx.url.searchParams.get('provider') as 'gmail' | 'outlook';
   if (provider !== 'gmail' && provider !== 'outlook') return fail('provider 必须为 gmail 或 outlook');
-  const authUrl = await buildAuthURL(ctx.env, user.id, provider);
-  return ok({ auth_url: authUrl, provider });
+  try {
+    const authUrl = await buildAuthURL(ctx.env, user.id, provider);
+    return ok({ auth_url: authUrl, provider });
+  } catch (e) {
+    // 未配置凭据等场景:直接把中文原因返回给前端,不再让用户跳到 Google 的 401 页面
+    return fail((e as Error).message);
+  }
+}
+
+// Gmail: Device Code Flow 授权(推荐,无需回调地址)
+export async function accountGoogleDeviceStart(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  try {
+    const data = await startGoogleDeviceFlow(ctx.env, user.id);
+    return ok({ ...data, provider: 'gmail' });
+  } catch (e) {
+    return fail((e as Error).message);
+  }
+}
+
+export async function accountGoogleDeviceStatus(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const result = await pollGoogleDeviceFlow(ctx.env, user.id);
+  return ok(result);
+}
+
+// 管理员:查看 / 保存 Google OAuth 凭据(加密落库,优先于环境变量)
+export async function adminGetOAuthConfig(ctx: Ctx): Promise<Response> {
+  await requireAdmin(ctx);
+  const status = await googleConfigStatus(ctx.env);
+  const hasSecret = !!(await getGoogleCreds(ctx.env))?.clientSecret;
+  return ok({ ...status, has_client_secret: hasSecret });
+}
+
+export async function adminSaveOAuthConfig(ctx: Ctx): Promise<Response> {
+  const admin = await requireAdmin(ctx);
+  const { client_id, client_secret } = ctx.body || {};
+  if (client_id !== undefined && typeof client_id !== 'string') return fail('参数格式错误');
+  if (client_secret !== undefined && typeof client_secret !== 'string') return fail('参数格式错误');
+  if (client_id && !/^[0-9]+-[0-9a-z]+\.apps\.googleusercontent\.com$/i.test(client_id.trim())) {
+    return fail('Client ID 格式不正确,应形如 1234567890-xxxx.apps.googleusercontent.com');
+  }
+  await saveGoogleCreds(ctx.env, (client_id || '').trim(), (client_secret || '').trim());
+  await db.addLog(ctx.env, admin.id, admin.username, '', 'update_oauth', '更新了 Google OAuth 凭据');
+  return ok(await googleConfigStatus(ctx.env));
+}
+
+// ============ 多别名 (每用户最多 5 个同时生效) ============
+export async function aliasLimits(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const active = await db.listActiveAliases(ctx.env, user.id);
+  return ok({
+    max: db.MAX_ACTIVE_ALIASES,
+    ttl_ms: db.ALIAS_TTL_MS,
+    history_keep: db.ALIAS_HISTORY_KEEP,
+    history_page_size: db.ALIAS_HISTORY_PAGE_SIZE,
+    active_count: active.length,
+  });
+}
+
+export async function aliasListActive(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const list = await db.listActiveAliases(ctx.env, user.id);
+  return ok({
+    list,
+    max: db.MAX_ACTIVE_ALIASES,
+    ttl_ms: db.ALIAS_TTL_MS,
+  });
+}
+
+export async function aliasCreate(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const { mail_account_id, label } = ctx.body || {};
+  if (!mail_account_id) return fail('请选择主邮箱');
+  if (!label || !String(label).trim()) return fail('别名标签不能为空');
+  const { alias, err } = await db.createUserAlias(ctx.env, user.id, mail_account_id, String(label).trim());
+  if (err) return fail(err);
+  await db.addLog(ctx.env, user.id, user.username, alias?.full || '', 'create_alias', `创建了别名 ${alias?.full}`);
+  return ok(alias);
+}
+
+export async function aliasHistory(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const page = parseInt(ctx.url.searchParams.get('page') || '1', 10);
+  const pageSize = parseInt(ctx.url.searchParams.get('page_size') || String(db.ALIAS_HISTORY_PAGE_SIZE), 10);
+  const keyword = ctx.url.searchParams.get('keyword') || '';
+  const result = await db.listAliasHistory(ctx.env, user.id, keyword, page, pageSize);
+  return ok({
+    ...result,
+    max: db.MAX_ACTIVE_ALIASES,
+    history_keep: db.ALIAS_HISTORY_KEEP,
+  });
+}
+
+export async function aliasRestore(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const id = ctx.url.pathname.split('/').slice(-2, -1)[0];
+  const { alias, err } = await db.restoreAlias(ctx.env, user.id, id);
+  if (err) return fail(err);
+  await db.addLog(ctx.env, user.id, user.username, alias?.full || '', 'restore_alias', `恢复启用别名 ${alias?.full}`);
+  return ok(alias);
+}
+
+export async function aliasRenew(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const id = ctx.url.pathname.split('/').slice(-2, -1)[0];
+  const { alias, err } = await db.renewAlias(ctx.env, user.id, id);
+  if (err) return fail(err);
+  return ok(alias);
+}
+
+export async function aliasDeactivate(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const id = ctx.url.pathname.split('/').slice(-2, -1)[0];
+  const ok2 = await db.deactivateAlias(ctx.env, user.id, id);
+  if (!ok2) return fail('别名不存在', 404);
+  return ok(null);
+}
+
+export async function aliasFavorite(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const id = ctx.url.pathname.split('/').slice(-2, -1)[0];
+  const favorite = ctx.body?.favorite === true || ctx.body?.favorite === 'true';
+  const ok2 = await db.setAliasFavorite(ctx.env, user.id, id, favorite);
+  if (!ok2) return fail('别名不存在', 404);
+  return ok({ favorite });
+}
+
+export async function aliasDelete(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const id = ctx.url.pathname.split('/').pop()!;
+  const ok2 = await db.deleteAlias(ctx.env, user.id, id);
+  if (!ok2) return fail('别名不存在', 404);
+  return ok(null);
+}
+
+// 兼容旧接口:设置别名(现在走多别名逻辑,不再清空 Webhook)
+export async function accountSetAliasCompat(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const { mail_account_id, label } = ctx.body || {};
+  if (!label || !String(label).trim()) return fail('别名标签不能为空');
+  if (!mail_account_id) return fail('请选择邮箱');
+  const { alias, err } = await db.createUserAlias(ctx.env, user.id, mail_account_id, String(label).trim());
+  if (err) return fail(err);
+  await db.addLog(ctx.env, user.id, user.username, alias?.full || '', 'set_alias', '设置了别名');
+  const updated = await db.getUserById(ctx.env, user.id);
+  return ok(updated);
 }
 
 // OAuth 回调 (浏览器跳转,返回 HTML 关闭窗口)
@@ -382,12 +531,17 @@ export async function accountSetAlias(ctx: Ctx): Promise<Response> {
   const { mail_account_id, label } = ctx.body;
   if (!label || !label.trim()) return fail('别名标签不能为空');
   if (!mail_account_id) return fail('请选择邮箱');
-  const { alias, err } = await db.setAlias(ctx.env, user.id, mail_account_id, label.trim());
+  // 旧版「替换唯一别名」语义:先停用其它生效别名,再创建/启用新的
+  const active = await db.listActiveAliases(ctx.env, user.id);
+  for (const a of active) {
+    if (a.mail_account_id !== mail_account_id || a.label !== label.trim()) {
+      await db.deactivateAlias(ctx.env, user.id, a.id);
+    }
+  }
+  const { alias, err } = await db.createUserAlias(ctx.env, user.id, mail_account_id, label.trim());
   if (err) return fail(err);
   if (!alias) return fail('用户不存在', 404);
   await db.addLog(ctx.env, user.id, user.username, alias.full, 'set_alias', '设置了别名');
-  // 别名变更后,旧 webhook 的 target_alias 已失效,自动清除该用户全部 webhook
-  await db.deleteWebhooksByUser(ctx.env, user.id);
   const updated = await db.getUserById(ctx.env, user.id);
   return ok(updated);
 }
@@ -460,43 +614,129 @@ export async function apiMarkRead(ctx: Ctx): Promise<Response> {
 }
 
 // ============ Web 邮件查询 (Session) ============
+// 支持三种查询范围:
+//   1) alias_id       查询指定别名
+//   2) all_aliases    聚合并去重查询当前用户全部生效别名
+//   3) all_aliases=false + mail_account_id  管理员查询整箱(不过滤别名)
+// 统一模糊搜索走 q 参数(发件人/收件人/主题/正文/HTML/附件名)
+const FETCH_CAP_MIN = 40;
+const FETCH_CAP_MAX = 150;
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.min(Math.max(n, min), max);
+}
+
 export async function webFetchEmails(ctx: Ctx): Promise<Response> {
   const user = await requireSession(ctx);
-  const rawUser = await db.getUserById(ctx.env, user.id);
   const params: FetchParams = { limit: 50, ...ctx.body };
   // silent=true: 自动收件模式,不记录日志
   const silent = ctx.body?.silent === true;
+  const q = typeof ctx.body?.q === 'string' ? ctx.body.q.trim() : '';
+  const page = Math.max(1, parseInt(String(ctx.body?.page || '1'), 10) || 1);
+  const pageSize = clamp(parseInt(String(ctx.body?.page_size || '20'), 10) || 20, 5, 100);
 
-  let accountId = params.mail_account_id;
-  let toFilter = params.to;
+  const activeAliases = await db.listActiveAliases(ctx.env, user.id);
 
-  // 别名优先
-  if (rawUser?.alias) {
-    accountId = rawUser.alias.mail_account_id;
-    toFilter = rawUser.alias.full;
-  } else if (!user.is_admin && !toFilter && !accountId) {
-    return fail('未设置别名邮箱,请先创建别名');
+  interface Target { accountId: string; to?: string; aliasId?: string; aliasFull?: string; }
+  let targets: Target[] = [];
+  let scopeLabel = '';
+
+  if (params.alias_id) {
+    const a = await db.getAliasRowById(ctx.env, user.id, params.alias_id);
+    if (!a) return fail('别名不存在');
+    if (a.status !== 'active') return fail('该别名已过期,请在历史别名中恢复启用');
+    targets = [{ accountId: a.mail_account_id, to: a.full, aliasId: a.id, aliasFull: a.full }];
+    scopeLabel = a.full;
+  } else if (ctx.body?.all_aliases === false) {
+    // 管理员整箱查询
+    if (!user.is_admin) return fail('仅管理员可查询整箱邮件', 403);
+    if (!params.mail_account_id) return fail('请选择查询邮箱');
+    targets = [{ accountId: params.mail_account_id, to: params.to }];
+    scopeLabel = '(整箱)';
+  } else if (activeAliases.length > 0) {
+    targets = activeAliases.map(a => ({
+      accountId: a.mail_account_id, to: a.full, aliasId: a.id, aliasFull: a.full,
+    }));
+    scopeLabel = `(全部 ${activeAliases.length} 个别名)`;
+  } else if (user.is_admin && params.mail_account_id) {
+    targets = [{ accountId: params.mail_account_id, to: params.to }];
+    scopeLabel = '(整箱)';
+  } else {
+    return fail('暂无生效中的别名,请先创建别名邮箱');
   }
-  if (!accountId) return fail('请选择查询邮箱');
 
-  // 越权防护:校验该邮箱账号归属当前用户(自己的或公开的)
-  const account = await db.getMailAccountRaw(ctx.env, user.id, accountId);
-  if (!account) return fail('无权查询该邮箱', 403);
+  // 抓取上限:随页码增长,但不超过 FETCH_CAP_MAX(保护 Gmail / Graph 配额)
+  const fetchCap = clamp(page * pageSize, FETCH_CAP_MIN, FETCH_CAP_MAX);
+  const perTarget = clamp(Math.ceil(fetchCap / targets.length), 20, fetchCap);
 
-  try {
-    const emails = await fetchEmails(ctx.env, accountId, { ...params, to: toFilter });
-    // 仅非静默模式记录日志,避免自动收件撑爆日志
-    if (!silent) {
-      await db.addLog(ctx.env, user.id, user.username, toFilter || '(全部)', 'web_fetch', `获取了${emails.length}封邮件`);
+  const merged: Array<Email & { alias?: string }> = [];
+  const seen = new Set<string>();
+  const errors: string[] = [];
+  const touched: string[] = [];
+
+  for (const t of targets) {
+    // 越权防护:校验该邮箱账号归属当前用户(自己的或公开的)
+    const account = await db.getMailAccountRaw(ctx.env, user.id, t.accountId);
+    if (!account) continue;
+    try {
+      const list = await fetchEmails(ctx.env, t.accountId, {
+        ...params,
+        to: t.to,
+        q,
+        limit: perTarget,
+      });
+      for (const e of list) {
+        const key = e.id || `${e.subject}|${e.date_iso}|${e.from}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push({ ...e, alias: t.aliasFull });
+      }
+      if (list.length > 0 && t.aliasId) touched.push(t.aliasId);
+    } catch (e) {
+      errors.push((e as Error).message);
     }
-    return ok({
-      total: emails.length,
-      emails,
-      query: { email: '', to: toFilter, sender: params.sender, subject: params.subject, keyword: params.keyword, unseen: params.unseen, limit: params.limit },
-    });
-  } catch (e) {
-    return fail('邮件查询失败,请稍后重试', 500);
   }
+
+  merged.sort((a, b) => String(b.date_iso || '').localeCompare(String(a.date_iso || '')));
+  const emails = merged.slice(0, fetchCap);
+
+  // 命中邮件的别名刷新「最后使用时间」(带 60 秒节流,避免自动收件疯狂写库)
+  if (touched.length) {
+    const now = Date.now();
+    const needTouch = activeAliases
+      .filter(a => touched.indexOf(a.id) !== -1)
+      .filter(a => now - Date.parse(a.last_used_at || '') > 60_000)
+      .map(a => a.id);
+    if (needTouch.length) await db.touchAliases(ctx.env, user.id, needTouch);
+  }
+
+  // 仅非静默模式记录日志,避免自动收件撑爆日志
+  if (!silent) {
+    await db.addLog(ctx.env, user.id, user.username, scopeLabel, 'web_fetch', `获取了${emails.length}封邮件`);
+  }
+
+  return ok({
+    total: emails.length,
+    // true 表示已达抓取上限,后面可能还有邮件,缩小时间范围或用搜索词更精确
+    truncated: merged.length >= fetchCap,
+    emails,
+    query: {
+      email: '',
+      to: scopeLabel,
+      q,
+      sender: params.sender,
+      subject: params.subject,
+      keyword: params.keyword,
+      unseen: params.unseen,
+      start_time: params.start_time,
+      end_time: params.end_time,
+      limit: fetchCap,
+      page,
+      page_size: pageSize,
+    },
+    aliases: activeAliases.map(a => ({ id: a.id, full: a.full, label: a.label, remain_ms: a.remain_ms || 0 })),
+    errors,
+  });
 }
 
 // ============ Web 邮件标记已读 (Session) ============
@@ -504,11 +744,15 @@ export async function webFetchEmails(ctx: Ctx): Promise<Response> {
 export async function webMarkRead(ctx: Ctx): Promise<Response> {
   const user = await requireSession(ctx);
   const rawUser = await db.getUserById(ctx.env, user.id);
-  const { sender, subject, mail_account_id } = ctx.body;
+  const { sender, subject, mail_account_id, alias_id } = ctx.body;
 
   let accountId = mail_account_id;
-  // 别名优先
-  if (rawUser?.alias) {
+  if (alias_id) {
+    const a = await db.getAliasRowById(ctx.env, user.id, alias_id);
+    if (!a) return fail('别名不存在', 404);
+    accountId = a.mail_account_id;
+  } else if (rawUser?.alias) {
+    // 兼容:未指定时落到主别名
     accountId = rawUser.alias.mail_account_id;
   }
   if (!accountId) return fail('请选择邮箱');
@@ -535,11 +779,13 @@ export async function webhookList(ctx: Ctx): Promise<Response> {
 
 export async function webhookCreate(ctx: Ctx): Promise<Response> {
   const user = await requireSession(ctx);
-  const { mail_account_id, target_alias, url, secret, events } = ctx.body;
+  const { mail_account_id, target_alias, url, secret, events, format } = ctx.body;
   if (!mail_account_id) return fail('请选择监听的邮箱');
   if (!url) return fail('请填写回调 URL');
   if (!/^https?:\/\//.test(url)) return fail('URL 必须以 http(s):// 开头');
   if (!events) return fail('请选择订阅事件');
+  const fmt = ['card', 'markdown', 'text', 'json'].indexOf(String(format || 'card')) >= 0
+    ? String(format || 'card') : 'card';
   // 越权防护 + 权限逻辑:
   //  - 自己拥有的邮箱:可监听整个邮箱(target_alias 可选)
   //  - 公开但非自己的邮箱:仅当 target_alias 等于自己设置的别名 full 时允许(别人只能订阅自己的别名)
@@ -553,9 +799,9 @@ export async function webhookCreate(ctx: Ctx): Promise<Response> {
   }
   // SSRF 防护:拒绝内网/元数据地址
   if (isPrivateOrUnsafeUrl(url)) return fail('不允许的回调地址');
-  // 单 webhook 约束:每用户仅保留一个订阅,创建前清除旧的(换别名时也会自动清)
+  // 单 webhook 约束:每用户仅保留一个订阅,创建前清除旧的
   await db.deleteWebhooksByUser(ctx.env, user.id);
-  const id = await db.createWebhook(ctx.env, user.id, mail_account_id, target_alias || null, url, secret || null, events);
+  const id = await db.createWebhook(ctx.env, user.id, mail_account_id, target_alias || null, url, secret || null, events, fmt);
   await db.addLog(ctx.env, user.id, user.username, '', 'create_webhook', `创建了 Webhook ${url}`);
   return ok({ id });
 }
@@ -596,6 +842,17 @@ export async function webhookDelete(ctx: Ctx): Promise<Response> {
   const ok2 = await db.deleteWebhook(ctx.env, id, user.id);
   if (!ok2) return fail('Webhook 不存在', 404);
   return ok(null);
+}
+
+// 切换推送格式: card / markdown / text / json
+export async function webhookSetFormat(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const id = ctx.url.pathname.split('/').slice(-2, -1)[0];
+  const format = String(ctx.body?.format || 'card');
+  if (['card', 'markdown', 'text', 'json'].indexOf(format) < 0) return fail('不支持的推送格式');
+  const ok2 = await db.updateWebhookFormat(ctx.env, id, user.id, format);
+  if (!ok2) return fail('Webhook 不存在', 404);
+  return ok({ format });
 }
 
 export async function webhookTest(ctx: Ctx): Promise<Response> {

@@ -2,7 +2,44 @@
  * settings.js — 管理员: 系统设置页
  * ============================================================ */
 
+// ============ Google OAuth 凭据 ============
+async function loadOAuthConfig() {
+  const statusEl = document.getElementById('oauthStatusText');
+  try {
+    const data = await api('/api/admin/oauth/config');
+    if (statusEl) {
+      statusEl.innerHTML = data.configured
+        ? `<span class="badge badge-success">已配置</span> <span class="mono" style="font-size:12px">${esc(data.client_id_masked)}</span> <span class="text-lighter">(${esc(data.source === 'db' ? '数据库' : '环境变量')})</span>`
+        : '<span class="badge badge-danger">未配置</span> 未配置时绑定 Gmail 会提示缺少凭据';
+    }
+    const idEl = document.getElementById('googleClientId');
+    if (idEl && !idEl.value && data.configured) idEl.placeholder = data.client_id_masked;
+  } catch (err) {
+    if (statusEl) statusEl.innerHTML = '<span class="badge badge-danger">读取失败</span>';
+    toast(err.message, 'error');
+  }
+}
+
+async function saveOAuthConfig() {
+  const client_id = document.getElementById('googleClientId').value.trim();
+  const client_secret = document.getElementById('googleClientSecret').value.trim();
+  if (!client_id && !client_secret) { toast('请填写 Client ID 与 Client Secret', 'warning'); return; }
+  if (!client_id) { toast('请填写 Client ID', 'warning'); return; }
+  if (!/^[0-9]+-[0-9a-z]+\.apps\.googleusercontent\.com$/i.test(client_id)) {
+    toast('Client ID 格式不正确，应形如 1234567890-xxxx.apps.googleusercontent.com', 'error', 5000);
+    return;
+  }
+  if (!client_secret) { toast('请填写 Client Secret', 'warning'); return; }
+  try {
+    await api('/api/admin/oauth/config', { method: 'PUT', body: { client_id, client_secret } });
+    document.getElementById('googleClientSecret').value = '';
+    toast('Google OAuth 凭据已保存', 'success');
+    await loadOAuthConfig();
+  } catch (err) { toast(err.message, 'error', 4000); }
+}
+
 async function initSettingsPage() {
+  await loadOAuthConfig();
   try {
     const s = await api('/api/admin/settings');
     document.getElementById('setAllowReg').checked = s.allow_registration;

@@ -54,8 +54,13 @@
   <div class="card">
     <div class="card-header"><h3>OAuth 邮箱绑定</h3></div>
     <div class="card-body">
-      <p class="form-hint" style="margin-bottom:12px">绑定邮箱后,系统将自动刷新访问令牌并代为查询邮件。Outlook/Hotmail 采用 Device Code 授权,无需配置回调地址即可使用。</p>
-      <div style="display:flex; gap:8px; margin-bottom:16px">
+      <p class="form-hint" style="margin-bottom:12px">
+        绑定邮箱后,系统将自动刷新访问令牌并代为查询邮件。Gmail 与 Outlook 均采用 <strong>Device Code 授权</strong>：
+        点击按钮后会弹出一串授权码，到授权页输入即可完成绑定，<strong>无需配置任何回调地址</strong>，也不会出现
+        <span class="mono">invalid_client</span> / <span class="mono">redirect_uri_mismatch</span> 之类的跳转报错。
+        授权页面若无法打开，请自行开启网络代理后重试。
+      </p>
+      <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap">
         <button class="btn" onclick="startOAuth('gmail')">绑定 Gmail</button>
         <button class="btn" onclick="startOAuth('outlook')">绑定 Outlook/Hotmail</button>
       </div>

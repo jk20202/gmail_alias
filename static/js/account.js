@@ -147,61 +147,108 @@ async function deleteAccount(id, email) {
   });
 }
 
+// 统一的授权入口: Gmail / Outlook 都走 Device Code Flow
+// (Device Code 不需要在 Google / 微软后台登记回调地址,部署在任意域名都不会
+//  出现 redirect_uri_mismatch / invalid_client 之类的跳转报错)
 async function startOAuth(provider) {
   if (provider === 'outlook') return startMsDeviceFlow();
-  try {
-    const data = await api('/api/account/oauth/start?provider=' + provider);
-    if (!data.auth_url) { toast('未获取到授权地址', 'error'); return; }
-    const win = window.open(data.auth_url, '_blank');
-    if (!win) { toast('浏览器拦截了弹窗，请允许后重试', 'warning'); return; }
-    toast('请在弹出的窗口完成授权', 'info', 4000);
-    if (State.oauthTimer) clearInterval(State.oauthTimer);
-    State.oauthTimer = setInterval(() => {
-      if (win.closed) {
-        clearInterval(State.oauthTimer);
-        State.oauthTimer = null;
-        loadMyAccounts();
-        loadAvailableAccounts();
-        toast('授权流程结束', 'success');
+  return startGoogleDeviceFlow();
+}
+
+// 离开页面时停掉所有轮询
+function stopAllDevicePolling() {
+  if (State.deviceTimer) { clearInterval(State.deviceTimer); State.deviceTimer = null; }
+  if (State.gDeviceTimer) { clearInterval(State.gDeviceTimer); State.gDeviceTimer = null; }
+  if (State.oauthTimer) { clearInterval(State.oauthTimer); State.oauthTimer = null; }
+}
+
+function renderDeviceModal(opt) {
+  showModal(opt.title, `
+    <div style="text-align:center; padding:6px 0">
+      <p style="margin-bottom:12px; color:var(--text-light)">${opt.tip}</p>
+      <div style="font-size:28px; font-weight:700; letter-spacing:3px; padding:14px; background:var(--bg); border:1px dashed var(--border); border-radius:8px; margin-bottom:14px; font-family:monospace; word-break:break-all">${esc(opt.user_code)}</div>
+      <a href="${esc(opt.open_url)}" target="_blank" rel="noopener" class="btn" style="display:inline-block; text-decoration:none">打开授权页面</a>
+      <p class="form-hint" style="margin-top:14px">代码有效期 ${opt.expires_in || 900} 秒，授权完成后本窗口会自动关闭。授权页面若打不开，请自行开启网络代理后重试。</p>
+      <div id="deviceStatus" style="margin-top:10px"><span class="badge badge-gray">等待授权中...</span></div>
+    </div>`,
+    `<button class="btn btn-secondary" onclick="cancelDevice()">取消</button>`);
+}
+
+function bindDevicePolling(statusPath, timerKey, onSuccess) {
+  if (State[timerKey]) clearInterval(State[timerKey]);
+  State[timerKey] = setInterval(async () => {
+    try {
+      const st = await api(statusPath);
+      const el = document.getElementById('deviceStatus');
+      if (st.status === 'success') {
+        clearInterval(State[timerKey]); State[timerKey] = null;
+        if (el) el.innerHTML = '<span class="badge badge-success">授权成功: ' + esc(st.email || '') + '</span>';
+        toast((st.email || '邮箱') + ' 绑定成功', 'success');
+        setTimeout(() => { closeModal(); onSuccess(); }, 1500);
+      } else if (st.status === 'failed') {
+        clearInterval(State[timerKey]); State[timerKey] = null;
+        if (el) el.innerHTML = '<span class="badge badge-danger">' + esc(st.reason || '授权失败') + '</span>';
+        toast(st.reason || '授权失败', 'error', 5000);
       }
-    }, 2000);
-  } catch (err) { toast(err.message, 'error'); }
+    } catch (e) { /* 网络抖动忽略 */ }
+  }, 4000);
+}
+
+function afterBindSuccess() {
+  loadMyAccounts();
+  if (typeof loadAvailableAccounts === 'function') loadAvailableAccounts();
+}
+
+async function startGoogleDeviceFlow() {
+  let data;
+  try {
+    data = await api('/api/account/oauth/google/device', { method: 'POST' });
+  } catch (err) {
+    toast(err.message, 'error', 5000);
+    // 未配置凭据时,引导管理员去系统设置页
+    if (State.user && State.user.is_admin) {
+      setTimeout(() => showModal('需要先配置 Google OAuth 凭据', `
+        <p style="margin-bottom:10px">绑定 Gmail 前，需要在 Google Cloud 创建「桌面应用」类型的 OAuth 客户端，并把 Client ID / Client Secret 填到系统设置里。</p>
+        <ol style="padding-left:18px; color:var(--text-light); font-size:13px; line-height:1.9">
+          <li>打开 Google Cloud 控制台 → API 和服务 → 凭据</li>
+          <li>创建凭据 → OAuth 客户端 ID → 应用类型选「桌面应用」</li>
+          <li>复制 Client ID 与 Client Secret</li>
+          <li>回到本系统「系统设置 → Google OAuth 凭据」粘贴保存</li>
+        </ol>`,
+        `<button class="btn btn-secondary" onclick="closeModal()">稍后配置</button><button class="btn" onclick="closeModal();switchTab('settings')">去配置</button>`), 400);
+    }
+    return;
+  }
+  const openUrl = data.verification_url_complete || data.verification_url || 'https://google.com/device';
+  renderDeviceModal({
+    title: '绑定 Gmail',
+    tip: '请在打开的页面中登录谷歌账号，并输入下面的授权码',
+    user_code: data.user_code,
+    open_url: openUrl,
+    expires_in: data.expires_in,
+  });
+  bindDevicePolling('/api/account/oauth/google/device/status', 'gDeviceTimer', afterBindSuccess);
 }
 
 async function startMsDeviceFlow() {
   let data;
   try {
     data = await api('/api/account/oauth/device', { method: 'POST' });
-  } catch (err) { toast(err.message, 'error'); return; }
-  showModal('微软邮箱授权', `
-    <div style="text-align:center; padding:8px 0">
-      <p style="margin-bottom:12px">请在新页面登录微软账号并输入以下代码完成授权:</p>
-      <div style="font-size:28px; font-weight:700; letter-spacing:3px; padding:14px; background:var(--bg); border:1px dashed var(--border); border-radius:8px; margin-bottom:14px; font-family:monospace">${esc(data.user_code)}</div>
-      <a href="${esc(data.verification_uri)}" target="_blank" class="btn" style="display:inline-block; text-decoration:none">打开授权页面</a>
-      <p class="form-hint" style="margin-top:14px">代码有效期 ${data.expires_in || 900} 秒,授权完成后本窗口会自动关闭</p>
-      <div id="deviceStatus" style="margin-top:10px"><span class="badge badge-gray">等待授权中...</span></div>
-    </div>`,
-    `<button class="btn btn-secondary" onclick="cancelMsDevice()">取消</button>`);
-  if (State.deviceTimer) clearInterval(State.deviceTimer);
-  State.deviceTimer = setInterval(async () => {
-    try {
-      const st = await api('/api/account/oauth/device/status');
-      const el = document.getElementById('deviceStatus');
-      if (st.status === 'success') {
-        clearInterval(State.deviceTimer); State.deviceTimer = null;
-        if (el) el.innerHTML = '<span class="badge badge-success">授权成功: ' + esc(st.email || '') + '</span>';
-        toast('微软邮箱 ' + (st.email || '') + ' 绑定成功', 'success');
-        setTimeout(() => { closeModal(); loadMyAccounts(); loadAvailableAccounts(); }, 1500);
-      } else if (st.status === 'failed') {
-        clearInterval(State.deviceTimer); State.deviceTimer = null;
-        if (el) el.innerHTML = '<span class="badge badge-danger">' + esc(st.reason || '授权失败') + '</span>';
-        toast(st.reason || '授权失败', 'error');
-      }
-    } catch (e) { /* 网络抖动忽略 */ }
-  }, 4000);
+  } catch (err) { toast(err.message, 'error', 5000); return; }
+  renderDeviceModal({
+    title: '绑定 Outlook / Hotmail',
+    tip: '请在打开的页面中登录微软账号，并输入下面的授权码',
+    user_code: data.user_code,
+    open_url: data.verification_url,
+    expires_in: data.expires_in,
+  });
+  bindDevicePolling('/api/account/oauth/device/status', 'deviceTimer', afterBindSuccess);
 }
 
-function cancelMsDevice() {
-  if (State.deviceTimer) { clearInterval(State.deviceTimer); State.deviceTimer = null; }
+function cancelDevice() {
+  stopAllDevicePolling();
   closeModal();
 }
+
+// 兼容旧命名
+function cancelMsDevice() { cancelDevice(); }

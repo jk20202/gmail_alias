@@ -1,5 +1,5 @@
 /* ============================================================
- * app.js — 核心: 全局状态、API 封装、会话、路由(Ajax 加载页面)
+ * app.js — 核心: 全局状态、API 封装、会话、左侧导航路由(Ajax 加载页面)
  * ============================================================ */
 
 const State = {
@@ -10,11 +10,29 @@ const State = {
   mailAccounts: [],     // 我的邮箱缓存
   oauthTimer: null,     // OAuth 轮询定时器
   deviceTimer: null,    // 微软 Device Code 轮询定时器
+  gDeviceTimer: null,   // 谷歌 Device Code 轮询定时器
+  aliasMax: 5,          // 别名数量上限(服务端下发)
+  aliasTtlMs: 3600000,  // 别名有效期(服务端下发)
 };
 
 // localStorage 持久化键
 const LS_TOKEN = 'mail_alias_token';
 const LS_USER = 'mail_alias_user';
+
+// 导航图标(内联 SVG,避免额外请求)
+const NAV_ICONS = {
+  mail: '<path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>',
+  account: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  webhook: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+  docs: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
+  users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+};
+
+function svgIcon(name, size) {
+  const s = size || 17;
+  return `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${NAV_ICONS[name] || ''}</svg>`;
+}
 
 /* ============ 统一 API 封装 ============ */
 async function api(path, opts = {}) {
@@ -44,7 +62,7 @@ async function api(path, opts = {}) {
   return data.data;
 }
 
-// 轻提示
+/* ============ 通用 UI 工具 ============ */
 function toast(msg, type = 'info', duration = 2600) {
   const box = document.getElementById('toastBox');
   const el = document.createElement('div');
@@ -74,11 +92,23 @@ function fmtTime(iso) {
   } catch { return iso; }
 }
 
-// 模态框
-function showModal(title, bodyHtml, footerHtml = '') {
+// 剩余时间的人类可读描述
+function fmtRemain(ms) {
+  if (!ms || ms <= 0) return '已过期';
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  if (m >= 60) {
+    const h = Math.floor(m / 60);
+    return `${h} 小时 ${m % 60} 分`;
+  }
+  return m > 0 ? `${m} 分 ${s} 秒` : `${s} 秒`;
+}
+
+function showModal(title, bodyHtml, footerHtml = '', wide = false) {
   const root = document.getElementById('modalRoot');
   root.innerHTML = `<div class="modal-mask" onclick="if(event.target===this)closeModal()">
-    <div class="modal">
+    <div class="modal${wide ? ' wide' : ''}">
       <div class="modal-header"><h3>${esc(title)}</h3><button class="close" onclick="closeModal()">&times;</button></div>
       <div class="modal-body">${bodyHtml}</div>
       ${footerHtml ? `<div class="modal-footer">${footerHtml}</div>` : ''}
@@ -88,19 +118,23 @@ function closeModal() { document.getElementById('modalRoot').innerHTML = ''; }
 function confirmDialog(msg, onOk) {
   showModal('确认操作', `<p>${esc(msg)}</p>`,
     `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn btn-danger" id="confirmOkBtn">确定</button>`);
-  document.getElementById('confirmOkBtn').onclick = () => { closeModal(); onOk(); };
+  const btn = document.getElementById('confirmOkBtn');
+  if (btn) btn.onclick = () => { closeModal(); onOk(); };
 }
 
-// 复制文本到剪贴板
 function copyText(text) {
   if (navigator.clipboard) {
-    navigator.clipboard.writeText(text).then(() => toast('已复制', 'success'));
+    navigator.clipboard.writeText(text).then(() => toast('已复制', 'success'))
+      .catch(() => fallbackCopy(text));
   } else {
-    const ta = document.createElement('textarea');
-    ta.value = text; document.body.appendChild(ta); ta.select();
-    try { document.execCommand('copy'); toast('已复制', 'success'); } catch { toast('复制失败', 'error'); }
-    ta.remove();
+    fallbackCopy(text);
   }
+}
+function fallbackCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text; document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); toast('已复制', 'success'); } catch { toast('复制失败', 'error'); }
+  ta.remove();
 }
 
 /* ============================================================
@@ -156,9 +190,8 @@ async function doLogin(e) {
     saveSession(data.session_token, data.user);
     toast('登录成功，正在进入系统...', 'success');
     showAppView();
-  } catch (err) {
+  } catch {
     showLoginError('账户不存在,或是密码不匹配');
-    toast('登录失败:账户不存在或密码不匹配', 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '登录'; }
   }
@@ -166,7 +199,7 @@ async function doLogin(e) {
 }
 
 async function doRegister(e) {
-  e.preventDefault();
+  if (e) e.preventDefault();
   const username = document.getElementById('regUsername').value.trim();
   const password = document.getElementById('regPassword').value;
   if (!username || username.length < 3) { showLoginError('用户名至少 3 个字符'); return false; }
@@ -201,10 +234,9 @@ async function checkRegistrationAllowed() {
 }
 
 /* ============================================================
- * 主应用渲染 — Ajax 加载页面 HTML
+ * 主应用渲染 — 左侧导航 + 顶部条 + Ajax 加载页面
  * ============================================================ */
 
-// 页面初始化函数映射
 const PAGE_INIT = {
   mail: () => initMailPage(),
   account: () => initAccountPage(),
@@ -214,7 +246,20 @@ const PAGE_INIT = {
   settings: () => initSettingsPage(),
 };
 
-// Ajax 加载页面 HTML 并注入到主区域
+const PAGE_META = {
+  mail: { title: '邮件查询', desc: '聚合查询所有生效别名邮箱的收件，支持全文模糊搜索' },
+  account: { title: '我的账户', desc: '个人信息、API Key、OAuth 邮箱绑定与登录密码' },
+  webhook: { title: 'Webhook 订阅', desc: '新邮件主动推送到飞书 / 钉钉 / 自定义地址' },
+  docs: { title: 'API 文档', desc: '接口说明与调用示例' },
+  users: { title: '用户管理', desc: '管理系统用户、别名与绑定的邮箱' },
+  settings: { title: '系统设置', desc: 'OAuth 凭据、注册开关、运行统计与调用日志' },
+};
+
+function toggleSidebar(open) {
+  document.getElementById('sidebar').classList.toggle('open', !!open);
+  document.getElementById('sidebarMask').classList.toggle('show', !!open);
+}
+
 async function loadPageHtml(pageName) {
   const resp = await fetch('pages/' + pageName + '.html');
   if (!resp.ok) throw new Error('页面加载失败: ' + resp.status);
@@ -224,49 +269,73 @@ async function loadPageHtml(pageName) {
 function renderApp() {
   const u = State.user;
   if (!u) return;
-  // 顶部用户信息
+  // 侧边栏用户信息
   document.getElementById('navUsername').textContent = u.username;
+  document.getElementById('navAvatar').textContent = (u.username || 'U').slice(0, 1).toUpperCase();
   document.getElementById('navRole').innerHTML = u.is_admin
     ? '<span class="badge badge-primary">管理员</span>'
-    : '<span class="badge badge-gray">用户</span>';
-  // 导航
-  const nav = document.getElementById('appNav');
-  const tabs = [
-    { key: 'mail', label: '邮件查询' },
-    { key: 'account', label: '我的账户' },
-    { key: 'webhook', label: 'Webhook 订阅' },
-    { key: 'docs', label: 'API 文档' },
+    : '<span class="badge badge-gray">普通用户</span>';
+
+  // 导航项
+  const groups = [
+    {
+      label: '邮箱服务',
+      items: [
+        { key: 'mail', label: '邮件查询', icon: 'mail' },
+        { key: 'account', label: '我的账户', icon: 'account' },
+        { key: 'webhook', label: 'Webhook 订阅', icon: 'webhook' },
+        { key: 'docs', label: 'API 文档', icon: 'docs' },
+      ],
+    },
   ];
   if (u.is_admin) {
-    tabs.push({ key: 'users', label: '用户管理' });
-    tabs.push({ key: 'settings', label: '系统设置' });
+    groups.push({
+      label: '系统管理',
+      items: [
+        { key: 'users', label: '用户管理', icon: 'users' },
+        { key: 'settings', label: '系统设置', icon: 'settings' },
+      ],
+    });
   }
-  nav.innerHTML = tabs.map(t =>
-    `<button class="${State.tab === t.key ? 'active' : ''}" onclick="switchTab('${t.key}')">${t.label}</button>`
-  ).join('');
-  // 异步加载页面
+
+  const nav = document.getElementById('appNav');
+  nav.innerHTML = groups.map(g => `
+    <div class="nav-group-label">${esc(g.label)}</div>
+    ${g.items.map(t => `
+      <button class="nav-item ${State.tab === t.key ? 'active' : ''}" data-key="${t.key}" onclick="switchTab('${t.key}')">
+        ${svgIcon(t.icon)}
+        <span>${esc(t.label)}</span>
+        ${t.key === 'mail' ? `<span class="tag" id="navAliasTag">${u.active_alias_count || 0}</span>` : ''}
+      </button>`).join('')}
+  `).join('');
+
   switchTab(State.tab);
 }
 
 async function switchTab(key) {
-  // 切换前清理当前页面 (如停止自动收件定时器)
-  if (State.tab === 'mail' && typeof cleanupMailPage === 'function') {
-    cleanupMailPage();
-  }
+  // 切换前清理当前页面(停止自动收件 / 轮询定时器等)
+  if (State.tab === 'mail' && typeof cleanupMailPage === 'function') cleanupMailPage();
+  if (typeof stopAllDevicePolling === 'function') stopAllDevicePolling();
+
   State.tab = key;
+  toggleSidebar(false);
+
   // 更新导航高亮
-  document.querySelectorAll('#appNav button').forEach(btn => {
-    btn.classList.toggle('active', btn.getAttribute('onclick').includes("'" + key + "'"));
+  document.querySelectorAll('#appNav .nav-item').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-key') === key);
   });
+  const meta = PAGE_META[key] || { title: key, desc: '' };
+  document.getElementById('topbarTitle').textContent = meta.title;
+  document.getElementById('topbarDesc').textContent = meta.desc;
+  const actions = document.getElementById('topbarActions');
+  if (actions) actions.innerHTML = '';
+
   const main = document.getElementById('appMain');
   main.innerHTML = '<div class="loading"><span class="spinner"></span> 加载中...</div>';
   try {
     const html = await loadPageHtml(key);
     main.innerHTML = html;
-    // 执行页面初始化
-    if (PAGE_INIT[key]) {
-      await PAGE_INIT[key]();
-    }
+    if (PAGE_INIT[key]) await PAGE_INIT[key]();
   } catch (err) {
     main.innerHTML = '<div class="mail-empty">页面加载失败: ' + esc(err.message) + '</div>';
   }

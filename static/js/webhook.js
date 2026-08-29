@@ -2,6 +2,13 @@
  * webhook.js — Webhook 订阅页
  * ============================================================ */
 
+const WH_FORMAT_LABEL = {
+  card: '卡片消息',
+  markdown: 'Markdown',
+  text: '纯文本',
+  json: '原始 JSON',
+};
+
 async function initWebhookPage() {
   try {
     const list = await api('/api/account/mail_accounts/available');
@@ -47,11 +54,16 @@ async function loadWebhooks() {
       box.innerHTML = '<div class="mail-empty">暂无订阅</div>';
       return;
     }
-    box.innerHTML = list.map(w => `
+    box.innerHTML = list.map(w => {
+      const fmt = w.format || 'card';
+      const fmtOptions = Object.keys(WH_FORMAT_LABEL)
+        .map(k => `<option value="${k}" ${k === fmt ? 'selected' : ''}>${WH_FORMAT_LABEL[k]}</option>`).join('');
+      return `
       <div class="mail-item" style="margin-bottom:10px">
         <div class="mail-head" style="cursor:default; flex-wrap:wrap">
           <span class="badge ${w.is_active ? 'badge-success' : 'badge-gray'}">${w.is_active ? '启用' : '停用'}</span>
-          <span class="mono" style="font-size:12px">${esc(w.url)}</span>
+          <span class="badge badge-primary">${WH_FORMAT_LABEL[fmt] || fmt}</span>
+          <span class="mono" style="font-size:12px; flex:1; min-width:0; word-break:break-all">${esc(w.url)}</span>
         </div>
         <div class="mail-body" style="display:block; border-top:1px solid var(--border)">
           <div class="meta-row">
@@ -61,15 +73,30 @@ async function loadWebhooks() {
             ${w.secret ? '<span class="badge badge-primary">已设签名</span>' : ''}
             <span>创建: ${fmtTime(w.created_at)}</span>
           </div>
+          <div class="row-gap" style="margin-top:12px">
+            <label class="form-hint" style="margin:0">推送格式</label>
+            <select class="form-control" style="width:auto; padding:4px 8px; height:30px" onchange="changeWebhookFormat('${esc(w.id)}', this.value)">
+              ${fmtOptions}
+            </select>
+          </div>
           <div class="actions">
             <button class="btn btn-secondary btn-sm" onclick="testWebhook('${esc(w.id)}')">测试推送</button>
             <button class="btn btn-danger btn-sm" onclick="deleteWebhook('${esc(w.id)}')">删除</button>
           </div>
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   } catch (err) {
     box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
   }
+}
+
+async function changeWebhookFormat(id, format) {
+  try {
+    await api('/api/webhooks/' + id + '/format', { method: 'POST', body: { format } });
+    toast('推送格式已切换为「' + (WH_FORMAT_LABEL[format] || format) + '」', 'success');
+    loadWebhooks();
+  } catch (err) { toast(err.message, 'error'); loadWebhooks(); }
 }
 
 async function createWebhook() {
@@ -79,6 +106,7 @@ async function createWebhook() {
   const body = {
     mail_account_id: document.getElementById('whAccount').value,
     url: document.getElementById('whUrl').value.trim(),
+    format: document.getElementById('whFormat').value,
     events: events.join(','),
     target_alias: document.getElementById('whAlias').value.trim() || undefined,
     secret: document.getElementById('whSecret').value.trim() || undefined,
@@ -89,7 +117,7 @@ async function createWebhook() {
   try {
     await api('/api/webhooks', { method: 'POST', body });
     toast('订阅创建成功', 'success');
-    ['whUrl', 'whSecret'].forEach(id => document.getElementById(id).value = '');
+    ['whUrl', 'whSecret'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     onWhAccountChange();
     loadWebhooks();
   } catch (err) { toast(err.message, 'error'); }
@@ -98,7 +126,7 @@ async function createWebhook() {
 async function testWebhook(id) {
   try {
     const data = await api('/api/webhooks/' + id + '/test', { method: 'POST' });
-    toast(data.success ? '测试推送已发送' : '测试推送失败', data.success ? 'success' : 'error');
+    toast(data.success ? '测试推送已发送' : '测试推送失败,请检查回调地址', data.success ? 'success' : 'error');
   } catch (err) { toast(err.message, 'error'); }
 }
 

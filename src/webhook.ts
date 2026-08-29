@@ -1,10 +1,16 @@
 // Webhook 推送服务
 // 提供两种触发模式:
-//   1) 主动轮询:由外部定时器调用 /api/webhook/poll?account_id=xxx&key=xxx 触发
+//   1) 主动轮询:由 Cron / 外部定时器调用 /api/webhook/poll?account_id=xxx&key=xxx 触发
 //   2) 被动接收:第三方(Gmail Pub/Sub / Outlook Subscription) POST 到 /api/webhook/receive
-// 推送时携带 HMAC-SHA256 签名头 X-Webhook-Signature,接收方务必校验
+// 推送时携带 HMAC-SHA256 签名头 X-Webhook-Signature,接收方务必校验(仅通用 JSON 格式)
+//
+// 推送格式(format):
+//   card     卡片消息(飞书 interactive / 钉钉 actionCard),完整正文,单封一封卡片
+//   markdown Markdown 富文本(飞书卡片 Markdown 版 / 钉钉 markdown)
+//   text     纯文本(含完整正文)
+//   json     原始 JSON 载荷(含完整 body / html / 附件列表 / 签名头)
 import type { Env, Email, Webhook } from './types';
-import { hmacSha256, nowISO } from './utils';
+import { hmacSha256, nowISO, htmlToText } from './utils';
 import { getWebhooksForAccount, logWebhookDelivery, getMailAccountById } from './db';
 import { fetchEmails } from './emailService';
 
@@ -18,6 +24,11 @@ export interface WebhookPayload {
   count: number;
   emails: Email[];
 }
+
+// 单封邮件最多推送的正文字数(超出部分会明确标注,不再悄悄截断)
+const MAX_BODY_CHARS = 20000;
+// 一次轮询最多推送的邮件数(每封一条消息,避免刷屏与超时)
+const MAX_PUSH_EMAILS = 10;
 
 // ============ 主动轮询模式 ============
 // 拉取最近邮件,逐条匹配订阅,推送给订阅者
@@ -94,28 +105,43 @@ export async function pollAndPush(env: Env, accountId: string): Promise<{ pushed
 }
 
 // ============ 发起一次推送 ============
-// 识别飞书/钉钉/企业微信等平台 URL,自动转换为对应的消息卡片格式
-// 其他 URL 保持原始 JSON 载荷推送
+// 识别飞书/钉钉等平台 URL,按订阅选择的格式自动转换为对应消息体。
+// 内容尽量完整:每封邮件一条消息,正文不再截断到 150 字。
 export async function deliver(env: Env, webhook: Webhook, payload: WebhookPayload): Promise<boolean> {
   const platform = detectPlatform(webhook.url);
-  // body 和 headers 根据平台动态生成
-  const { body, contentType } = platform === 'feishu'
-    ? buildFeishuPayload(payload)
-    : platform === 'dingtalk'
-    ? buildDingtalkPayload(payload)
-    : { body: JSON.stringify(payload), contentType: 'application/json' };
+  const format = normalizeFormat(webhook.format);
+  const messages = buildMessages(platform, format, payload);
 
-  const headers: Record<string, string> = {
-    'Content-Type': contentType,
-    'User-Agent': 'MailAlias-Webhook/1.0',
-  };
-  // 签名: HMAC-SHA256(body) base64url (飞书平台不使用此签名,仅对原始JSON接收方有效)
-  if (webhook.secret && platform === 'generic') {
-    headers['X-Webhook-Signature'] = await hmacSha256(webhook.secret, body);
+  let allOk = messages.length > 0;
+  for (let i = 0; i < messages.length; i++) {
+    const { body, contentType } = messages[i];
+    const headers: Record<string, string> = {
+      'Content-Type': contentType,
+      'User-Agent': 'MailAlias-Webhook/1.0',
+    };
+    // 签名: HMAC-SHA256(body) base64url (平台自有签名机制时不附加)
+    if (webhook.secret && (platform === 'generic' || format === 'json')) {
+      headers['X-Webhook-Signature'] = await hmacSha256(webhook.secret, body);
+    }
+    // 多条消息时轻微串行,降低被平台限流概率
+    if (i > 0) await sleep(300);
+
+    const ok = await sendOnce(env, webhook, body, headers);
+    if (!ok) allOk = false;
   }
-  // 8 秒超时 (第三方平台可能稍慢)
+  return allOk;
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function sendOnce(
+  env: Env, webhook: Webhook, body: string, headers: Record<string, string>
+): Promise<boolean> {
+  // 10 秒超时 (第三方平台可能稍慢)
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
+  const timeout = setTimeout(() => controller.abort(), 10000);
   let success = false;
   let status = 0;
   let responseText = '';
@@ -133,57 +159,220 @@ export async function deliver(env: Env, webhook: Webhook, payload: WebhookPayloa
   return success;
 }
 
+function normalizeFormat(f?: string | null): 'card' | 'markdown' | 'text' | 'json' {
+  const v = (f || 'card').toLowerCase();
+  if (v === 'markdown' || v === 'text' || v === 'json') return v;
+  return 'card';
+}
+
 // 识别推送平台类型 (根据 URL 域名)
 function detectPlatform(url: string): 'feishu' | 'dingtalk' | 'generic' {
   try {
     const host = new URL(url).hostname.toLowerCase();
-    if (host === 'open.feishu.cn' || host.endsWith('.feishu.cn')) return 'feishu';
+    if (host === 'open.feishu.cn' || host.endsWith('.feishu.cn') || host.endsWith('.larksuite.com')) return 'feishu';
     if (host === 'oapi.dingtalk.com') return 'dingtalk';
     return 'generic';
   } catch { return 'generic'; }
 }
 
-// 构建飞书群机器人消息 (text 类型,飞书机器人 API 要求 msg_type + content)
-function buildFeishuPayload(p: WebhookPayload): { body: string; contentType: string } {
-  const lines: string[] = [];
-  const eventLabel = p.event === 'test' ? '🔧 测试推送' : p.event === 'new_mail' ? '📬 新邮件' : '📬 邮件通知';
-  lines.push(eventLabel);
-  lines.push(`主邮箱: ${p.email || '(未指定)'}`);
-  if (p.to_alias) lines.push(`别名: ${p.to_alias}`);
-  lines.push(`数量: ${p.count}`);
-  if (p.emails && p.emails.length) {
-    lines.push('---');
-    for (const m of p.emails.slice(0, 10)) {
-      lines.push(`【${m.subject || '(无主题)'}】`);
-      lines.push(`发件人: ${m.from}`);
-      if (m.body) lines.push(`正文: ${m.body.slice(0, 150)}`);
-    }
-    if (p.emails.length > 10) lines.push(`... 还有 ${p.emails.length - 10} 封`);
+// ============ 消息体构建 ============
+interface OutMessage { body: string; contentType: string; }
+
+function buildMessages(
+  platform: 'feishu' | 'dingtalk' | 'generic',
+  format: 'card' | 'markdown' | 'text' | 'json',
+  p: WebhookPayload
+): OutMessage[] {
+  // 通用格式:无论什么平台都推原始 JSON(包含完整正文与 HTML)
+  if (format === 'json' || platform === 'generic') {
+    return [{ body: JSON.stringify(p), contentType: 'application/json' }];
   }
-  const feishuBody = JSON.stringify({
-    msg_type: 'text',
-    content: { text: lines.join('\n') },
-  });
-  return { body: feishuBody, contentType: 'application/json' };
+  if (platform === 'feishu') return buildFeishuMessages(format, p);
+  return buildDingtalkMessages(format, p);
 }
 
-// 构建钉钉机器人消息 (text 类型,钉钉要求 text + content)
-function buildDingtalkPayload(p: WebhookPayload): { body: string; contentType: string } {
+// 取邮件正文(优先纯文本,缺失时从 HTML 转文本)
+function bodyOf(m: Email): string {
+  let text = (m.body || '').trim();
+  if (!text && m.html) text = htmlToText(m.html).trim();
+  if (!text) return '(无正文)';
+  if (text.length > MAX_BODY_CHARS) {
+    return text.slice(0, MAX_BODY_CHARS) + `\n\n… (正文过长已截断,共 ${text.length} 字,完整内容请登录系统查看)`;
+  }
+  return text;
+}
+
+function subjectOf(m: Email): string {
+  return (m.subject || '(无主题)').trim();
+}
+
+function attachmentLine(m: Email): string {
+  const atts = (m.attachments || []).filter(Boolean);
+  return atts.length ? atts.join('、') : '无';
+}
+
+// ============ 飞书 ============
+function buildFeishuMessages(format: 'card' | 'markdown' | 'text', p: WebhookPayload): OutMessage[] {
+  if (format === 'text') {
+    return [{ body: JSON.stringify({ msg_type: 'text', content: { text: buildPlainText(p) } }), contentType: 'application/json' }];
+  }
+  // 无邮件(测试/汇总)时也发一张卡片
+  if (!p.emails || p.emails.length === 0) {
+    return [feishuCard('🔧 测试推送', 'blue', [
+      { tag: 'div', text: { tag: 'lstr', content: `Webhook 配置正常,已收到测试事件。\n**主邮箱**: ${p.email || '(未指定)'}\n**时间**: ${p.delivered_at}` } },
+    ])];
+  }
+  const list = p.emails.slice(0, MAX_PUSH_EMAILS);
+  const msgs: OutMessage[] = list.map(m => {
+    const content = [
+      `**发件人**: ${m.from || '-'}`,
+      `**收件人**: ${m.to || '-'}`,
+      `**时间**: ${m.date || '-'}`,
+      `**附件**: ${attachmentLine(m)}`,
+      '',
+      '---',
+      '',
+      bodyOf(m),
+    ].join('\n');
+
+    if (format === 'markdown') {
+      // Markdown 版:单块 Markdown 的简洁卡片
+      return feishuCard(subjectOf(m), 'turquoise', [
+        { tag: 'div', text: { tag: 'lstr', content } },
+      ]);
+    }
+    // 完整卡片:标题 + 结构化字段 + 正文
+    return feishuCard(subjectOf(m), 'blue', [
+      {
+        tag: 'div',
+        fields: [
+          { is_short: true, text: { tag: 'lstr', content: `**发件人**\n${m.from || '-'}` } },
+          { is_short: true, text: { tag: 'lstr', content: `**收件时间**\n${m.date || '-'}` } },
+          { is_short: true, text: { tag: 'lstr', content: `**收件人(别名)**\n${m.to || '-'}` } },
+          { is_short: true, text: { tag: 'lstr', content: `**附件**\n${attachmentLine(m)}` } },
+        ],
+      },
+      { tag: 'hr' },
+      { tag: 'div', text: { tag: 'lstr', content: bodyOf(m) } },
+      { tag: 'note', elements: [{ tag: 'plain_text', content: `主邮箱 ${p.email || '-'}${p.to_alias ? ' · 别名 ' + p.to_alias : ''}` }] },
+    ]);
+  });
+  // 超出单轮上限时补一条汇总
+  if (p.emails.length > MAX_PUSH_EMAILS) {
+    msgs.push({
+      body: JSON.stringify({
+        msg_type: 'text',
+        content: { text: `本次共 ${p.emails.length} 封新邮件,已推送前 ${MAX_PUSH_EMAILS} 封,其余请登录系统查看。` },
+      }),
+      contentType: 'application/json',
+    });
+  }
+  return msgs;
+}
+
+function feishuCard(title: string, template: string, elements: unknown[]): OutMessage {
+  return {
+    body: JSON.stringify({
+      msg_type: 'interactive',
+      card: {
+        config: { wide_screen_mode: true, enable_forward: true },
+        header: {
+          title: { tag: 'plain_text', content: clip(title, 100) },
+          template,
+        },
+        elements,
+      },
+    }),
+    contentType: 'application/json',
+  };
+}
+
+// ============ 钉钉 ============
+function buildDingtalkMessages(format: 'card' | 'markdown' | 'text', p: WebhookPayload): OutMessage[] {
+  if (format === 'text') {
+    return [{ body: JSON.stringify({ msgtype: 'text', text: { content: buildPlainText(p) } }), contentType: 'application/json' }];
+  }
+  if (!p.emails || p.emails.length === 0) {
+    return [{
+      body: JSON.stringify({
+        msgtype: 'markdown',
+        markdown: { title: '测试推送', text: `### 🔧 测试推送\n\nWebhook 配置正常,已收到测试事件。\n\n主邮箱:${p.email || '(未指定)'}` },
+      }),
+      contentType: 'application/json',
+    }];
+  }
+  const list = p.emails.slice(0, MAX_PUSH_EMAILS);
+  const msgs: OutMessage[] = list.map(m => {
+    const text = [
+      `### ${subjectOf(m)}`,
+      '',
+      `- **发件人**: ${m.from || '-'}`,
+      `- **收件人**: ${m.to || '-'}`,
+      `- **时间**: ${m.date || '-'}`,
+      `- **附件**: ${attachmentLine(m)}`,
+      '',
+      bodyOf(m),
+    ].join('\n');
+    if (format === 'card') {
+      return {
+        body: JSON.stringify({
+          msgtype: 'actionCard',
+          actionCard: {
+            title: clip(subjectOf(m), 60),
+            text: text,
+            hideAvatar: '0',
+            btnOrientation: '0',
+            btns: [{ title: '登录系统查看', actionURL: 'https://jin520.eu.org/' }],
+          },
+        }),
+        contentType: 'application/json',
+      };
+    }
+    return {
+      body: JSON.stringify({ msgtype: 'markdown', markdown: { title: clip(subjectOf(m), 60), text } }),
+      contentType: 'application/json',
+    };
+  });
+  if (p.emails.length > MAX_PUSH_EMAILS) {
+    msgs.push({
+      body: JSON.stringify({
+        msgtype: 'text',
+        text: { content: `本次共 ${p.emails.length} 封新邮件,已推送前 ${MAX_PUSH_EMAILS} 封,其余请登录系统查看。` },
+      }),
+      contentType: 'application/json',
+    });
+  }
+  return msgs;
+}
+
+// 纯文本汇总(供 text 格式使用,同样保留完整正文)
+function buildPlainText(p: WebhookPayload): string {
   const lines: string[] = [];
-  lines.push(p.event === 'test' ? '测试推送' : '新邮件通知');
+  lines.push(p.event === 'test' ? '🔧 测试推送' : `📬 新邮件通知 (${p.count} 封)`);
   lines.push(`主邮箱: ${p.email || '(未指定)'}`);
   if (p.to_alias) lines.push(`别名: ${p.to_alias}`);
-  lines.push(`数量: ${p.count}`);
-  if (p.emails && p.emails.length) {
-    for (const m of p.emails.slice(0, 5)) {
-      lines.push(`【${m.subject || '(无主题)'}】来自 ${m.from}`);
-    }
+  if (!p.emails || p.emails.length === 0) {
+    lines.push('Webhook 配置正常,已收到测试事件。');
+    return lines.join('\n');
   }
-  const dingBody = JSON.stringify({
-    msgtype: 'text',
-    text: { content: lines.join('\n') },
-  });
-  return { body: dingBody, contentType: 'application/json' };
+  for (const m of p.emails.slice(0, MAX_PUSH_EMAILS)) {
+    lines.push('────────────────');
+    lines.push(`【${subjectOf(m)}】`);
+    lines.push(`发件人: ${m.from || '-'}`);
+    lines.push(`收件人: ${m.to || '-'}`);
+    lines.push(`时间: ${m.date || '-'}`);
+    lines.push(`附件: ${attachmentLine(m)}`);
+    lines.push(bodyOf(m));
+  }
+  if (p.emails.length > MAX_PUSH_EMAILS) {
+    lines.push(`… 还有 ${p.emails.length - MAX_PUSH_EMAILS} 封,请登录系统查看`);
+  }
+  return lines.join('\n');
+}
+
+function clip(s: string, n: number): string {
+  const t = (s || '').replace(/\s+/g, ' ').trim();
+  return t.length > n ? t.slice(0, n - 1) + '…' : (t || '(无主题)');
 }
 
 // ============ 发送测试推送 ============

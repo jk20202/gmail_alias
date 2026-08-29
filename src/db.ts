@@ -1,10 +1,78 @@
 // D1 数据访问层 - 封装所有 SQL 操作
-import type { Env, SafeUser, SafeMailAccount, MailAccountRaw, Alias, Webhook } from './types';
+import type { Env, SafeUser, SafeMailAccount, MailAccountRaw, Alias, Webhook, UserAlias } from './types';
 import { sha256, randomHex, maskToken, nowISO, buildAliasFull } from './utils';
 
 const SESSION_TTL_DAYS = 7;
 const LOG_RETENTION_DAYS = 30;
 const LOG_MAX_RECORDS = 20000; // 日志最大记录数,超过则舍弃旧的
+
+// ============ 多别名业务常量 ============
+export const MAX_ACTIVE_ALIASES = 5;            // 每用户同时生效的别名上限
+export const ALIAS_TTL_MS = 60 * 60 * 1000;     // 别名有效期 1 小时
+export const ALIAS_HISTORY_KEEP = 30;           // 非收藏别名最多保留条数(历史列表 3 页 x 10 条)
+export const ALIAS_HISTORY_PAGE_SIZE = 10;
+
+// ============ Schema 版本迁移 ============
+// Cloudflare 自动部署只跑 wrangler deploy,不会执行 schema.sql,
+// 因此这里做运行时的一次性迁移(用 KV 记录版本号,避免每次请求都跑 DDL)
+const SCHEMA_VERSION = '2';
+
+export async function ensureSchema(env: Env): Promise<void> {
+  try {
+    const cur = await env.KV.get('schema_version');
+    if (cur === SCHEMA_VERSION) return;
+  } catch {
+    return; // KV 不可用时不阻塞请求
+  }
+
+  const ddl: string[] = [
+    // 多别名表:一个用户可同时拥有多个别名,支持收藏/过期/历史
+    `CREATE TABLE IF NOT EXISTS user_aliases (
+      id              TEXT PRIMARY KEY,
+      user_id         TEXT NOT NULL,
+      mail_account_id TEXT NOT NULL,
+      label           TEXT NOT NULL,
+      full            TEXT NOT NULL,
+      is_favorite     INTEGER NOT NULL DEFAULT 0,
+      status          TEXT NOT NULL DEFAULT 'active',
+      expires_at      TEXT,
+      last_used_at    TEXT NOT NULL,
+      created_at      TEXT NOT NULL
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_user_aliases_unique
+       ON user_aliases(user_id, full)`,
+    `CREATE INDEX IF NOT EXISTS idx_user_aliases_user
+       ON user_aliases(user_id, status)`,
+    `CREATE INDEX IF NOT EXISTS idx_user_aliases_used
+       ON user_aliases(user_id, last_used_at)`,
+  ];
+  for (const sql of ddl) {
+    try { await env.DB.prepare(sql).run(); } catch { /* 已存在则忽略 */ }
+  }
+
+  // webhooks 增加推送格式字段(旧库无此列,失败即说明已存在)
+  try {
+    await env.DB.prepare(`ALTER TABLE webhooks ADD COLUMN format TEXT NOT NULL DEFAULT 'card'`).run();
+  } catch { /* 列已存在 */ }
+
+  // 迁移旧版单别名数据 -> user_aliases(给 1 小时有效期,避免一升级就全部过期)
+  // 注意:时间统一用 JS 生成的 ISO 字符串,不能用 SQLite 的 datetime('now')(格式不同会导致比较失效)
+  try {
+    const iso = nowISO();
+    const exp = new Date(Date.now() + ALIAS_TTL_MS).toISOString();
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO user_aliases
+         (id, user_id, mail_account_id, label, full, is_favorite, status, expires_at, last_used_at, created_at)
+       SELECT lower(hex(randomblob(6))), a.user_id, a.mail_account_id, a.label, a.full, 0, 'active',
+              ?, ?, ?
+       FROM aliases a`
+    ).bind(exp, iso, iso).run();
+  } catch { /* 旧表不存在则跳过 */ }
+
+  try {
+    await env.KV.put('schema_version', SCHEMA_VERSION);
+  } catch { /* ignore */ }
+}
 
 // ============ 转换函数 (DB 行 -> 安全对象) ============
 interface UserRow {
@@ -28,6 +96,11 @@ interface LogRow {
 interface WebhookRow {
   id: string; user_id: string; mail_account_id: string; target_alias: string | null;
   url: string; secret: string | null; events: string; is_active: number; created_at: string;
+  format?: string | null;
+}
+interface UserAliasRow {
+  id: string; user_id: string; mail_account_id: string; label: string; full: string;
+  is_favorite: number; status: string; expires_at: string | null; last_used_at: string; created_at: string;
 }
 
 // 安全邮箱账号(脱敏)
@@ -48,18 +121,39 @@ async function toSafeUser(env: Env, row: UserRow): Promise<SafeUser> {
     'SELECT * FROM mail_accounts WHERE user_id = ? ORDER BY created_at'
   ).bind(row.id).all<MailAccountRow>();
 
-  const aliasRow = await env.DB.prepare(
-    'SELECT * FROM aliases WHERE user_id = ?'
-  ).bind(row.id).first<AliasRow>();
+  // 主别名:优先取 user_aliases 中生效的第一个,没有则回退旧 aliases 表(平滑过渡)
+  const activeRow = await env.DB.prepare(
+    `SELECT ua.*, ma.email, ma.provider
+       FROM user_aliases ua JOIN mail_accounts ma ON ma.id = ua.mail_account_id
+      WHERE ua.user_id = ? AND ua.status = 'active'
+      ORDER BY ua.is_favorite DESC, ua.last_used_at DESC LIMIT 1`
+  ).bind(row.id).first<UserAliasRow & { email: string; provider: string }>();
 
-  const alias: Alias | null = aliasRow
-    ? {
+  let alias: Alias | null = null;
+  if (activeRow) {
+    alias = {
+      mail_account_id: activeRow.mail_account_id,
+      label: activeRow.label,
+      full: activeRow.full,
+      updated_at: activeRow.last_used_at,
+    };
+  } else {
+    const aliasRow = await env.DB.prepare(
+      'SELECT * FROM aliases WHERE user_id = ?'
+    ).bind(row.id).first<AliasRow>();
+    if (aliasRow) {
+      alias = {
         mail_account_id: aliasRow.mail_account_id,
         label: aliasRow.label,
         full: aliasRow.full,
         updated_at: aliasRow.updated_at,
-      }
-    : null;
+      };
+    }
+  }
+
+  const cntRow = await env.DB.prepare(
+    `SELECT COUNT(*) AS cnt FROM user_aliases WHERE user_id = ? AND status = 'active'`
+  ).bind(row.id).first<{ cnt: number }>();
 
   return {
     id: row.id,
@@ -69,6 +163,7 @@ async function toSafeUser(env: Env, row: UserRow): Promise<SafeUser> {
     disabled: row.disabled === 1,
     mail_accounts: (accounts.results || []).map(toSafeMailAccount),
     alias,
+    active_alias_count: cntRow?.cnt || 0,
     created_at: row.created_at,
   };
 }
@@ -300,6 +395,7 @@ export async function deleteMailAccount(env: Env, userId: string, accountId: str
   if (r.meta.changes > 0) {
     // 关联别名清除
     await env.DB.prepare('DELETE FROM aliases WHERE mail_account_id = ?').bind(accountId).run();
+    await env.DB.prepare('DELETE FROM user_aliases WHERE mail_account_id = ?').bind(accountId).run();
     return true;
   }
   return false;
@@ -309,6 +405,7 @@ export async function adminDeleteMailAccount(env: Env, accountId: string): Promi
   const r = await env.DB.prepare('DELETE FROM mail_accounts WHERE id = ?').bind(accountId).run();
   if (r.meta.changes > 0) {
     await env.DB.prepare('DELETE FROM aliases WHERE mail_account_id = ?').bind(accountId).run();
+    await env.DB.prepare('DELETE FROM user_aliases WHERE mail_account_id = ?').bind(accountId).run();
     return true;
   }
   return false;
@@ -355,6 +452,246 @@ export async function adminSetAlias(env: Env, userId: string, mailAccountId: str
      ON CONFLICT(user_id) DO UPDATE SET mail_account_id=excluded.mail_account_id, label=excluded.label, full=excluded.full, updated_at=excluded.updated_at`
   ).bind(userId, mailAccountId, label, full, nowISO()).run();
   return { alias: await getAlias(env, userId) };
+}
+
+// ==================== 多别名管理 ====================
+
+function toUserAlias(r: UserAliasRow & { email?: string; provider?: string }): UserAlias {
+  const remain = r.expires_at ? Date.parse(r.expires_at) - Date.now() : 0;
+  return {
+    id: r.id,
+    user_id: r.user_id,
+    mail_account_id: r.mail_account_id,
+    label: r.label,
+    full: r.full,
+    is_favorite: r.is_favorite === 1,
+    status: (r.status as UserAlias['status']) || 'active',
+    expires_at: r.expires_at,
+    last_used_at: r.last_used_at,
+    created_at: r.created_at,
+    email: r.email,
+    provider: (r.provider as 'gmail' | 'outlook') || undefined,
+    remain_ms: r.status === 'active' ? Math.max(0, remain) : 0,
+  };
+}
+
+// 把已到期仍标记为 active 的别名置为 expired(惰性过期,无需后台任务)
+export async function expireStaleAliases(env: Env, userId?: string): Promise<void> {
+  const sql = userId
+    ? `UPDATE user_aliases SET status='expired'
+        WHERE status='active' AND user_id = ? AND expires_at IS NOT NULL AND expires_at < ?`
+    : `UPDATE user_aliases SET status='expired'
+        WHERE status='active' AND expires_at IS NOT NULL AND expires_at < ?`;
+  const stmt = env.DB.prepare(sql);
+  await (userId ? stmt.bind(userId, nowISO()) : stmt.bind(nowISO())).run();
+}
+
+// 历史裁剪:收藏的永久保留,其余只保留最近 ALIAS_HISTORY_KEEP 条
+export async function pruneAliasHistory(env: Env, userId: string): Promise<void> {
+  await env.DB.prepare(
+    `DELETE FROM user_aliases
+      WHERE user_id = ? AND is_favorite = 0 AND status <> 'active'
+        AND id NOT IN (
+          SELECT id FROM user_aliases
+           WHERE user_id = ? AND is_favorite = 0 AND status <> 'active'
+           ORDER BY last_used_at DESC LIMIT ?
+        )`
+  ).bind(userId, userId, ALIAS_HISTORY_KEEP).run();
+}
+
+// 生效中的别名(自动剔除已过期)
+export async function listActiveAliases(env: Env, userId: string): Promise<UserAlias[]> {
+  await expireStaleAliases(env, userId);
+  const { results } = await env.DB.prepare(
+    `SELECT ua.*, ma.email, ma.provider
+       FROM user_aliases ua JOIN mail_accounts ma ON ma.id = ua.mail_account_id
+      WHERE ua.user_id = ? AND ua.status = 'active'
+      ORDER BY ua.is_favorite DESC, ua.last_used_at DESC`
+  ).bind(userId).all<UserAliasRow & { email: string; provider: string }>();
+  return (results || []).map(toUserAlias);
+}
+
+export async function getAllAliases(env: Env, userId: string): Promise<UserAlias[]> {
+  const { results } = await env.DB.prepare(
+    `SELECT ua.*, ma.email, ma.provider
+       FROM user_aliases ua JOIN mail_accounts ma ON ma.id = ua.mail_account_id
+      WHERE ua.user_id = ?
+      ORDER BY ua.is_favorite DESC, ua.last_used_at DESC`
+  ).bind(userId).all<UserAliasRow & { email: string; provider: string }>();
+  return (results || []).map(toUserAlias);
+}
+
+export async function getAliasRowById(env: Env, userId: string, aliasId: string): Promise<UserAlias | null> {
+  const row = await env.DB.prepare(
+    `SELECT ua.*, ma.email, ma.provider
+       FROM user_aliases ua JOIN mail_accounts ma ON ma.id = ua.mail_account_id
+      WHERE ua.id = ? AND ua.user_id = ?`
+  ).bind(aliasId, userId).first<UserAliasRow & { email: string; provider: string }>();
+  return row ? toUserAlias(row) : null;
+}
+
+export async function countActiveAliases(env: Env, userId: string): Promise<number> {
+  await expireStaleAliases(env, userId);
+  const row = await env.DB.prepare(
+    `SELECT COUNT(*) AS cnt FROM user_aliases WHERE user_id = ? AND status = 'active'`
+  ).bind(userId).first<{ cnt: number }>();
+  return row?.cnt || 0;
+}
+
+// 创建别名:校验邮箱可用 + 生效数量上限 + full 唯一
+export async function createUserAlias(
+  env: Env, userId: string, mailAccountId: string, label: string
+): Promise<{ alias: UserAlias | null; err?: string }> {
+  const account = await env.DB.prepare(
+    'SELECT * FROM mail_accounts WHERE id = ? AND (user_id = ? OR is_public = 1)'
+  ).bind(mailAccountId, userId).first<MailAccountRow>();
+  if (!account) return { alias: null, err: '未找到指定的邮箱或无权使用' };
+
+  const full = buildAliasFull(account.email, label);
+  if (!full) return { alias: null, err: '别名生成失败,邮箱格式错误' };
+
+  await expireStaleAliases(env, userId);
+  const active = await countActiveAliases(env, userId);
+  if (active >= MAX_ACTIVE_ALIASES) {
+    return { alias: null, err: `可创建邮箱已达到上限(${MAX_ACTIVE_ALIASES}个),请先停用或删除一个` };
+  }
+
+  const dup = await env.DB.prepare(
+    'SELECT id FROM user_aliases WHERE user_id = ? AND full = ?'
+  ).bind(userId, full).first<{ id: string }>();
+
+  const now = nowISO();
+  const expiresAt = new Date(Date.now() + ALIAS_TTL_MS).toISOString();
+  if (dup) {
+    // 已存在同名别名 -> 直接重新启用(续期)
+    await env.DB.prepare(
+      `UPDATE user_aliases SET status='active', expires_at=?, last_used_at=?, mail_account_id=? WHERE id=?`
+    ).bind(expiresAt, now, mailAccountId, dup.id).run();
+    return { alias: await getAliasRowById(env, userId, dup.id) };
+  }
+
+  const id = 'a' + randomHex(6);
+  await env.DB.prepare(
+    `INSERT INTO user_aliases(id, user_id, mail_account_id, label, full, is_favorite, status, expires_at, last_used_at, created_at)
+     VALUES(?,?,?,?,?,0,'active',?,?,?)`
+  ).bind(id, userId, mailAccountId, label, full, expiresAt, now, now).run();
+
+  await pruneAliasHistory(env, userId);
+  return { alias: await getAliasRowById(env, userId, id) };
+}
+
+// 恢复启用(历史别名重新收件):同样受上限约束
+export async function restoreAlias(
+  env: Env, userId: string, aliasId: string
+): Promise<{ alias: UserAlias | null; err?: string }> {
+  const row = await env.DB.prepare(
+    'SELECT * FROM user_aliases WHERE id = ? AND user_id = ?'
+  ).bind(aliasId, userId).first<UserAliasRow>();
+  if (!row) return { alias: null, err: '别名不存在' };
+
+  await expireStaleAliases(env, userId);
+  if (row.status !== 'active') {
+    const active = await countActiveAliases(env, userId);
+    if (active >= MAX_ACTIVE_ALIASES) {
+      return { alias: null, err: `可创建邮箱已达到上限(${MAX_ACTIVE_ALIASES}个),请先停用或删除一个` };
+    }
+  }
+  const expiresAt = new Date(Date.now() + ALIAS_TTL_MS).toISOString();
+  await env.DB.prepare(
+    `UPDATE user_aliases SET status='active', expires_at=?, last_used_at=? WHERE id=? AND user_id=?`
+  ).bind(expiresAt, nowISO(), aliasId, userId).run();
+  await pruneAliasHistory(env, userId);
+  return { alias: await getAliasRowById(env, userId, aliasId) };
+}
+
+// 续期:再延 1 小时
+export async function renewAlias(
+  env: Env, userId: string, aliasId: string
+): Promise<{ alias: UserAlias | null; err?: string }> {
+  const row = await env.DB.prepare(
+    'SELECT status FROM user_aliases WHERE id = ? AND user_id = ?'
+  ).bind(aliasId, userId).first<{ status: string }>();
+  if (!row) return { alias: null, err: '别名不存在' };
+  if (row.status !== 'active') return { alias: null, err: '别名已失效,请点击恢复启用' };
+  const expiresAt = new Date(Date.now() + ALIAS_TTL_MS).toISOString();
+  await env.DB.prepare(
+    `UPDATE user_aliases SET expires_at=?, last_used_at=? WHERE id=? AND user_id=?`
+  ).bind(expiresAt, nowISO(), aliasId, userId).run();
+  return { alias: await getAliasRowById(env, userId, aliasId) };
+}
+
+// 停用(暂停收件),但保留在历史列表中
+export async function deactivateAlias(env: Env, userId: string, aliasId: string): Promise<boolean> {
+  const r = await env.DB.prepare(
+    `UPDATE user_aliases SET status='archived', expires_at=NULL WHERE id=? AND user_id=?`
+  ).bind(aliasId, userId).run();
+  return r.meta.changes > 0;
+}
+
+export async function deleteAlias(env: Env, userId: string, aliasId: string): Promise<boolean> {
+  const r = await env.DB.prepare('DELETE FROM user_aliases WHERE id = ? AND user_id = ?')
+    .bind(aliasId, userId).run();
+  return r.meta.changes > 0;
+}
+
+export async function setAliasFavorite(
+  env: Env, userId: string, aliasId: string, favorite: boolean
+): Promise<boolean> {
+  const r = await env.DB.prepare(
+    'UPDATE user_aliases SET is_favorite = ? WHERE id = ? AND user_id = ?'
+  ).bind(favorite ? 1 : 0, aliasId, userId).run();
+  return r.meta.changes > 0;
+}
+
+// 刷新使用时间(查询命中时调用,用于历史列表排序)
+export async function touchAliases(env: Env, userId: string, aliasIds: string[]): Promise<void> {
+  if (!aliasIds.length) return;
+  const now = nowISO();
+  for (const id of aliasIds) {
+    await env.DB.prepare('UPDATE user_aliases SET last_used_at = ? WHERE id = ? AND user_id = ?')
+      .bind(now, id, userId).run();
+  }
+}
+
+// 历史列表:收藏置顶 + 最近使用降序,支持别名地址/标签/主邮箱模糊搜索 + 分页
+export async function listAliasHistory(
+  env: Env, userId: string, keyword: string, page: number, pageSize = ALIAS_HISTORY_PAGE_SIZE
+): Promise<{ list: UserAlias[]; total: number; page: number; page_size: number; total_pages: number }> {
+  await expireStaleAliases(env, userId);
+  const kw = (keyword || '').trim().toLowerCase();
+  const where = kw
+    ? `WHERE ua.user_id = ? AND (lower(ua.full) LIKE ? OR lower(ua.label) LIKE ? OR lower(ma.email) LIKE ?)`
+    : `WHERE ua.user_id = ?`;
+  const like = `%${kw}%`;
+  const countStmt = env.DB.prepare(
+    `SELECT COUNT(*) AS cnt FROM user_aliases ua JOIN mail_accounts ma ON ma.id = ua.mail_account_id ${where}`
+  );
+  const countRow = await (kw ? countStmt.bind(userId, like, like, like) : countStmt.bind(userId))
+    .first<{ cnt: number }>();
+  const total = countRow?.cnt || 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const offset = (safePage - 1) * pageSize;
+
+  const listStmt = env.DB.prepare(
+    `SELECT ua.*, ma.email, ma.provider
+       FROM user_aliases ua JOIN mail_accounts ma ON ma.id = ua.mail_account_id
+       ${where}
+      ORDER BY ua.is_favorite DESC, ua.last_used_at DESC
+      LIMIT ? OFFSET ?`
+  );
+  const { results } = await (kw
+    ? listStmt.bind(userId, like, like, like, pageSize, offset)
+    : listStmt.bind(userId, pageSize, offset)
+  ).all<UserAliasRow & { email: string; provider: string }>();
+
+  return {
+    list: (results || []).map(toUserAlias),
+    total,
+    page: safePage,
+    page_size: pageSize,
+    total_pages: totalPages,
+  };
 }
 
 // ============ 使用日志 ============
@@ -418,13 +755,21 @@ export async function statsSummary(env: Env): Promise<{ total_calls: number; by_
 // ============ Webhook ============
 export async function createWebhook(
   env: Env, userId: string, mailAccountId: string, targetAlias: string | null,
-  url: string, secret: string | null, events: string
+  url: string, secret: string | null, events: string, format = 'card'
 ): Promise<string> {
   const id = 'w' + randomHex(4);
-  await env.DB.prepare(
-    `INSERT INTO webhooks(id, user_id, mail_account_id, target_alias, url, secret, events, is_active)
-     VALUES(?,?,?,?,?,?,?,1)`
-  ).bind(id, userId, mailAccountId, targetAlias, url, secret, events).run();
+  // 兼容未执行 ALTER 的旧库:先尝试带 format 插入,失败则退回旧列
+  try {
+    await env.DB.prepare(
+      `INSERT INTO webhooks(id, user_id, mail_account_id, target_alias, url, secret, events, format, is_active)
+       VALUES(?,?,?,?,?,?,?,?,1)`
+    ).bind(id, userId, mailAccountId, targetAlias, url, secret, events, format).run();
+  } catch {
+    await env.DB.prepare(
+      `INSERT INTO webhooks(id, user_id, mail_account_id, target_alias, url, secret, events, is_active)
+       VALUES(?,?,?,?,?,?,?,1)`
+    ).bind(id, userId, mailAccountId, targetAlias, url, secret, events).run();
+  }
   return id;
 }
 
@@ -435,7 +780,7 @@ export async function listWebhooks(env: Env, userId: string): Promise<Webhook[]>
   return (results || []).map(r => ({
     id: r.id, user_id: r.user_id, mail_account_id: r.mail_account_id,
     target_alias: r.target_alias, url: r.url, secret: r.secret,
-    events: r.events, is_active: r.is_active === 1, created_at: r.created_at,
+    events: r.events, format: r.format || 'card', is_active: r.is_active === 1, created_at: r.created_at,
   }));
 }
 
@@ -459,7 +804,7 @@ export async function getWebhooksForAccount(env: Env, mailAccountId: string): Pr
   return (results || []).map(r => ({
     id: r.id, user_id: r.user_id, mail_account_id: r.mail_account_id,
     target_alias: r.target_alias, url: r.url, secret: r.secret,
-    events: r.events, is_active: r.is_active === 1, created_at: r.created_at,
+    events: r.events, format: r.format || 'card', is_active: r.is_active === 1, created_at: r.created_at,
   }));
 }
 
@@ -475,6 +820,16 @@ export async function getActiveWebhookAccountIds(env: Env): Promise<string[]> {
     'SELECT DISTINCT mail_account_id FROM webhooks WHERE is_active = 1'
   ).all<{ mail_account_id: string }>();
   return (results || []).map(r => r.mail_account_id);
+}
+
+export async function updateWebhookFormat(env: Env, id: string, userId: string, format: string): Promise<boolean> {
+  try {
+    const r = await env.DB.prepare('UPDATE webhooks SET format = ? WHERE id = ? AND user_id = ?')
+      .bind(format, id, userId).run();
+    return r.meta.changes > 0;
+  } catch {
+    return false; // 旧库无 format 列
+  }
 }
 
 export async function logWebhookDelivery(env: Env, webhookId: string, payload: string, status: number, response: string, success: boolean): Promise<void> {
