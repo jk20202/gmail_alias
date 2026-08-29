@@ -175,6 +175,28 @@ class ImapConnection {
     return map;
   }
 
+  // 取收件箱邮件总数(用于按序列号拉取最近若干封,避免全量 UID 枚举撑爆 CPU)
+  async statusMessages(): Promise<number> {
+    const tag = this.nextTag();
+    const res = await this.command(tag, `${tag} STATUS INBOX (MESSAGES)`, 15000);
+    if (res.tagged !== 'OK') return 0;
+    const text = this.dec.decode(res.raw);
+    const m = /MESSAGES\s+(\d+)/i.exec(text);
+    return m ? parseInt(m[1], 10) : 0;
+  }
+
+  // 按序列号区间拉取(默认只拉头部):用于「最近 N 封」场景,响应体积与封数成正比,CPU 占用恒定极小
+  async fetchBySequence(range: string, spec = 'UID FLAGS BODY.PEEK[HEADER]'): Promise<Map<number, { raw: Uint8Array; flags: string[] }>> {
+    const map = new Map<number, { raw: Uint8Array; flags: string[] }>();
+    const tag = this.nextTag();
+    const res = await this.command(tag, `${tag} FETCH ${range} (${spec})`, 15000);
+    if (res.tagged !== 'OK') throw new Error('IMAP 拉取失败: ' + (res.text || ''));
+    for (const item of parseFetchBlocks(res.raw)) {
+      if (item.uid != null && item.raw) map.set(item.uid, { raw: item.raw, flags: item.flags });
+    }
+    return map;
+  }
+
   async storeSeen(uids: number[]): Promise<void> {
     if (!uids.length) return;
     const tag = this.nextTag();
@@ -199,15 +221,6 @@ class ImapConnection {
 // IMAP 引号(双引号包裹,转义内部 " 与 \)
 function imapQuote(s: string): string {
   return '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
-}
-
-// IMAP 日期格式 DD-Mon-YYYY(用于 SEARCH SINCE),按 UTC 取值避免时区偏差
-function imapDate(iso: string): string | null {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return null;
-  const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
-  const day = String(d.getUTCDate()).padStart(2, '0');
-  return `${day}-${mon}-${d.getUTCFullYear()}`;
 }
 
 // ============ FETCH 响应字节级解析 ============
@@ -437,21 +450,15 @@ export async function fetchImapEmails(env: Env, accountId: string, params: Fetch
     await conn.login(cfg.username, cfg.password);
     await conn.selectInbox();
 
-    // 搜索条件: unseen 优先;有起始时间时按 SINCE 收敛(只查该别名创建以来的邮件),
-    // 避免 Gmail 全量 UID 列表撑爆 Worker 的 CPU/时长上限;JS 端再做时间/关键字过滤
-    const criteriaParts: string[] = [];
-    if (params.unseen === true) criteriaParts.push('UNSEEN');
-    const since = imapDate(params.start_time || '');
-    if (since) criteriaParts.push(`SINCE ${since}`);
-    const criteria = criteriaParts.length ? criteriaParts.join(' ') : 'ALL';
-    let uids = await conn.searchUids(criteria);
-    if (!uids.length) return [];
-    // UID 升序,取末尾 N 封(最新);控制总量,降低负载
-    const cap = Math.min(Math.max(params.limit || 50, 20), 30);
-    if (uids.length > cap) uids = uids.slice(uids.length - cap);
-
-    // 只拉头部(BODY.PEEK[HEADER]),不拉正文
-    const map = await conn.fetchUids(uids, 'UID FLAGS BODY.PEEK[HEADER]');
+    // 关键优化: 绝不调用 UID SEARCH ALL / SINCE —— Gmail 会返回收件箱全量 UID 列表(大邮箱下可达数百 KB),
+    // 解析的 O(n^2) 直接冲破 Worker 的 CPU 限额(Cloudflare error 1102)。
+    // 改为先 STATUS 取邮件总数,再按序列号拉取收件箱「最近若干封」的头部(响应体积只与封数成正比,CPU 恒定且极小),
+    // 真正的 to/时间/关键字过滤交给 emailService 在 JS 端完成。
+    const total = await conn.statusMessages();
+    if (total <= 0) return [];
+    const window = Math.min(Math.max((params.limit || 10) * 3, 30), 80);
+    const seqStart = Math.max(1, total - window + 1);
+    const map = await conn.fetchBySequence(`${seqStart}:*`, 'UID FLAGS BODY.PEEK[HEADER]');
     const emails: Email[] = [];
     for (const [uid, val] of map) {
       const parsed = parseImapHeaders(val.raw);
