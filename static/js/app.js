@@ -161,6 +161,11 @@ function showAppView() {
   document.getElementById('loginView').classList.add('hidden');
   document.getElementById('appView').classList.remove('hidden');
   renderApp();
+  // 后台预加载所有页面 HTML,使随后切换任意页面时无需再等待网络(静态资源,瞬时渲染)
+  Object.keys(PAGE_INIT).forEach(p => {
+    if (PAGE_HTML_CACHE[p]) return;
+    loadPageHtml(p).then(h => { PAGE_HTML_CACHE[p] = h; }).catch(() => {});
+  });
 }
 
 function switchLoginTab(which) {
@@ -245,6 +250,9 @@ const PAGE_INIT = {
   users: () => initUsersPage(),
   settings: () => initSettingsPage(),
 };
+
+// 页面 HTML 本地缓存:首次加载后缓存,后续切换直接渲染,不再有转圈等待
+const PAGE_HTML_CACHE = {};
 
 const PAGE_META = {
   mail: { title: '邮件查询', desc: '聚合查询所有生效别名邮箱的收件，支持全文模糊搜索' },
@@ -331,9 +339,16 @@ async function switchTab(key) {
   if (actions) actions.innerHTML = '';
 
   const main = document.getElementById('appMain');
+  // 命中本地缓存: 直接渲染,零等待(首次加载后所有页面均会被预加载缓存)
+  if (PAGE_HTML_CACHE[key]) {
+    main.innerHTML = PAGE_HTML_CACHE[key];
+    if (PAGE_INIT[key]) await PAGE_INIT[key]();
+    return;
+  }
   main.innerHTML = '<div class="loading"><span class="spinner"></span> 加载中...</div>';
   try {
     const html = await loadPageHtml(key);
+    PAGE_HTML_CACHE[key] = html;
     main.innerHTML = html;
     if (PAGE_INIT[key]) await PAGE_INIT[key]();
   } catch (err) {

@@ -9,23 +9,42 @@ const WH_FORMAT_LABEL = {
   json: '原始 JSON',
 };
 
+// ============ 本地缓存: 减少重复查库,页面切换瞬时渲染 ============
+const WH_CACHE_KEY = 'mail_alias_webhooks_v1';
+function getCachedWebhooks() {
+  try { return JSON.parse(localStorage.getItem(WH_CACHE_KEY) || 'null'); } catch { return null; }
+}
+function setCachedWebhooks(list) {
+  try { localStorage.setItem(WH_CACHE_KEY, JSON.stringify(list || [])); } catch {}
+}
+
 async function initWebhookPage() {
-  try {
-    const list = await api('/api/account/mail_accounts/available');
-    const sel = document.getElementById('whAccount');
-    if (!list || !list.length) {
-      sel.innerHTML = '<option value="">无可用邮箱</option>';
-    } else {
-      sel.innerHTML = list.map(a => {
-        const own = a.is_own;
-        const tag = own ? '可监听整箱' : '仅限我的别名';
-        return `<option value="${esc(a.id)}" data-own="${own ? 1 : 0}">${esc(a.email)} (${esc(a.provider)} · ${tag})</option>`;
-      }).join('');
-    }
-    onWhAccountChange();
-    sel.onchange = onWhAccountChange;
-  } catch (err) { toast(err.message, 'error'); }
-  loadWebhooks();
+  // 可用邮箱:优先复用已加载的缓存(邮件查询/账户页已拉取过),避免每次都查库
+  if (!State.availableAccounts || !State.availableAccounts.length) {
+    try { State.availableAccounts = await api('/api/account/mail_accounts/available'); }
+    catch { State.availableAccounts = []; }
+  }
+  renderWhAccountOptions(State.availableAccounts || []);
+  onWhAccountChange();
+  // 先用本地缓存瞬时渲染(无转圈),随后后台静默刷新线上数据
+  const cached = getCachedWebhooks();
+  if (cached) renderWebhooks(cached);
+  loadWebhooks(true);
+}
+
+function renderWhAccountOptions(list) {
+  const sel = document.getElementById('whAccount');
+  if (!sel) return;
+  if (!list || !list.length) {
+    sel.innerHTML = '<option value="">无可用邮箱</option>';
+  } else {
+    sel.innerHTML = list.map(a => {
+      const own = a.is_own;
+      const tag = own ? '可监听整箱' : '仅限我的别名';
+      return `<option value="${esc(a.id)}" data-own="${own ? 1 : 0}">${esc(a.email)} (${esc(a.provider)} · ${tag})</option>`;
+    }).join('');
+  }
+  sel.onchange = onWhAccountChange;
 }
 
 function onWhAccountChange() {
@@ -45,20 +64,32 @@ function onWhAccountChange() {
   }
 }
 
-async function loadWebhooks() {
+async function loadWebhooks(silent) {
   const box = document.getElementById('whList');
   if (!box) return;
+  if (!silent) box.innerHTML = '<div class="loading"><span class="spinner"></span> 加载中...</div>';
   try {
     const list = await api('/api/webhooks');
-    if (!list.length) {
-      box.innerHTML = '<div class="mail-empty">暂无订阅</div>';
-      return;
-    }
-    box.innerHTML = list.map(w => {
-      const fmt = w.format || 'card';
-      const fmtOptions = Object.keys(WH_FORMAT_LABEL)
-        .map(k => `<option value="${k}" ${k === fmt ? 'selected' : ''}>${WH_FORMAT_LABEL[k]}</option>`).join('');
-      return `
+    setCachedWebhooks(list);
+    renderWebhooks(list);
+  } catch (err) {
+    // 静默刷新失败:保留本地缓存内容,不破坏当前页面
+    if (!silent) box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
+  }
+}
+
+function renderWebhooks(list) {
+  const box = document.getElementById('whList');
+  if (!box) return;
+  if (!list || !list.length) {
+    box.innerHTML = '<div class="mail-empty">暂无订阅</div>';
+    return;
+  }
+  box.innerHTML = list.map(w => {
+    const fmt = w.format || 'card';
+    const fmtOptions = Object.keys(WH_FORMAT_LABEL)
+      .map(k => `<option value="${k}" ${k === fmt ? 'selected' : ''}>${WH_FORMAT_LABEL[k]}</option>`).join('');
+    return `
       <div class="mail-item" style="margin-bottom:10px">
         <div class="mail-head" style="cursor:default; flex-wrap:wrap">
           <span class="badge ${w.is_active ? 'badge-success' : 'badge-gray'}">${w.is_active ? '启用' : '停用'}</span>
@@ -85,10 +116,7 @@ async function loadWebhooks() {
           </div>
         </div>
       </div>`;
-    }).join('');
-  } catch (err) {
-    box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
-  }
+  }).join('');
 }
 
 async function changeWebhookFormat(id, format) {

@@ -76,9 +76,12 @@ button, input, select, textarea { font-family: inherit; }
 .btn-block { width: 100%; }
 .btn-ghost { background: transparent; color: var(--text-light); border-color: transparent; }
 .btn-ghost:hover { background: var(--bg-hover); color: var(--text); }
-/* 表格操作列:按钮统一对齐,等宽更整齐 */
-.table .actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.table .actions .btn { min-width: 56px; }
+/* 表格操作列:按钮统一水平对齐,不换行,等宽更整齐 */
+.table .actions { display: flex; gap: 8px; flex-wrap: nowrap; align-items: center; white-space: nowrap; }
+.table .actions .btn { min-width: 52px; flex: 0 0 auto; }
+/* 超长内容省略(悬停 title 看全文) */
+.cell-ellipsis { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
+.cell-ellipsis.mono { font-family: var(--mono); }
 .btn svg { width: 15px; height: 15px; flex: 0 0 auto; }
 
 .card {

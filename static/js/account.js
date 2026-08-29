@@ -7,7 +7,7 @@
 
 async function initAccountPage() {
   fillAccountInfo();
-  await loadMyAccounts();
+  await loadMyAccounts(true);
   // 监听 OAuth 跳转授权成功后子窗口 postMessage
   window.addEventListener('message', onOAuthMessage);
 }
@@ -16,7 +16,7 @@ function onOAuthMessage(e) {
   if (!e.data || typeof e.data !== 'object') return;
   if (e.data.type === 'oauth_bind_success') {
     toast((e.data.email || '邮箱') + ' 绑定成功', 'success');
-    loadMyAccounts();
+    loadMyAccounts(true);
     if (typeof loadAvailableAccounts === 'function') loadAvailableAccounts();
   } else if (e.data.type === 'oauth_bind_failed') {
     toast(e.data.message || '绑定失败', 'error', 5000);
@@ -76,41 +76,53 @@ async function doChangePassword() {
 }
 
 /* ============ 邮箱列表 ============ */
-async function loadMyAccounts() {
+async function loadMyAccounts(silent) {
   const box = document.getElementById('myAccounts');
   if (!box) return;
+  // 命中本地缓存:先瞬时渲染,随后后台静默刷新(避免每次切换页面都转圈查库)
+  if (silent && State.mailAccounts && State.mailAccounts.length) {
+    renderMyAccounts(State.mailAccounts, box);
+    return;
+  }
+  if (!silent) box.innerHTML = '<div class="loading"><span class="spinner"></span> 加载中...</div>';
   try {
     const list = await api('/api/account/mail_accounts');
     State.mailAccounts = list || [];
-    if (!list.length) {
-      box.innerHTML = '<div class="mail-empty">尚未绑定任何邮箱，点击上方按钮开始绑定</div>';
-      return;
-    }
-    box.innerHTML = `<div class="table-wrap"><table class="table">
-      <thead><tr>
-        <th>邮箱</th><th>类型</th><th>Plus寻址</th><th>授权状态</th><th>是否公开</th><th>操作</th>
-      </tr></thead>
-      <tbody>${list.map(a => `
-        <tr>
-          <td><span class="mono">${esc(a.email)}</span></td>
-          <td><span class="badge ${a.provider === 'gmail' ? 'badge-primary' : 'badge-warning'}">${esc(a.provider)}</span></td>
-          <td><span class="badge badge-success">✓ 启用</span></td>
-          <td id="acc-status-${esc(a.id)}"><span class="badge badge-gray">检测中...</span></td>
-          <td>
-            <label class="switch" style="display:inline-flex; align-items:center; gap:6px; cursor:pointer">
-              <input type="checkbox" ${a.is_public ? 'checked' : ''} onchange="togglePublic('${esc(a.id)}', this.checked)">
-              <span class="track"></span>
-              <span>${a.is_public ? '公开' : '私有'}</span>
-            </label>
-          </td>
-          <td>
-            <button class="btn btn-secondary btn-sm" id="acc-reauth-${esc(a.id)}" onclick="reauthAccount('${esc(a.id)}','${esc(a.provider)}')">重新授权</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteAccount('${esc(a.id)}','${esc(a.email)}')">删除</button>
-          </td>
-        </tr>`).join('')}</tbody>
-    </table></div>`;
-    list.forEach(a => probeAuthStatus(a.id));
-  } catch (err) { box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`; }
+    renderMyAccounts(State.mailAccounts, box);
+  } catch (err) {
+    if (!silent) box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
+  }
+}
+
+function renderMyAccounts(list, box) {
+  if (!list.length) {
+    box.innerHTML = '<div class="mail-empty">尚未绑定任何邮箱，点击上方按钮开始绑定</div>';
+    return;
+  }
+  box.innerHTML = `<div class="table-wrap"><table class="table">
+    <thead><tr>
+      <th>邮箱</th><th>类型</th><th>Plus寻址</th><th>授权状态</th><th>是否公开</th><th>操作</th>
+    </tr></thead>
+    <tbody>${list.map(a => `
+      <tr>
+        <td><span class="mono">${esc(a.email)}</span></td>
+        <td><span class="badge ${a.provider === 'gmail' ? 'badge-primary' : 'badge-warning'}">${esc(a.provider)}</span></td>
+        <td><span class="badge badge-success">✓ 启用</span></td>
+        <td id="acc-status-${esc(a.id)}"><span class="badge badge-gray">检测中...</span></td>
+        <td>
+          <label class="switch" style="display:inline-flex; align-items:center; gap:6px; cursor:pointer">
+            <input type="checkbox" ${a.is_public ? 'checked' : ''} onchange="togglePublic('${esc(a.id)}', this.checked)">
+            <span class="track"></span>
+            <span>${a.is_public ? '公开' : '私有'}</span>
+          </label>
+        </td>
+        <td>
+          <button class="btn btn-secondary btn-sm" id="acc-reauth-${esc(a.id)}" onclick="reauthAccount('${esc(a.id)}','${esc(a.provider)}')">重新授权</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteAccount('${esc(a.id)}','${esc(a.email)}')">删除</button>
+        </td>
+      </tr>`).join('')}</tbody>
+  </table></div>`;
+  list.forEach(a => probeAuthStatus(a.id));
 }
 
 async function probeAuthStatus(id) {
@@ -139,9 +151,9 @@ async function togglePublic(id, isPublic) {
   try {
     await api('/api/account/mail_accounts/' + id + '/public', { method: 'PUT', body: { is_public: isPublic } });
     toast(isPublic ? '已设为公开,其他用户可使用此邮箱' : '已设为私有', 'success');
-    loadMyAccounts();
+    loadMyAccounts(true);
     if (typeof loadAvailableAccounts === 'function') loadAvailableAccounts();
-  } catch (err) { toast(err.message, 'error'); loadMyAccounts(); }
+  } catch (err) { toast(err.message, 'error'); loadMyAccounts(true); }
 }
 
 async function regenApiKey() {
@@ -161,7 +173,7 @@ async function deleteAccount(id, email) {
     try {
       await api('/api/account/mail_accounts/' + id, { method: 'DELETE' });
       toast('已删除邮箱', 'success');
-      loadMyAccounts();
+      loadMyAccounts(true);
       if (typeof loadAvailableAccounts === 'function') loadAvailableAccounts();
     } catch (err) { toast(err.message, 'error'); }
   });
@@ -173,40 +185,29 @@ function openBindModal(provider) {
   const title = isGmail ? '绑定 Gmail' : '绑定 Outlook / Hotmail';
   const body = `
     <div class="bind-options">
-      <div class="bind-option" onclick="startRedirectAuth('${provider}')">
-        <div class="bind-option-title">🌐 跳转授权（推荐）</div>
-        <div class="bind-option-desc">自动打开 Google / 微软授权页，授权完成后自动关闭窗口。可重复绑定多个账号。</div>
-      </div>
       <div class="bind-option" onclick="startDeviceAuth('${provider}')">
-        <div class="bind-option-title">⌨️ 设备码授权</div>
-        <div class="bind-option-desc">复制弹出的授权码，到授权页输入完成绑定。适合网络代理不稳定的环境。</div>
+        <div class="bind-option-title">⌨️ 设备码授权（推荐）</div>
+        <div class="bind-option-desc">复制弹出的授权码，到授权页输入完成绑定。无需在 Google / 微软后台登记任何回调地址，最适配 Cloudflare 部署。${isGmail ? '首次绑定会在弹窗内要求填写一次 Google 客户端凭据（全站共享）。' : ''}</div>
       </div>
       ${isGmail ? `
       <div class="bind-option" onclick="showAppPasswordInfo()">
-        <div class="bind-option-title">🔑 应用密码 (App Password)</div>
-        <div class="bind-option-desc">使用 Gmail 生成的 16 位应用密码。当前版本仅支持 OAuth 方式收取邮件，应用密码方式暂未接入。</div>
+        <div class="bind-option-title">🔑 应用密码 (App Password) · 暂不支持</div>
+        <div class="bind-option-desc">Gmail 的 16 位应用密码仅用于 IMAP / SMTP，与系统采用的 Gmail API（OAuth 2.0）通道不兼容，当前及可预见版本均无法接入。</div>
       </div>` : ''}
     </div>`;
   showModal(title, body, '<button class="btn btn-secondary" onclick="closeModal()">取消</button>');
 }
 
 function showAppPasswordInfo() {
-  showModal('应用密码绑定（暂不支持）', `
-    <p>应用密码（App Password）是 Gmail 为开启两步验证的账号提供的 16 位专用密码，仅用于 <b>IMAP / SMTP</b> 客户端。</p>
-    <p class="form-hint" style="margin-top:10px">当前系统通过 <b>Gmail API（OAuth 2.0）</b> 收取邮件，与应用密码走的 IMAP 通道完全不同。要在 Cloudflare Workers 上支持应用密码，需要额外实现一套完整的 IMAP 客户端（含 TLS、命令解析、收件轮询），工作量较大，且与现有 token 刷新机制不兼容。因此现阶段建议直接使用上方的「跳转授权 / 设备码」OAuth 方式绑定，体验一致且无需改代码。</p>`,
+  showModal('应用密码（App Password）能否用于本系统？', `
+    <p><b>结论：当前版本及可预见的未来版本均不支持应用密码方式。</b></p>
+    <p class="form-hint" style="margin-top:10px">原因有两点：</p>
+    <ol style="padding-left:18px; color:var(--text-light); font-size:13px; line-height:1.9">
+      <li><b>通道不同</b>：应用密码是 Gmail 给 <b>IMAP / SMTP</b> 客户端用的；本系统收邮件走的是 <b>Gmail API（OAuth 2.0）</b>，两者底层协议完全不同，应用密码对 API 通道无效。</li>
+      <li><b>实现成本极高</b>：要在 Cloudflare Workers 上支持应用密码，需要自写一整套 IMAP 客户端（TLS 握手、命令解析、收件轮询、与现有 token 刷新机制并存），工作量很大且容易出兼容问题。</li>
+    </ol>
+    <p class="form-hint">因此请直接使用上方的「设备码授权」OAuth 方式绑定 Gmail，体验一致、无需改代码，也无需在 Google Cloud 登记任何回调地址。</p>`,
     '<button class="btn btn-secondary" onclick="closeModal()">知道了</button>');
-}
-
-/* ============ 跳转授权 ============ */
-let _oauthPopup = null;
-async function startRedirectAuth(provider) {
-  if (provider === 'gmail' && !(await ensureGoogleCreds('redirect'))) return;
-  try {
-    const data = await api('/api/account/oauth/start?provider=' + provider);
-    closeModal();
-    _oauthPopup = window.open(data.auth_url, 'oauth_' + provider, 'width=600,height=700,scrollbars=yes');
-    if (!_oauthPopup) toast('弹窗被浏览器拦截，请允许弹窗后重试', 'error');
-  } catch (err) { toast(err.message, 'error', 5000); }
 }
 
 /* ============ 设备码授权 ============ */
@@ -259,7 +260,6 @@ async function submitGoogleCreds(method) {
     await api('/api/account/oauth/google/creds', { method: 'POST', body: { client_id: id, client_secret: secret } });
     toast('凭据已保存', 'success');
     closeModal();
-    if (method === 'redirect') return startRedirectAuth('gmail');
     return startDeviceAuth('gmail');
   } catch (err) {
     toast(err.message, 'error');
@@ -307,7 +307,7 @@ function bindDevicePolling(statusPath, timerKey, onSuccess) {
 }
 
 function afterBindSuccess() {
-  loadMyAccounts();
+  loadMyAccounts(true);
   if (typeof loadAvailableAccounts === 'function') loadAvailableAccounts();
 }
 
@@ -317,17 +317,10 @@ async function startGoogleDeviceFlow() {
     data = await api('/api/account/oauth/google/device', { method: 'POST' });
   } catch (err) {
     toast(err.message, 'error', 5000);
-    if (State.user && State.user.is_admin) {
-      setTimeout(() => showModal('需要先配置 Google OAuth 凭据', `
-        <p style="margin-bottom:10px">绑定 Gmail 前，需要在 Google Cloud 创建「桌面应用」类型的 OAuth 客户端，并把 Client ID / Client Secret 填到系统设置里。</p>
-        <ol style="padding-left:18px; color:var(--text-light); font-size:13px; line-height:1.9">
-          <li>打开 Google Cloud 控制台 → API 和服务 → 凭据</li>
-          <li>创建凭据 → OAuth 客户端 ID → 应用类型选「桌面应用」</li>
-          <li>复制 Client ID 与 Client Secret</li>
-          <li>回到本系统「系统设置 → Google OAuth 凭据」粘贴保存</li>
-        </ol>`,
-        `<button class="btn btn-secondary" onclick="closeModal()">稍后配置</button><button class="btn" onclick="closeModal();switchTab('settings')">去配置</button>`), 400);
-    }
+    setTimeout(() => showModal('Gmail 绑定失败', `
+      <p style="margin-bottom:10px">${esc(err.message)}</p>
+      <p class="form-hint">若提示缺少凭据或凭据无效，请在「我的账户 → 绑定 Gmail」弹窗内重新填写正确的 Google 客户端 Client ID / Client Secret（普通用户也可在弹窗内填写，无需进系统设置），再重试设备码授权。</p>`,
+      `<button class="btn btn-secondary" onclick="closeModal()">知道了</button>`), 400);
     return;
   }
   const openUrl = data.verification_url_complete || data.verification_url || 'https://google.com/device';

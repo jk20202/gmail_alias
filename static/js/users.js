@@ -14,20 +14,24 @@ async function loadUsers() {
     const list = await api('/api/admin/users');
     State.adminUsers = list || [];
     box.innerHTML = `<table class="table">
-      <thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>API Key</th><th>邮箱数</th><th>别名</th><th>创建时间</th><th>操作</th></tr></thead>
+      <thead><tr><th>用户名</th><th>角色</th><th>状态（开关）</th><th>API Key</th><th>邮箱数</th><th>创建时间</th><th>操作</th></tr></thead>
       <tbody>${list.map(u => `
         <tr>
-          <td><strong>${esc(u.username)}</strong></td>
+          <td><strong class="cell-ellipsis" title="${esc(u.username)}">${esc(u.username)}</strong></td>
           <td>${u.is_admin ? '<span class="badge badge-primary">管理员</span>' : '<span class="badge badge-gray">用户</span>'}</td>
-          <td>${u.disabled ? '<span class="badge badge-danger">已禁用</span>' : '<span class="badge badge-success">正常</span>'}</td>
-          <td class="mono" style="font-size:12px">${esc(u.api_key)}</td>
+          <td>
+            <label class="switch" title="${u.disabled ? '已禁用，点击启用' : '正常，点击禁用'}">
+              <input type="checkbox" ${u.disabled ? '' : 'checked'} onchange="toggleDisableUser('${esc(u.id)}', !this.checked)">
+              <span class="track"></span>
+              <span>${u.disabled ? '禁用' : '正常'}</span>
+            </label>
+          </td>
+          <td><span class="cell-ellipsis mono" style="font-size:12px" title="${esc(u.api_key)}">${esc(u.api_key)}</span></td>
           <td>${u.mail_accounts ? u.mail_accounts.length : 0}</td>
-          <td>${u.alias ? '<span class="badge badge-success">' + esc(u.alias.full) + '</span>' : '-'}</td>
           <td>${fmtTime(u.created_at)}</td>
           <td>
             <div class="actions">
               <button class="btn btn-sm" onclick="showEditUserModal('${esc(u.id)}')">编辑</button>
-              ${u.is_admin ? '' : `<button class="btn ${u.disabled ? 'btn-secondary' : 'btn-warning'} btn-sm" onclick="toggleDisableUser('${esc(u.id)}', ${!u.disabled})">${u.disabled ? '启用' : '禁用'}</button>`}
               ${u.is_admin ? '' : `<button class="btn btn-danger btn-sm" onclick="deleteUser('${esc(u.id)}','${esc(u.username)}')">删除</button>`}
             </div>
           </td>
