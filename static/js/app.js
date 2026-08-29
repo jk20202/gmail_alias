@@ -349,13 +349,18 @@ function renderApp() {
   switchTab(State.tab, { noPush: true });
 }
 
-async function switchTab(key) {
+async function switchTab(key, opts = {}) {
   // 切换前清理当前页面(停止自动收件 / 轮询定时器等)
   if (State.tab === 'mail' && typeof cleanupMailPage === 'function') cleanupMailPage();
   if (typeof stopAllDevicePolling === 'function') stopAllDevicePolling();
 
   State.tab = key;
   toggleSidebar(false);
+
+  // 更新地址栏(独立 URL,支持书签/分享/后退),初始渲染与浏览器前进后退不重复压栈
+  if (!opts.noPush) {
+    history.pushState({ tab: key }, '', TAB_PATHS[key]);
+  }
 
   // 更新导航高亮
   document.querySelectorAll('#appNav .nav-item').forEach(btn => {

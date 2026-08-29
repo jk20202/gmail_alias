@@ -174,7 +174,9 @@ export default {
     // 5. SPA 回退: 非 API、非静态资源的页面导航请求,统一返回 index.html。
     //    这样 /mail /account /settings 等独立 URL 可被直接访问 / 书签 / 分享,刷新也不会 404
     const accept = req.headers.get('accept') || '';
-    if (accept.includes('text/html')) {
+    // 浏览器导航带 text/html;无扩展名的路径(如 /account)也视为页面路由(curl 等不带 Accept 时同样生效)
+    const isNav = accept.includes('text/html') || !pathname.includes('.');
+    if (isNav && !pathname.startsWith('/api/')) {
       return routes.indexPage({ env, req, url });
     }
 
