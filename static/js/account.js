@@ -79,16 +79,23 @@ async function doChangePassword() {
 async function loadMyAccounts(silent) {
   const box = document.getElementById('myAccounts');
   if (!box) return;
-  // 命中本地缓存:先瞬时渲染,随后后台静默刷新(避免每次切换页面都转圈查库)
-  if (silent && State.mailAccounts && State.mailAccounts.length) {
-    renderMyAccounts(State.mailAccounts, box);
-    return;
+  const cached = State.mailAccounts || [];
+  // 缓存优先: 有旧数据先秒渲染(不转圈);随后后台静默刷新,
+  // 确保新增/删除邮箱后,切换 tab 再切回也能看到最新数据(无需强制刷新)
+  if (silent && cached.length) {
+    renderMyAccounts(cached, box);
+  } else if (!silent) {
+    box.innerHTML = '<div class="loading"><span class="spinner"></span> 加载中...</div>';
   }
-  if (!silent) box.innerHTML = '<div class="loading"><span class="spinner"></span> 加载中...</div>';
   try {
     const list = await api('/api/account/mail_accounts');
     State.mailAccounts = list || [];
-    renderMyAccounts(State.mailAccounts, box);
+    const newIds = (list || []).map(a => a.id).join(',');
+    const oldIds = cached.map(a => a.id).join(',');
+    // 仅当列表内容(增删)变化时才重渲染,避免无谓闪烁
+    if (newIds !== oldIds || !silent) {
+      renderMyAccounts(State.mailAccounts, box);
+    }
   } catch (err) {
     if (!silent) box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
   }
@@ -233,6 +240,18 @@ async function ensureGoogleCreds(method) {
 function showGoogleCredsForm(method) {
   showModal('填写 Google OAuth 凭据', `
     <p class="form-hint" style="margin:0 0 12px">绑定 Gmail 需要先在 Google Cloud 创建「桌面应用」类型的 OAuth 客户端。填写并保存后即可立即授权（凭据全站共享，只需填一次）。</p>
+    <div style="margin:0 0 12px">
+      <a class="btn btn-ghost" href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px">↗ 打开 Google Cloud 凭据页（新标签页）</a>
+    </div>
+    <details style="margin:0 0 12px">
+      <summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--text-light)">看不懂步骤？点开查看</summary>
+      <ol style="padding-left:18px;color:var(--text-light);font-size:13px;line-height:1.9;margin-top:8px">
+        <li>在打开的页面左上，选好对应的 Google 项目（或新建一个）</li>
+        <li>「OAuth 同意屏幕」：用户类型选<strong>外部</strong>，填写应用名称与支持邮箱，测试用户里加上你自己的 Gmail</li>
+        <li>「凭据 → 创建凭据 → OAuth 客户端 ID」：应用类型务必选<strong>桌面应用</strong></li>
+        <li>复制生成的 <b>Client ID</b> 与 <b>Client Secret</b>，粘贴到下方保存</li>
+      </ol>
+    </details>
     <div class="form-group">
       <label class="form-label">Client ID <span class="req">*</span></label>
       <input type="text" id="gcClientId" class="form-control" placeholder="1234567890-xxxx.apps.googleusercontent.com">

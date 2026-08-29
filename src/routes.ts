@@ -95,10 +95,17 @@ async function parseBody(req: Request): Promise<any> {
 }
 
 // ============ 页面 ============
+const SPA_PAGES = ['/mail', '/account', '/webhook', '/docs', '/users', '/settings', '/login'];
+
 export async function indexPage(ctx: Ctx): Promise<Response> {
   // 走 [assets] 绑定,直接 fetch 静态资源
   const url = new URL(ctx.req.url);
-  if (url.pathname === '/' || url.pathname === '/index.html') {
+  // 归一化: 去掉末尾斜杠,避免 /account/ 这类路径无法匹配
+  const p = url.pathname.replace(/\/+$/, '') || '/';
+  // 根路径或任意 SPA 子路径(如 /mail /account /settings)都返回 index.html,
+  // 使各功能页拥有独立、可分享、可书签、刷新不 404 的 URL
+  const isSpa = p === '/' || p === '/index.html' || SPA_PAGES.includes(p);
+  if (isSpa) {
     const resp = await ctx.env.ASSETS.fetch(new Request('http://localhost/', { method: 'GET' }));
     // 读取完整body避免流式传输导致内容截断
     const body = await resp.arrayBuffer();

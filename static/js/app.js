@@ -34,6 +34,29 @@ function svgIcon(name, size) {
   return `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${NAV_ICONS[name] || ''}</svg>`;
 }
 
+/* ============ 多页面独立 URL 路由 ============ */
+// 每个功能页拥有独立、可分享、可书签、刷新不 404 的路径
+const TAB_PATHS = {
+  mail: '/mail', account: '/account', webhook: '/webhook',
+  docs: '/docs', users: '/users', settings: '/settings',
+};
+const PATH_TABS = Object.fromEntries(Object.entries(TAB_PATHS).map(([k, v]) => [v, k]));
+function pathToTab(pathname) {
+  const p = (pathname || '/').replace(/\/+$/, '') || '/';
+  if (p === '/') return 'mail';
+  return PATH_TABS[p] || 'mail';
+}
+// 导航点击: 拦截默认跳转,走 SPA 切换(同时 URL 已更新,支持书签/后退)
+function navTo(key, e) {
+  if (e && e.preventDefault) e.preventDefault();
+  switchTab(key);
+  return false;
+}
+// 浏览器前进/后退: 按 URL 还原对应 tab
+window.addEventListener('popstate', () => {
+  switchTab(pathToTab(location.pathname), { noPush: true });
+});
+
 /* ============ 统一 API 封装 ============ */
 async function api(path, opts = {}) {
   const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
@@ -160,6 +183,12 @@ function showLoginView() {
 function showAppView() {
   document.getElementById('loginView').classList.add('hidden');
   document.getElementById('appView').classList.remove('hidden');
+  // 从 URL 还原当前 tab(支持深链接 / 书签 / 刷新)
+  State.tab = pathToTab(location.pathname);
+  // 规范化 URL: 根路径 / 登录页统一替换为对应 tab 路径,便于书签与分享
+  if (location.pathname === '/' || location.pathname === '/index.html' || location.pathname === '/login') {
+    history.replaceState({ tab: State.tab }, '', TAB_PATHS[State.tab]);
+  }
   renderApp();
   // 后台预加载所有页面 HTML,使随后切换任意页面时无需再等待网络(静态资源,瞬时渲染)
   Object.keys(PAGE_INIT).forEach(p => {
@@ -310,14 +339,14 @@ function renderApp() {
   nav.innerHTML = groups.map(g => `
     <div class="nav-group-label">${esc(g.label)}</div>
     ${g.items.map(t => `
-      <button class="nav-item ${State.tab === t.key ? 'active' : ''}" data-key="${t.key}" onclick="switchTab('${t.key}')">
+      <a class="nav-item ${State.tab === t.key ? 'active' : ''}" data-key="${t.key}" href="${TAB_PATHS[t.key]}" onclick="return navTo('${t.key}', event)">
         ${svgIcon(t.icon)}
         <span>${esc(t.label)}</span>
         ${t.key === 'mail' ? `<span class="tag" id="navAliasTag">${u.active_alias_count || 0}</span>` : ''}
-      </button>`).join('')}
+      </a>`).join('')}
   `).join('');
 
-  switchTab(State.tab);
+  switchTab(State.tab, { noPush: true });
 }
 
 async function switchTab(key) {

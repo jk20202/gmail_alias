@@ -169,7 +169,14 @@ export default {
         }
         return new Response(assetResp.body, { status: assetResp.status, headers: newHeaders, statusText: assetResp.statusText });
       }
-    } catch { /* 走 404 */ }
+    } catch { /* 走 SPA 回退 */ }
+
+    // 5. SPA 回退: 非 API、非静态资源的页面导航请求,统一返回 index.html。
+    //    这样 /mail /account /settings 等独立 URL 可被直接访问 / 书签 / 分享,刷新也不会 404
+    const accept = req.headers.get('accept') || '';
+    if (accept.includes('text/html')) {
+      return routes.indexPage({ env, req, url });
+    }
 
     return new Response(JSON.stringify({ code: 404, msg: 'Not Found', data: null }), {
       status: 404,

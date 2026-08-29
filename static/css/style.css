@@ -202,6 +202,7 @@ select.form-control { cursor: pointer; }
   padding: 9px 11px; margin-bottom: 2px; border: none; background: none;
   border-radius: 9px; cursor: pointer; font-size: 13.5px; color: var(--text-light);
   text-align: left; transition: background .15s, color .15s; position: relative;
+  text-decoration: none;
 }
 .nav-item svg { width: 17px; height: 17px; flex: 0 0 17px; }
 .nav-item:hover { background: var(--bg-hover); color: var(--text); }
