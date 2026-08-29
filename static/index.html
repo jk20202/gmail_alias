@@ -13,7 +13,8 @@
 <body>
 
 <!-- ============ 登录页 ============ -->
-<div id="loginView" class="login-wrap">
+<!-- 默认隐藏:避免刷新时先闪现登录页(静默刷新,校验通过后才显示对应视图) -->
+<div id="loginView" class="login-wrap hidden">
   <div class="login-card">
     <div class="brand">
       <div class="logo">A</div>
@@ -90,6 +91,12 @@
     </header>
     <main class="app-main" id="appMain"></main>
   </div>
+</div>
+
+<!-- ============ 启动过渡层(默认可见,校验完成后由 JS 隐藏) ============ -->
+<div id="bootSplash" class="boot-splash">
+  <span class="spinner"></span>
+  <span>正在加载…</span>
 </div>
 
 <div id="toastBox"></div>

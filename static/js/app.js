@@ -179,10 +179,14 @@ function clearSession() {
 function showLoginView() {
   document.getElementById('loginView').classList.remove('hidden');
   document.getElementById('appView').classList.add('hidden');
+  const bs = document.getElementById('bootSplash');
+  if (bs) bs.classList.add('hidden');
 }
 function showAppView() {
   document.getElementById('loginView').classList.add('hidden');
   document.getElementById('appView').classList.remove('hidden');
+  const bs = document.getElementById('bootSplash');
+  if (bs) bs.classList.add('hidden');
   // 从 URL 还原当前 tab(支持深链接 / 书签 / 刷新)
   State.tab = pathToTab(location.pathname);
   // 规范化 URL: 根路径 / 登录页统一替换为对应 tab 路径,便于书签与分享
@@ -394,7 +398,6 @@ async function switchTab(key, opts = {}) {
  * 启动入口
  * ============================================================ */
 (async function init() {
-  await checkRegistrationAllowed();
   const token = localStorage.getItem(LS_TOKEN);
   const userJson = localStorage.getItem(LS_USER);
   if (token && userJson) {
@@ -402,16 +405,26 @@ async function switchTab(key, opts = {}) {
     try {
       State.user = JSON.parse(userJson);
     } catch { clearSession(); }
-    try {
-      const me = await api('/api/auth/me');
-      State.user = me;
-      localStorage.setItem(LS_USER, JSON.stringify(me));
-      showAppView();
-    } catch {
-      clearSession();
-      showLoginView();
-    }
+  }
+
+  if (State.token && State.user) {
+    // 已有会话: 先用本地缓存的用户信息秒渲染应用外壳(不再闪现登录页),
+    // 再在后台静默校验会话有效性; 仅当校验确实失败时才回退到登录页。
+    showAppView();
+    api('/api/auth/me')
+      .then(me => {
+        State.user = me;
+        localStorage.setItem(LS_USER, JSON.stringify(me));
+        fillAccountInfo();
+      })
+      .catch(() => {
+        clearSession();
+        showLoginView();
+      });
   } else {
     showLoginView();
   }
+
+  // 注册开关: 非阻塞,失败不影响主流程
+  checkRegistrationAllowed().catch(() => {});
 })();

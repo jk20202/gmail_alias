@@ -202,22 +202,99 @@ function openBindModal(provider) {
   if (provider === 'imap') return openImapForm();
   const isGmail = provider === 'gmail';
   const title = isGmail ? '绑定 Gmail' : '绑定 Outlook / Hotmail';
-  const deviceDesc = isGmail
-    ? '复制弹出的授权码，到授权页输入完成绑定。无需在 Google 后台登记回调地址，最适配 Cloudflare 部署。绑定 Gmail 需在弹窗内填写你自己的 Google 客户端凭据（仅保存在你的账号下，与系统设置无关）。'
-    : '复制弹出的授权码，到授权页输入完成绑定。无需在微软后台登记回调地址，最适配 Cloudflare 部署。';
+  if (!isGmail) {
+    // Outlook / Hotmail 只能走设备码授权(Microsoft 已禁用 Basic Auth)
+    const body = `
+      <div class="bind-options">
+        <div class="bind-option" onclick="startDeviceAuth('outlook')">
+          <div class="bind-option-title">⌨️ 设备码授权（推荐）</div>
+          <div class="bind-option-desc">复制弹出的授权码，到授权页输入完成绑定。无需在微软后台登记回调地址，最适配 Cloudflare 部署。</div>
+        </div>
+      </div>`;
+    showModal(title, body, '<button class="btn btn-secondary" onclick="closeModal()">取消</button>');
+    return;
+  }
+  // Gmail: 「应用密码（IMAP）」作为首选推荐, 设备码 OAuth 作为备选
   const body = `
     <div class="bind-options">
-      <div class="bind-option" onclick="startDeviceAuth('${provider}')">
-        <div class="bind-option-title">⌨️ 设备码授权（推荐）</div>
-        <div class="bind-option-desc">${deviceDesc}</div>
+      <div class="bind-option bind-option-recommended" onclick="openGmailAppPasswordForm()">
+        <div class="bind-option-title">🔑 应用密码（IMAP）· 推荐</div>
+        <div class="bind-option-desc">无需创建 Google Cloud OAuth 客户端、无需品牌验证。在 Google 账号开启两步验证后生成一个 16 位应用密码即可收信，最省事（emails-cloud 等自建项目均用此方式）。</div>
       </div>
-      ${isGmail ? `
-      <div class="bind-option" onclick="openImapForm()">
-        <div class="bind-option-title">🔑 应用密码（IMAP）方式</div>
-        <div class="bind-option-desc">若 Google Cloud 强制两步验证导致无法创建 OAuth 凭据，可改用「应用密码 + IMAP」方式收信。需要先在 Google 账号开启两步验证并生成 16 位应用密码。</div>
-      </div>` : ''}
+      <div class="bind-option" onclick="openGoogleBindForm()">
+        <div class="bind-option-title">⌨️ 设备码授权（OAuth）</div>
+        <div class="bind-option-desc">需在 Google Cloud 创建「桌面应用」OAuth 客户端并填写 Client ID / Secret。若 Google 强制两步验证导致创建困难，建议用上方应用密码方式。</div>
+      </div>
     </div>`;
   showModal(title, body, '<button class="btn btn-secondary" onclick="closeModal()">取消</button>');
+}
+
+/* ============ Gmail 应用密码绑定（推荐首选） ============ */
+async function openGmailAppPasswordForm() {
+  showModal('绑定 Gmail（应用密码 · 推荐）', `
+    <p class="form-hint" style="margin:0 0 12px">无需 Google Cloud OAuth、无需品牌验证，直接用一个 <b>16 位应用密码</b> 通过 IMAP 收信。当前仅支持收信，不支持发信。</p>
+    <div class="gp-steps">
+      <div class="gp-step">
+        <span class="gp-step-n">1</span>
+        <div><b>开启两步验证</b>（若已开启可跳过）<br>
+          <a class="btn btn-ghost" href="https://myaccount.google.com/security" target="_blank" rel="noopener" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;margin-top:6px">↗ 打开 Google 安全性</a>
+        </div>
+      </div>
+      <div class="gp-step">
+        <span class="gp-step-n">2</span>
+        <div><b>生成应用密码</b>：在「应用密码」页输入一个名称（如「邮箱别名」）点生成，复制得到的 16 位密码<br>
+          <a class="btn btn-ghost" href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;margin-top:6px">↗ 打开应用密码页</a>
+        </div>
+      </div>
+      <div class="gp-step">
+        <span class="gp-step-n">3</span>
+        <div>把 16 位密码粘贴到下方「应用密码」框（可含空格，会自动去除）</div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Gmail 地址 <span class="req">*</span></label>
+      <input type="text" id="imapEmail" class="form-control" placeholder="you@gmail.com">
+    </div>
+    <div class="form-group">
+      <label class="form-label">IMAP 服务器</label>
+      <input type="text" id="imapHost" class="form-control" value="imap.gmail.com" readonly>
+    </div>
+    <div class="group-row">
+      <div class="form-group" style="flex:0 0 110px">
+        <label class="form-label">端口</label>
+        <input type="number" id="imapPort" class="form-control" value="993">
+      </div>
+      <div class="form-group" style="flex:1">
+        <label class="form-label">用户名 <span class="req">*</span></label>
+        <input type="text" id="imapUser" class="form-control" placeholder="通常为完整 Gmail 地址">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">应用密码 <span class="req">*</span></label>
+      <input type="password" id="imapPass" class="form-control" placeholder="16 位应用密码">
+    </div>
+    <div class="form-group" style="margin-top:4px">
+      <label class="switch" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="imapPublic">
+        <span class="track"></span>
+        <span>设为公开（允许其他用户使用此邮箱）</span>
+      </label>
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">取消</button>
+     <button class="btn" id="imapBindBtn">连接并绑定</button>`);
+  // 用户名默认跟随邮箱输入,减少填写
+  const emailEl = document.getElementById('imapEmail');
+  const userEl = document.getElementById('imapUser');
+  if (emailEl && userEl) {
+    emailEl.addEventListener('input', () => {
+      if (!userEl.value || userEl.dataset.touched !== '1') {
+        userEl.value = emailEl.value.trim();
+      }
+    });
+    userEl.addEventListener('input', () => { userEl.dataset.touched = '1'; });
+  }
+  const btn = document.getElementById('imapBindBtn');
+  if (btn) btn.onclick = () => submitImapBind();
 }
 
 /* ============ IMAP 绑定（应用密码） ============ */
@@ -276,8 +353,9 @@ async function submitImapBind() {
   const email = getImapField('imapEmail');
   const host = getImapField('imapHost');
   const port = getImapField('imapPort');
-  const user = getImapField('imapUser');
-  const pass = getImapField('imapPass');
+  // 应用密码常带空格显示(如 abcd efgh ...),登录时须去除所有空白
+  const user = getImapField('imapUser').replace(/\s+/g, '');
+  const pass = getImapField('imapPass').replace(/\s+/g, '');
   const isPublic = document.getElementById('imapPublic') && document.getElementById('imapPublic').checked;
   if (!email || !host || !user || !pass) { toast('请填写邮箱、服务器、用户名与应用密码', 'warning'); return; }
   const btn = document.getElementById('imapBindBtn');
