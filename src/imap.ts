@@ -456,6 +456,9 @@ export async function fetchImapEmails(env: Env, accountId: string, params: Fetch
   const cfg = await getImapAccountById(env, accountId);
   if (!cfg) throw new Error('该邮箱未配置 IMAP(应用密码)信息');
 
+  // [DIAG] 临时跳过 IMAP 以确认 1102 是否由 IMAP 路径的 CPU 占用导致;诊断后移除
+  return [];
+
   const conn = await ImapConnection.connect(cfg);
   try {
     await conn.login(cfg.username, cfg.password);
