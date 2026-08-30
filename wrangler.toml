@@ -53,6 +53,12 @@ bucket_name = "mail-alias-v2-raw"
 # 这个域名必须是已经接入 Cloudflare 并开启了 Email Routing 的域名。
 RECV_DOMAIN = "jkf.kdns.fr"
 
+# 兜底账号 ID(可选,但强烈建议配置):
+# 当 Email Worker 收到一封邮件、又无法归属到任何别名/主邮箱/专属转发地址时,
+# 直接把它交给这个 account_id,而不是拒收。
+# 这实现了「所有外部邮箱统一转发到 alle@域名,最终全部进一个收件箱」的模型。
+CATCHALL_ACCOUNT_ID = "va3d4d01a"
+
 # 默认管理员(首次部署时初始化用,部署后请立即在「我的账户」修改密码)
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "请修改为你的强密码"

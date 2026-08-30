@@ -743,7 +743,8 @@ async function markMailRead(i, autoMark = false) {
   const m = MailState.emails[i];
   if (!m) return;
   const alias = (MailState.aliases || []).find(a => a.id === MailState.selectedAliasId);
-  const accountId = alias ? alias.mail_account_id : undefined;
+  // v2: 直接选中邮箱时,accountId 从 MailState.selectedAccountId 取
+  const accountId = alias ? alias.mail_account_id : (MailState.selectedAccountId || m.account_id);
   try {
     await api('/api/web/email/mark_read', {
       method: 'POST',

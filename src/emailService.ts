@@ -15,6 +15,7 @@ export function toEmail(row: EmailRow): Email {
   const dateIso = new Date(row.sent_at * 1000).toISOString();
   return {
     id: row.id,
+    account_id: row.account_id,
     from: row.from_name
       ? `${row.from_name} <${row.from_address || ''}>`
       : (row.from_address || ''),

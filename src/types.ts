@@ -12,6 +12,9 @@ export interface Env {
   // 收信域名:用于为每个邮箱拼接专属转发地址,如 recv.example.com
   // 生成结果形如 f-a1b2c3@recv.example.com,用户需在各邮箱里把邮件转发到该地址
   RECV_DOMAIN?: string;
+  // 兜底账号:所有归属失败的邮件都交给这个 account_id(单人单域场景下"固定写死一个收件箱")
+  // 若为空,则未匹配邮件会被拒收并记录到 email_unmatched。
+  CATCHALL_ACCOUNT_ID?: string;
   // 安全密钥
   JWT_SECRET: string;
   ENCRYPT_KEY: string;        // 32字节 hex(v2 不再加密 OAuth/IMAP 凭据,保留供其它加密用途)
@@ -129,6 +132,7 @@ export interface EmailRow {
 // 邮件对象(对前端/API 输出)
 export interface Email {
   id: string;
+  account_id: string;          // 归属邮箱 ID(前端按邮箱查询/标记已读需要)
   from: string;
   to: string;
   subject: string;

@@ -146,6 +146,14 @@ async function resolveOwner(env: Env, candidates: string[], envelopeTo: string):
       .bind(env3[0]).first<{ id: string }>();
     if (row) return { accountId: row.id, aliasId: null };
   }
+  // 4) 最终兜底: 若配置了 CATCHALL_ACCOUNT_ID,所有归属失败的邮件都交给它。
+  // 这是「单人/单域/所有邮箱统一转发到一个固定地址」场景下的最简单模型。
+  const catchAll = (env.CATCHALL_ACCOUNT_ID || '').trim();
+  if (catchAll) {
+    const row = await env.DB.prepare('SELECT id FROM mail_accounts WHERE id = ?')
+      .bind(catchAll).first<{ id: string }>();
+    if (row) return { accountId: row.id, aliasId: null };
+  }
   return null;
 }
 
@@ -211,10 +219,13 @@ export async function emailHandler(
     const month = new Date().toISOString().slice(0, 7);   // yyyy-mm
     const rawKey = `emails/${owner.accountId}/${month}/${id}.eml`;
 
-    // 原始邮件流式写入 R2(不做拼接/解码,CPU 开销极低)
+    // 原始邮件写入 R2。Email Worker 的 message.raw 是 ReadableStream,
+    // 实测直接 put(stream,...) 会在生产环境失败(raw_key=null,详情页 404)。
+    // 改为先读成 ArrayBuffer 再写入;10ms CPU 限额内处理常见邮件(<25MiB)无压力。
     let storedKey: string | null = null;
     try {
-      await env.EMAIL_RAW.put(rawKey, message.raw, {
+      const rawBuf = await new Response(message.raw).arrayBuffer();
+      await env.EMAIL_RAW.put(rawKey, rawBuf, {
         httpMetadata: { contentType: 'message/rfc822' },
       });
       storedKey = rawKey;

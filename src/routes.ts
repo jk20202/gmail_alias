@@ -898,11 +898,17 @@ export async function webFetchEmails(ctx: Ctx): Promise<Response> {
   // 也不再依赖任何 OAuth 授权。
   //
   // 权限分离:只能查询「属于自己的邮箱」或「已被公开共享的邮箱」。
-  const available = await db.listAvailableAccounts(ctx.env, user.id);
-  const allowedIds = new Set(available.map(a => a.id));
-  const targetIds = targets.map(t => t.accountId).filter(id => allowedIds.has(id));
-  if (targetIds.length === 0) {
-    return fail('暂无可用邮箱,请先绑定邮箱(或该邮箱未对你公开共享)');
+  // 管理员可查询任意邮箱(便于帮用户排查)。
+  let targetIds: string[];
+  if (user.is_admin) {
+    targetIds = targets.map(t => t.accountId);
+  } else {
+    const available = await db.listAvailableAccounts(ctx.env, user.id);
+    const allowedIds = new Set(available.map(a => a.id));
+    targetIds = targets.map(t => t.accountId).filter(id => allowedIds.has(id));
+    if (targetIds.length === 0) {
+      return fail('暂无可用邮箱,请先绑定邮箱(或该邮箱未对你公开共享)');
+    }
   }
 
   const { rows, total } = await db.listEmails(ctx.env, {
@@ -1017,8 +1023,10 @@ export async function webEmailRaw(ctx: Ctx): Promise<Response> {
   if (!id) return fail('缺少邮件 id');
   const row = await db.getEmailRow(ctx.env, String(id));
   if (!row) return fail('邮件不存在', 404);
-  const account = await db.getMailAccountRaw(ctx.env, user.id, row.account_id);
-  if (!account) return fail('无权查看该邮件', 403);
+  if (!user.is_admin) {
+    const account = await db.getMailAccountRaw(ctx.env, user.id, row.account_id);
+    if (!account) return fail('无权查看该邮件', 403);
+  }
   if (!row.raw_key) return fail('该邮件未保存原始内容', 404);
   const obj = await ctx.env.EMAIL_RAW.get(row.raw_key);
   if (!obj) return fail('原始邮件已丢失', 404);
