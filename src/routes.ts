@@ -1041,12 +1041,11 @@ export async function webEmailRaw(ctx: Ctx): Promise<Response> {
 // 统一转发地址配置:返回 catch-all 账号的 forward_address,
 // 供前端把所有邮箱的「专属转发地址」统一展示为同一个地址。
 export async function webCatchallConfig(ctx: Ctx): Promise<Response> {
-  const user = await requireSession(ctx);
+  await requireSession(ctx);
   const id = (ctx.env.CATCHALL_ACCOUNT_ID || '').trim();
   if (!id) return ok({ enabled: false, account_id: null, forward_address: null });
-  const acc = await db.getMailAccountRaw(ctx.env, user.id, id);
-  // 即使非自己账号,也返回统一地址(只暴露 forward_address,不暴露主邮箱等隐私)
-  const addr = acc?.forward_address || null;
+  // 不校验账号归属:只暴露 forward_address 这个公开收信地址,不暴露主邮箱等隐私。
+  const addr = await db.getAccountForwardAddress(ctx.env, id);
   return ok({ enabled: true, account_id: id, forward_address: addr, recv_domain: (ctx.env.RECV_DOMAIN || '').trim() });
 }
 

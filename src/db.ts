@@ -1224,6 +1224,13 @@ export async function updateForwardAccountConfig(
   return { forwardAddressTaken };
 }
 
+// 按 ID 查询邮箱的 forward_address(不校验归属,仅用于 catch-all 配置展示)
+export async function getAccountForwardAddress(env: Env, accountId: string): Promise<string | null> {
+  const row = await env.DB.prepare('SELECT forward_address FROM mail_accounts WHERE id = ?')
+    .bind(accountId).first<{ forward_address: string | null }>();
+  return row?.forward_address || null;
+}
+
 // 把占位域名下生成的无效转发地址批量重发(改了 RECV_DOMAIN 后修复历史数据用)
 export async function regenerateInvalidForwardAddresses(env: Env): Promise<number> {
   const domain = recvDomain(env);
