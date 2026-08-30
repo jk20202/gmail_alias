@@ -97,6 +97,11 @@ bash scripts/provision.sh
 # 收信域名：必须是已接入 Cloudflare 并开启 Email Routing 的域名
 RECV_DOMAIN = "你的收信域名.com"
 
+# 兜底账号 ID（可选但强烈推荐）：所有归属失败的邮件直接交给这个账号。
+# 适合「所有外部邮箱统一转发到一个固定地址，最终全部进一个收件箱」的用法。
+# 先绑定一个邮箱，拿到它的 id（在「我的账户」里能看到），再填到这里。
+CATCHALL_ACCOUNT_ID = "va3d4d01a"
+
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "请修改为你的强密码"
 ```
