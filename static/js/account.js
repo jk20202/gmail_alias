@@ -5,11 +5,26 @@
  *   · 邮箱绑定弹窗: 跳转授权(推荐) / 设备码 / 应用密码(说明)
  * ============================================================ */
 
+// 统一转发地址(catch-all),所有邮箱都引导转发到这里
+let unifiedForward = null;
+
 async function initAccountPage() {
   fillAccountInfo();
+  loadCatchallConfig();
   await loadMyAccounts(true);
   // 监听 OAuth 跳转授权成功后子窗口 postMessage
   window.addEventListener('message', onOAuthMessage);
+}
+
+async function loadCatchallConfig() {
+  try {
+    const data = await api('/api/config/catchall');
+    unifiedForward = (data && data.forward_address) || null;
+    const el = document.getElementById('unifiedForwardAddr');
+    if (el) el.textContent = unifiedForward || '(未配置)';
+  } catch (e) {
+    unifiedForward = null;
+  }
 }
 
 function onOAuthMessage(e) {
@@ -106,6 +121,7 @@ function renderMyAccounts(list, box) {
     box.innerHTML = '<div class="mail-empty">尚未绑定任何邮箱，点击上方按钮开始绑定</div>';
     return;
   }
+  const fwdDisplay = unifiedForward || '(加载中...)';
   box.innerHTML = `<div class="table-wrap"><table class="table">
     <thead><tr>
       <th>邮箱</th>
@@ -117,12 +133,14 @@ function renderMyAccounts(list, box) {
     <tbody>${list.map(a => `
       <tr>
         <td>
-          <span class="mono">${esc(a.email)}</span>
-          ${a.notes ? `<div class="row-note">${esc(a.notes)}</div>` : ''}
-          ${a.forward_address
-            ? `<div class="row-note">专属转发地址：<span class="mono">${esc(a.forward_address)}</span>
-                 <button class="btn btn-ghost btn-sm" onclick="copyText('${esc(a.forward_address)}')">复制</button></div>`
-            : ''}
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px">
+            <span class="mono">${esc(a.email)}</span>
+            <button class="btn btn-ghost btn-xs" onclick="copyText('${esc(fwdDisplay)}')" title="复制统一转发地址">📋</button>
+          </div>
+          <div class="row-note">
+            转发到：<span class="mono">${esc(fwdDisplay)}</span>
+            ${a.notes ? `<span style="margin-left:8px; color:var(--text-light)">· ${esc(a.notes)}</span>` : ''}
+          </div>
         </td>
         <td>${aliasSupportBadge(a)}</td>
         <td id="acc-status-${esc(a.id)}"><span class="badge badge-gray">检测中...</span></td>
@@ -178,7 +196,7 @@ async function probeAuthStatus(id) {
     if (data && data.ok && n > 0) {
       cell.innerHTML = `<span class="badge badge-success" title="已收到 ${n} 封转发邮件">已收 ${n} 封</span>`;
     } else {
-      cell.innerHTML = '<span class="badge badge-warning" title="尚未收到转发邮件，请检查原邮箱的自动转发设置是否指向专属转发地址">待配置转发</span>';
+      cell.innerHTML = '<span class="badge badge-warning" title="尚未收到转发邮件，请检查原邮箱的自动转发设置是否指向统一转发地址">待配置转发</span>';
     }
   } catch (e) {
     cell.innerHTML = '<span class="badge badge-gray">未知</span>';
@@ -224,11 +242,12 @@ async function deleteAccount(id, email) {
  * 因此完全不需要 OAuth 授权、也不需要应用密码,不存在授权失败或被审查的问题。
  */
 function openBindModal() {
+  const fwd = unifiedForward || 'alle@你的域名';
   const body = `
     <p class="form-hint" style="margin:0 0 12px">
       只需填写你的<b>主邮箱地址</b>即可绑定 —— <b>无需授权、无需应用密码</b>。<br>
-      绑定后系统会生成一个<b>专属转发地址</b>，你再去原邮箱设置里把收到的邮件
-      <b>自动转发</b>到该地址，就能在这里统一收信。
+      绑定后，去原邮箱设置里把收到的邮件<b>自动转发</b>到
+      <span class="mono">${esc(fwd)}</span>，就能在这里统一收信。
     </p>
     <div class="form-group">
       <label class="form-label">主邮箱地址</label>
@@ -301,15 +320,16 @@ async function submitMailboxBind() {
 
 // 展示专属转发地址 + 各邮箱的配置指引
 function showForwardAddressModal(email, fwd) {
+  const display = unifiedForward || fwd || 'alle@你的域名';
   const body = `
     <p class="form-hint" style="margin:0 0 12px">
       邮箱 <b>${esc(email || '')}</b> 已绑定成功。最后一步：去这个邮箱的设置里，
-      把收到的邮件<b>自动转发</b>到下面的专属地址：
+      把收到的邮件<b>自动转发</b>到下面的统一地址：
     </p>
     <div class="form-group">
-      <label class="form-label">专属转发地址</label>
+      <label class="form-label">统一转发地址</label>
       <div style="display:flex;gap:8px">
-        <input type="text" id="fwdAddr" class="form-control mono" value="${esc(fwd || '')}" readonly>
+        <input type="text" id="fwdAddr" class="form-control mono" value="${esc(display)}" readonly>
         <button class="btn btn-secondary" onclick="copyForwardAddress()">复制</button>
       </div>
     </div>
@@ -520,17 +540,16 @@ async function openEditAccount(id) {
   const domain = (acc.email.split('@')[1] || '').toLowerCase();
   const defaultTpl = acc.alias_template || '{local}+{label}@{domain}';
   const unsupported = UNSUPPORTED_ALIAS_DOMAINS.includes(domain);
+  const display = unifiedForward || acc.forward_address || 'alle@你的域名';
   showModal(`编辑邮箱 · ${esc(acc.email)}`, `
     <div class="form-group">
-      <label class="form-label">专属转发地址</label>
-      <input type="text" id="editForward" class="form-control" value="${esc(acc.forward_address || '')}" placeholder="f-xxxxx@收信域名" autocomplete="off">
+      <label class="form-label">统一转发地址</label>
+      <div style="display:flex;gap:8px">
+        <input type="text" class="form-control mono" value="${esc(display)}" readonly>
+        <button class="btn btn-secondary" onclick="copyText('${esc(display)}')">复制</button>
+      </div>
       <p class="form-hint" style="margin-top:6px">
-        原邮箱的「自动转发」必须指向这个地址，系统靠它判定邮件归属。
-        若你已在原邮箱配好了别的地址（例如 <span class="mono">alle@你的域名</span>），
-        直接把它填在这里保存即可，<b>不用去改原邮箱的设置</b>。地址在系统内必须唯一。
-      </p>
-      <p class="form-hint" style="margin-top:6px">
-        <a href="javascript:void(0)" onclick="probeForwardAddress('editForward')">检测这个地址能否收信</a>
+        所有邮箱都统一转发到这里。系统会按收件地址自动归属到对应邮箱或别名。
       </p>
     </div>
     <div class="form-group">
@@ -560,12 +579,10 @@ async function openEditAccount(id) {
   if (saveBtn) saveBtn.onclick = () => submitEditSave(id);
 }
 
-// 保存 v2 邮箱配置:转发地址 / 别名开关 / 公开共享 / 别名规则 / 备注
+// 保存 v2 邮箱配置:别名开关 / 公开共享 / 别名规则 / 备注
 async function submitEditSave(id) {
   const btn = document.getElementById('editSaveBtn');
-  const fwdEl = document.getElementById('editForward');
   const body = {
-    forward_address: fwdEl ? fwdEl.value.trim() : undefined,
     supports_alias: document.getElementById('editSupportsAlias')?.checked,
     is_public: document.getElementById('editIsPublic')?.checked,
     alias_template: getImapField('editAliasTpl') || undefined,

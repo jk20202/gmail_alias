@@ -1275,6 +1275,35 @@ export async function probeRecipient(
   return { addr: a, matched: null, accountId: null, accountEmail: null, aliasId: null };
 }
 
+// 统计指定别名/邮箱的未读邮件数(用于前端小板块红点)
+export async function countUnreadByScope(
+  env: Env,
+  aliasIds: string[],
+  accountIds: string[],
+): Promise<{ aliases: Record<string, number>; accounts: Record<string, number> }> {
+  const aliases: Record<string, number> = {};
+  const accounts: Record<string, number> = {};
+  if (aliasIds.length) {
+    const ph = aliasIds.map(() => '?').join(',');
+    const { results } = await env.DB.prepare(
+      `SELECT alias_id, COUNT(*) AS c FROM emails
+        WHERE alias_id IN (${ph}) AND read = 0
+        GROUP BY alias_id`
+    ).bind(...aliasIds).all<{ alias_id: string; c: number }>();
+    for (const r of results || []) aliases[r.alias_id] = r.c;
+  }
+  if (accountIds.length) {
+    const ph = accountIds.map(() => '?').join(',');
+    const { results } = await env.DB.prepare(
+      `SELECT account_id, COUNT(*) AS c FROM emails
+        WHERE account_id IN (${ph}) AND alias_id IS NULL AND read = 0
+        GROUP BY account_id`
+    ).bind(...accountIds).all<{ account_id: string; c: number }>();
+    for (const r of results || []) accounts[r.account_id] = r.c;
+  }
+  return { aliases, accounts };
+}
+
 function toMailAccountRaw(row: MailAccountRow): MailAccountRaw {
   return {
     id: row.id,

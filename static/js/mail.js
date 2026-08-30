@@ -23,6 +23,10 @@ const MailState = {
   autoFetch: true,
   historyOpen: false,
   history: { page: 1, keyword: '', total: 0, totalPages: 1, list: [] },
+  unreadAliases: {},    // 各别名未读数 { alias_id: n }
+  unreadAccounts: {},   // 各邮箱未读数 { account_id: n }
+  clearedAliasCounts: {},   // 用户已点击过的别名,对应的未读数 "基准" { alias_id: n }
+  clearedAccountCounts: {}, // 用户已点击过的邮箱,对应的未读数 "基准" { account_id: n }
 };
 
 let _mailAutoTimer = null;
@@ -34,6 +38,8 @@ async function initMailPage() {
   resetMailState();
   await loadAvailableAccounts();
   await loadAliases();
+  await loadCatchallConfigMail();
+  await fetchUnreadCounts();
   bindSearchBox();
   bindInfiniteScroll();
   // 预取历史条数(面板默认折叠)
@@ -42,6 +48,24 @@ async function initMailPage() {
   const cb = document.getElementById('qAutoFetch');
   if (cb) cb.checked = true;
   startAutoFetch();
+}
+
+// 邮件页加载统一转发地址(用于复制)
+async function loadCatchallConfigMail() {
+  try {
+    const data = await api('/api/config/catchall');
+    if (data && data.forward_address) unifiedForward = data.forward_address;
+  } catch (e) { /* ignore */ }
+}
+
+// 获取各别名/邮箱的未读数,用于小板块红点
+async function fetchUnreadCounts() {
+  try {
+    const data = await api('/api/web/email/unread_counts', { method: 'POST' });
+    MailState.unreadAliases = (data && data.aliases) || {};
+    MailState.unreadAccounts = (data && data.accounts) || {};
+    renderActiveAliases();
+  } catch (e) { /* ignore */ }
 }
 
 function cleanupMailPage() {
@@ -178,21 +202,30 @@ function renderActiveAliases() {
     quota.innerHTML = `生效中 <strong>${list.length}</strong> / ${max}` +
       (list.length >= max ? ' · <span class="text-danger">满</span>' : '');
   }
-  // v2: 「直接收信的邮箱」区块。
-  // 关闭「支持别名」的邮箱无法生成别名,只能在这里被直接选中收信 —— 这是它唯一的入口。
-  const accts = State.availableAccounts || [];
-  const acctHtml = accts.length ? `
+
+  // v2: 「直接收信的邮箱」区块 —— 只展示自己拥有的邮箱，避免公开邮箱被他人整箱查看。
+  const ownAccts = (State.availableAccounts || []).filter(a => a.is_own);
+    const acctHtml = ownAccts.length ? `
     <div style="font-size:12px;color:var(--text-light);margin:10px 0 6px">直接收信的邮箱</div>
-    ${accts.map(a => `
-      <div class="alias-row ${a.id === MailState.selectedAccountId ? 'selected' : ''}"
+    ${ownAccts.map(a => {
+      const badge = a.supports_alias ? '' : ' <span class="badge badge-gray" title="该邮箱未开启别名支持，只能直接选中收信">无别名</span>';
+      const rawU = MailState.unreadAccounts?.[a.id] || 0;
+      const cleared = MailState.clearedAccountCounts?.[a.id] || 0;
+      const unread = Math.max(0, rawU - cleared);
+      return `
+      <div class="alias-row account-row ${a.id === MailState.selectedAccountId ? 'selected' : ''}"
            onclick="selectAccount('${esc(a.id)}')" title="点击查看该邮箱收到的全部邮件">
-        <div class="ar-info">
-          <div class="ar-addr">${esc(a.email)}${
-            a.supports_alias ? '' : ' <span class="badge badge-gray" title="该邮箱未开启别名支持，只能直接选中收信">无别名</span>'
-          }</div>
-          ${a.forward_address ? `<div class="form-hint" style="font-size:11px">转发地址：${esc(a.forward_address)}</div>` : ''}
+        <div class="ar-top">
+          <div class="ar-addr">${esc(a.email)}${badge}</div>
+          <div class="ar-actions-row" onclick="event.stopPropagation()">
+            <button class="icon-btn" title="复制统一转发地址" onclick="copyUnifiedForward(event)">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            </button>
+          </div>
         </div>
-      </div>`).join('')}
+        ${unread ? `<span class="ar-unread-badge">${unread > 99 ? '99+' : unread}</span>` : ''}
+      </div>`;
+    }).join('')}
   ` : '';
 
   if (!list.length) {
@@ -203,40 +236,41 @@ function renderActiveAliases() {
   box.innerHTML = acctHtml + list.map(a => {
     const pct = Math.max(0, Math.min(100, ((a.remain_ms || 0) / (State.aliasTtlMs || 3600000)) * 100));
     const isSel = a.id === MailState.selectedAliasId;
+    const rawU = MailState.unreadAliases?.[a.id] || 0;
+    const cleared = MailState.clearedAliasCounts?.[a.id] || 0;
+    const unread = Math.max(0, rawU - cleared);
     return `
     <div class="alias-row ${isSel ? 'selected' : ''} ${a.remain_ms <= 0 ? 'expired' : ''}" onclick="selectAlias('${esc(a.id)}')">
-      <div class="ar-info">
+      <div class="ar-top">
         <div class="ar-addr">${esc(a.full)}</div>
-        <div class="ar-bar"><i style="width:${pct.toFixed(1)}%"></i></div>
+        <div class="ar-actions-row" onclick="event.stopPropagation()">
+          <button class="icon-btn warn" title="停用该别名（保留记录，可恢复）" onclick="deactivateAlias('${esc(a.id)}')">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>
+          </button>
+          ${starButton(a.id, a.is_favorite, 'toggleAliasFavorite')}
+          <button class="icon-btn" title="复制别名地址" onclick="copyText('${esc(a.full)}'); event.stopPropagation();">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+          </button>
+          <button class="icon-btn" title="延期 1 小时" onclick="renewAlias('${esc(a.id)}'); event.stopPropagation();">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+          </button>
+        </div>
       </div>
-      <div class="ar-actions" onclick="event.stopPropagation()">
-        ${starButton(a.id, a.is_favorite, 'toggleAliasFavorite')}
-        <button class="copy-icon-btn" title="复制别名地址" onclick="copyText('${esc(a.full)}')">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-        </button>
-        <button class="icon-btn warn" title="停用该别名（保留记录，可恢复）" onclick="deactivateAlias('${esc(a.id)}')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>
-        </button>
-        <button class="icon-btn danger" title="删除该别名" onclick="deleteAliasById('${esc(a.id)}','${esc(a.full)}')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-        </button>
-      </div>
+      <div class="ar-bar"><i style="width:${pct.toFixed(1)}%"></i></div>
+      ${unread ? `<span class="ar-unread-badge">${unread > 99 ? '99+' : unread}</span>` : ''}
     </div>`;
   }).join('');
 }
 
-// 在生效列表中直接停用别名(保留历史,可恢复)
-async function deactivateAlias(id) {
-  try {
-    await api('/api/account/aliases/' + id + '/deactivate', { method: 'POST' });
-    toast('别名已停用，可在历史列表恢复', 'success');
-    await loadAliases();
-    if (MailState.selectedAliasId === id) resetMailView();
-    await loadAliasHistory(MailState.history.page);
-  } catch (err) { toast(err.message, 'error'); }
+// 复制统一转发地址（从 account 页加载的全局变量 unifiedForward）
+function copyUnifiedForward(e) {
+  e && e.stopPropagation();
+  if (typeof unifiedForward === 'string' && unifiedForward) copyText(unifiedForward);
+  else toast('统一转发地址尚未加载', 'error');
 }
 
-// 在生效列表中直接删除别名(不可恢复)
+// 生效列表中的「删除」按钮已改为「停用」。真正删除请去「历史别名」。
+// 这里保留一个 confirm 版的停用函数（被别名卡片调用）。
 async function deleteAliasById(id, full) {
   confirmDialog(`确认删除别名 ${full}？删除后不可恢复`, async () => {
     try {
@@ -264,6 +298,8 @@ function selectAlias(id) {
   MailState.selectedAliasId = id;
   // 选中别名时取消「直接选中邮箱」状态,两种模式互斥
   MailState.selectedAccountId = '';
+  // 清除该别名本次的红点提示:把当前未读数设为基准,之后只有新增未读才会再红点
+  MailState.clearedAliasCounts[id] = MailState.unreadAliases[id] || 0;
   renderActiveAliases();
   // 滚动到顶部
   const main = document.getElementById('mailMain');
@@ -283,6 +319,8 @@ function selectAccount(id) {
   MailState.selectedAccountId = id;
   // 与「选中别名」模式互斥
   MailState.selectedAliasId = '';
+  // 清除该邮箱本次的红点提示
+  MailState.clearedAccountCounts[id] = MailState.unreadAccounts[id] || 0;
   renderActiveAliases();
   const main = document.getElementById('mailMain');
   if (main) main.scrollTop = 0;
@@ -654,7 +692,10 @@ function toggleAutoFetch() {
 
 function startAutoFetch() {
   stopAutoFetch();
-  _mailAutoTimer = setInterval(() => fetchMails(true), 15000);
+  _mailAutoTimer = setInterval(() => {
+    fetchMails(true);
+    fetchUnreadCounts();
+  }, 15000);
 }
 
 function stopAutoFetch() {

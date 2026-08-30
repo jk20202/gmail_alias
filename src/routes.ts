@@ -1038,6 +1038,37 @@ export async function webEmailRaw(ctx: Ctx): Promise<Response> {
   return new Response(obj.body, { status: 200, headers });
 }
 
+// 统一转发地址配置:返回 catch-all 账号的 forward_address,
+// 供前端把所有邮箱的「专属转发地址」统一展示为同一个地址。
+export async function webCatchallConfig(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const id = (ctx.env.CATCHALL_ACCOUNT_ID || '').trim();
+  if (!id) return ok({ enabled: false, account_id: null, forward_address: null });
+  const acc = await db.getMailAccountRaw(ctx.env, user.id, id);
+  // 即使非自己账号,也返回统一地址(只暴露 forward_address,不暴露主邮箱等隐私)
+  const addr = acc?.forward_address || null;
+  return ok({ enabled: true, account_id: id, forward_address: addr, recv_domain: (ctx.env.RECV_DOMAIN || '').trim() });
+}
+
+// 未读邮件计数:给前端 alias/account 小板块的红点提供数据。
+// 只统计用户自己可见的别名与邮箱(含公开账号,但仅按账号 ID 统计,不暴露主邮箱)。
+export async function webEmailUnreadCounts(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const aliases = await db.listActiveAliases(ctx.env, user.id);
+  const accounts = await db.listAvailableAccounts(ctx.env, user.id);
+  const counts = await db.countUnreadByScope(
+    ctx.env,
+    aliases.map(a => a.id),
+    accounts.map(a => a.id),
+  );
+  return ok({
+    aliases: counts.aliases,
+    accounts: counts.accounts,
+    total_alias: Object.values(counts.aliases).reduce((a, b) => a + b, 0),
+    total_account: Object.values(counts.accounts).reduce((a, b) => a + b, 0),
+  });
+}
+
 // ============ Webhook 管理 ============
 export async function webhookList(ctx: Ctx): Promise<Response> {
   const user = await requireSession(ctx);

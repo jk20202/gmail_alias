@@ -107,6 +107,9 @@ const ROUTE_TABLE: RouteEntry[] = [
   buildRoute('POST', '/api/web/email/probe',     routes.webEmailProbe),
   buildRoute('POST', '/api/web/email/unmatched', routes.webEmailUnmatched),
   buildRoute('POST', '/api/admin/fix_forward',   routes.adminFixForwardAddresses),
+  // 配置/未读
+  buildRoute('GET',  '/api/config/catchall',     routes.webCatchallConfig),
+  buildRoute('POST', '/api/web/email/unread_counts', routes.webEmailUnreadCounts),
   // Webhook
   buildRoute('GET',  '/api/webhooks',            routes.webhookList),
   buildRoute('POST', '/api/webhooks',            routes.webhookCreate),

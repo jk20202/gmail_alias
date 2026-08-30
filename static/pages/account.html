@@ -6,9 +6,11 @@
     <div class="card-header"><h3>基本信息</h3></div>
     <div class="card-body" id="accountInfoBody">
       <div class="account-info-grid">
-        <div class="info-item" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap">
-          <span class="label">用户名</span>
-          <span class="value" id="accUsername"></span>
+        <div class="info-item info-item-wide">
+          <div class="info-item-main">
+            <span class="label">用户名</span>
+            <span class="value" id="accUsername"></span>
+          </div>
           <button class="btn btn-secondary btn-sm" onclick="openChangePasswordModal()">修改密码</button>
         </div>
         <div class="info-item">
@@ -39,8 +41,8 @@
     <div class="card-body">
       <p class="form-hint" style="margin-bottom:12px">
         只需填写<b>主邮箱地址</b>即可添加，<b>无需 OAuth 授权、无需应用密码</b>。
-        添加后系统会为该邮箱生成一个<b>专属转发地址</b>，你去原邮箱（Gmail / Outlook / QQ / 163 等）
-        的设置里把收到的邮件<b>自动转发</b>到该地址，即可在这里统一收信。
+        所有邮箱统一把收到的邮件<b>自动转发到 <span class="mono" id="unifiedForwardAddr">加载中...</span></b>，即可在这里统一收信。
+        系统会根据收件地址自动归属到对应邮箱或别名。
         添加时可设置是否<b>支持别名</b>（默认关闭，关闭时该邮箱只能直接选中收信）以及是否<b>公开共享</b>。
       </p>
       <div class="bind-actions" style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap">

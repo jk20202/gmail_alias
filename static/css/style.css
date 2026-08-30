@@ -378,7 +378,7 @@ select.form-control { cursor: pointer; }
 
 /* 左侧别名行(紧凑) */
 .alias-row {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; flex-direction: column; align-items: stretch; gap: 8px;
   padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);
   background: #fff; cursor: pointer; transition: background .15s, border-color .15s, box-shadow .15s;
   margin-bottom: 8px;
@@ -386,12 +386,13 @@ select.form-control { cursor: pointer; }
 .alias-row:hover { background: var(--bg-hover); border-color: var(--border-strong); }
 .alias-row.selected { border-color: var(--primary); background: var(--primary-light); box-shadow: var(--shadow-sm); }
 .alias-row.expired { opacity: .7; }
+.alias-row.account-row { gap: 0; }
 .alias-row .ar-info { flex: 1; min-width: 0; }
 .alias-row .ar-addr {
   font-family: var(--mono); font-size: 12.5px; word-break: break-all; font-weight: 550;
   line-height: 1.35; color: var(--text);
 }
-.alias-row .ar-bar { height: 3px; border-radius: 999px; background: var(--bg-hover); margin-top: 7px; overflow: hidden; }
+.alias-row .ar-bar { height: 4px; border-radius: 999px; background: var(--bg-hover); overflow: hidden; }
 .alias-row .ar-bar > i { display: block; height: 100%; background: var(--success); border-radius: 999px; transition: width .3s ease; }
 .alias-row.selected .ar-bar > i { background: var(--primary); }
 .alias-row .ar-actions {
@@ -524,11 +525,20 @@ select.form-control { cursor: pointer; }
 
 /* ============ 账户页美化 ============ */
 .account-info-grid {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;
 }
-.account-info-grid .info-item { flex-direction: column; align-items: flex-start; gap: 4px; }
+.account-info-grid .info-item { flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px 0; }
 .account-info-grid .info-item .label { font-size: 12px; color: var(--text-light); margin-bottom: 0; }
-.account-info-grid .info-item .value { font-size: 14px; font-weight: 600; }
+.account-info-grid .info-item .value { font-size: 14px; font-weight: 600; word-break: break-all; }
+.account-info-grid .info-item-wide {
+  grid-column: 1 / -1;
+  flex-direction: row !important; align-items: center !important; justify-content: space-between !important;
+  gap: 12px; padding: 12px 0;
+}
+.account-info-grid .info-item-wide .info-item-main {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.account-info-grid .info-item-wide .label { margin-bottom: 0; }
 
 .apikey-box {
   margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border);
@@ -546,6 +556,33 @@ select.form-control { cursor: pointer; }
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
 }
 .security-row .label { margin-bottom: 0; }
+
+.alias-row .ar-top {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%;
+}
+.alias-row .ar-top .ar-addr {
+  flex: 1; min-width: 0; word-break: break-all; font-size: 13px; font-weight: 500;
+}
+.alias-row .ar-actions-row {
+  display: flex; align-items: center; gap: 4px;
+  flex-shrink: 0;
+}
+.alias-row .ar-actions-row .icon-btn {
+  width: 28px; height: 28px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: transparent; color: var(--text-light); cursor: pointer;
+}
+.alias-row .ar-actions-row .icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+.alias-row .ar-actions-row .icon-btn.warn:hover { color: var(--warning); border-color: var(--warning); }
+.alias-row .ar-unread-badge {
+  position: absolute; top: 4px; right: 4px;
+  min-width: 18px; height: 18px; padding: 0 5px;
+  background: #ef4444; color: #fff; font-size: 11px; font-weight: 600;
+  border-radius: 9px; display: inline-flex; align-items: center; justify-content: center;
+}
+.alias-row { position: relative; }
 
 /* 绑定方式选项 */
 .bind-options { display: flex; flex-direction: column; gap: 10px; }
