@@ -133,13 +133,9 @@ function renderMyAccounts(list, box) {
     <tbody>${list.map(a => `
       <tr>
         <td>
-          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px">
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:4px">
             <span class="mono">${esc(a.email)}</span>
-            <button class="btn btn-ghost btn-xs" onclick="copyText('${esc(fwdDisplay)}')" title="复制统一转发地址">📋</button>
-          </div>
-          <div class="row-note">
-            转发到：<span class="mono">${esc(fwdDisplay)}</span>
-            ${a.notes ? `<span style="margin-left:8px; color:var(--text-light)">· ${esc(a.notes)}</span>` : ''}
+            ${a.notes ? `<span style="color:var(--text-light)">· ${esc(a.notes)}</span>` : ''}
           </div>
         </td>
         <td>${aliasSupportBadge(a)}</td>

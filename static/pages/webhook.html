@@ -5,8 +5,21 @@
     <div class="card-header"><h3>创建订阅</h3></div>
     <div class="card-body">
       <div class="form-group">
-        <label class="form-label">监听邮箱 <span class="req">*</span></label>
+        <label class="form-label">监听主邮箱 <span class="req">*</span></label>
         <select id="whAccount" class="form-control"><option value="">加载中...</option></select>
+        <div class="form-hint">仅显示你自己绑定的邮箱（含公开共享的）</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">监听范围 <span class="req">*</span></label>
+        <select id="whScope" class="form-control" onchange="onWhScopeChange()">
+          <option value="alias">指定别名（只推送命中该别名的邮件）</option>
+          <option value="alias_all">全部别名（推送该邮箱下所有存活别名的邮件）</option>
+          <option value="account">整个邮箱（推送该主邮箱的直接收信）</option>
+        </select>
+      </div>
+      <div class="form-group" id="whAliasWrap" style="display:none">
+        <label class="form-label">选择别名</label>
+        <select id="whAlias" class="form-control"><option value="">请先选择主邮箱</option></select>
       </div>
       <div class="form-group">
         <label class="form-label">回调 URL <span class="req">*</span></label>
@@ -29,10 +42,6 @@
           <label class="switch"><input type="checkbox" id="whEvNew" checked><span class="track"></span><span>new_mail 新邮件</span></label>
           <label class="switch"><input type="checkbox" id="whEvUnread"><span class="track"></span><span>unread 未读</span></label>
         </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">目标别名 (可选)</label>
-        <input type="text" id="whAlias" class="form-control" placeholder="仅推送命中此别名的邮件,留空表示全部">
       </div>
       <div class="form-group">
         <label class="form-label">签名密钥 Secret (可选)</label>

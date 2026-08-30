@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS mail_accounts (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_mail_accounts_user ON mail_accounts(user_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mail_accounts_forward ON mail_accounts(forward_address);
+-- v2: 统一转发地址(由环境变量控制),允许多个邮箱共用同一个地址,所以不要求唯一
+CREATE INDEX IF NOT EXISTS idx_mail_accounts_forward ON mail_accounts(forward_address);
 
 -- ============ 遗留单别名表(必须保留) ============
 -- v1 的「一用户一别名」表。v2 已改用下面的 user_aliases(多别名),

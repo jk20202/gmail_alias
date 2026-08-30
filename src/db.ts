@@ -101,9 +101,19 @@ export async function ensureSchema(env: Env): Promise<void> {
   ]) {
     try { await env.DB.prepare(col).run(); } catch { /* 列已存在 */ }
   }
+  // forward_address 不再要求唯一(所有邮箱共用统一地址 alle@域名),改为普通索引
   try {
-    await env.DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_mail_accounts_forward ON mail_accounts(forward_address)').run();
-  } catch { /* 已存在 */ }
+    await env.DB.prepare('DROP INDEX IF EXISTS idx_mail_accounts_forward').run();
+    await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_mail_accounts_forward ON mail_accounts(forward_address)').run();
+  } catch { /* 已存在或无权限 */ }
+
+  // 同时确保 users 表的 google_client_id/secret 列已存在(旧部署可能因 SCHEMA_VERSION 早退而未执行)
+  try {
+    await env.DB.prepare('ALTER TABLE users ADD COLUMN google_client_id TEXT').run();
+  } catch { /* 列已存在 */ }
+  try {
+    await env.DB.prepare('ALTER TABLE users ADD COLUMN google_client_secret TEXT').run();
+  } catch { /* 列已存在 */ }
 
   // emails: 已接收邮件。只存「元数据 + R2 对象 key」,不存正文 —— 正文/附件由前端
   // 下载 raw 后用 postal-mime 在浏览器解析,避免 Worker 解析 MIME 超出免费套餐 10ms CPU。
