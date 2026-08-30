@@ -868,11 +868,12 @@ export async function webFetchEmails(ctx: Ctx): Promise<Response> {
       accountId: a.mail_account_id, to: a.full, aliasId: a.id, aliasFull: a.full, aliasCreated: a.created_at,
     }));
     scopeLabel = `(全部 ${activeAliases.length} 个别名)`;
-  } else if (user.is_admin && params.mail_account_id) {
+  } else if (params.mail_account_id) {
+    // 没有别名但指定了邮箱ID:允许按整箱查询(只要有权限)
     targets = [{ accountId: params.mail_account_id, to: params.to }];
     scopeLabel = '(整箱)';
   } else {
-    return fail('暂无生效中的别名,请先创建别名邮箱');
+    return fail('暂无生效中的别名,也无可用邮箱,请先绑定邮箱');
   }
 
   // 如果指定了别名且前端未传时间范围,默认查询该别名创建(激活)时间至今的邮件,
