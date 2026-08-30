@@ -1133,39 +1133,20 @@ export async function saveUserGoogleCreds(env: Env, userId: string, clientId: st
 
 // ==================================================================
 // v2: 邮件转发聚合
-//   - 绑定邮箱免授权(只填主邮箱地址),系统分配一个「专属转发地址」
-//   - 收信时按 别名 > 主邮箱 > 专属转发地址 的顺序判定归属
+//   - 全站只有一个统一收信地址(从 UNIFIED_FORWARD_ADDRESS 环境变量读取)
+//   - 各邮箱设置「自动转发」到该地址,系统按收件头归属
 //   - 邮件元数据入库,原始 .eml 存 R2(正文/附件由浏览器端解析)
 // ==================================================================
 
-const FORWARD_DOMAIN_FALLBACK = 'example.com';
-
-function recvDomain(env: Env): string {
-  return (env.RECV_DOMAIN || '').trim() || FORWARD_DOMAIN_FALLBACK;
-}
-
-// 生成一个未被占用的专属转发地址,形如 f-a1b2c3@recv.example.com
-async function uniqueForwardAddress(env: Env): Promise<string> {
-  const domain = recvDomain(env);
-  for (let i = 0; i < 8; i++) {
-    const addr = `f-${randomHex(5)}@${domain}`;
-    const dup = await env.DB.prepare('SELECT id FROM mail_accounts WHERE forward_address = ?')
-      .bind(addr).first<{ id: string }>();
-    if (!dup) return addr;
-  }
-  return `f-${randomHex(10)}@${domain}`;
-}
-
-// 绑定邮箱(v2 免授权)。返回账号 id 与系统分配的专属转发地址,
-// 用户需去原邮箱(Gmail/Outlook/QQ…)把收到的邮件「自动转发」到该地址。
+// 绑定邮箱(v2 免授权)。统一转发地址由环境变量 UNIFIED_FORWARD_ADDRESS 控制,
+// 系统不再为每个邮箱生成专属地址。
 export async function addForwardAccount(
   env: Env, userId: string, email: string,
   opts: { isPublic?: boolean; supportsAlias?: boolean; aliasTemplate?: string | null; notes?: string | null } = {},
-): Promise<{ id: string; forward_address: string }> {
+): Promise<{ id: string; forward_address: string | null }> {
   const id = 'v' + randomHex(4);
-  const forward = await uniqueForwardAddress(env);
-  // mail_accounts 的 access_token/refresh_token/token_expires_at 是 NOT NULL,
-  // v2 不使用 OAuth,统一写入空串占位。
+  // 不再生成 per-account 专属地址;统一地址由 env.UNIFIED_FORWARD_ADDRESS 提供
+  const unifiedAddr = (env.UNIFIED_FORWARD_ADDRESS || '').trim() || null;
   await env.DB.prepare(
     `INSERT INTO mail_accounts
        (id, user_id, provider, email, access_token, refresh_token, token_expires_at,
@@ -1177,10 +1158,10 @@ export async function addForwardAccount(
     nowISO(),
     opts.aliasTemplate || null,
     opts.notes || null,
-    forward,
+    unifiedAddr,
     opts.supportsAlias === true ? 1 : 0,
   ).run();
-  return { id, forward_address: forward };
+  return { id, forward_address: unifiedAddr };
 }
 
 // 更新转发邮箱的「别名开关 / 公开共享 / 别名规则 / 备注 / 专属转发地址」
@@ -1224,26 +1205,24 @@ export async function updateForwardAccountConfig(
   return { forwardAddressTaken };
 }
 
-// 按 ID 查询邮箱的 forward_address(不校验归属,仅用于 catch-all 配置展示)
+// 按 ID 查询邮箱的 forward_address(不校验归属,仅用于展示)
 export async function getAccountForwardAddress(env: Env, accountId: string): Promise<string | null> {
   const row = await env.DB.prepare('SELECT forward_address FROM mail_accounts WHERE id = ?')
     .bind(accountId).first<{ forward_address: string | null }>();
   return row?.forward_address || null;
 }
 
-// 把占位域名下生成的无效转发地址批量重发(改了 RECV_DOMAIN 后修复历史数据用)
-export async function regenerateInvalidForwardAddresses(env: Env): Promise<number> {
-  const domain = recvDomain(env);
+// 把历史数据中 still 有专属地址的邮箱重置为统一转发地址(改了 UNIFIED_FORWARD_ADDRESS 后执行一次)
+export async function resetForwardAddressesToUnified(env: Env): Promise<number> {
+  const unifiedAddr = (env.UNIFIED_FORWARD_ADDRESS || '').trim();
+  if (!unifiedAddr) return 0;
   const { results } = await env.DB.prepare(
-    `SELECT id, forward_address FROM mail_accounts
-      WHERE (forward_address IS NULL OR forward_address = ''
-             OR forward_address NOT LIKE '%@${domain}')`
-  ).all<{ id: string; forward_address: string | null }>();
+    `SELECT id FROM mail_accounts WHERE forward_address IS NULL OR forward_address != ?`
+  ).bind(unifiedAddr).all<{ id: string }>();
   const rows = results || [];
   for (const r of rows) {
-    const addr = await uniqueForwardAddress(env);
     await env.DB.prepare('UPDATE mail_accounts SET forward_address = ? WHERE id = ?')
-      .bind(addr, r.id).run();
+      .bind(unifiedAddr, r.id).run();
   }
   return rows.length;
 }

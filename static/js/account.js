@@ -310,17 +310,17 @@ async function submitMailboxBind() {
     closeModal();
     loadMyAccounts(true);
     if (typeof loadAvailableAccounts === 'function') loadAvailableAccounts();
-    // 绑定成功后,把「专属转发地址」醒目展示出来,引导用户去原邮箱配置转发
-    showForwardAddressModal(res && res.email, res && res.forward_address);
+    // 绑定成功后,把统一转发地址醒目展示出来,引导用户去原邮箱配置转发
+    showForwardAddressModal(res && res.email);
   } catch (err) {
     toast(err.message, 'error', 6000);
     if (btn) { btn.disabled = false; btn.textContent = '绑定'; }
   }
 }
 
-// 展示专属转发地址 + 各邮箱的配置指引
-function showForwardAddressModal(email, fwd) {
-  const display = unifiedForward || fwd || 'alle@你的域名';
+// 展示统一转发地址 + 各邮箱的配置指引
+function showForwardAddressModal(email) {
+  const display = unifiedForward || 'alle@你的域名';
   const body = `
     <p class="form-hint" style="margin:0 0 12px">
       邮箱 <b>${esc(email || '')}</b> 已绑定成功。最后一步：去这个邮箱的设置里，
@@ -540,7 +540,7 @@ async function openEditAccount(id) {
   const domain = (acc.email.split('@')[1] || '').toLowerCase();
   const defaultTpl = acc.alias_template || '{local}+{label}@{domain}';
   const unsupported = UNSUPPORTED_ALIAS_DOMAINS.includes(domain);
-  const display = unifiedForward || acc.forward_address || 'alle@你的域名';
+  const display = unifiedForward || 'alle@jkf.kdns.fr';
   showModal(`编辑邮箱 · ${esc(acc.email)}`, `
     <div class="form-group">
       <label class="form-label">统一转发地址</label>
@@ -592,7 +592,7 @@ async function submitEditSave(id) {
   try {
     const data = await api('/api/account/mail_accounts/' + id, { method: 'PATCH', body });
     if (data && data.data && data.data.forward_address_taken) {
-      toast('转发地址已被其它邮箱占用，未生效；其余设置已保存', 'error');
+      toast('其他设置已保存', 'success');
     } else {
       toast('已保存', 'success');
     }

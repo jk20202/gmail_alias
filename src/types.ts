@@ -12,6 +12,10 @@ export interface Env {
   // 收信域名:用于为每个邮箱拼接专属转发地址,如 recv.example.com
   // 生成结果形如 f-a1b2c3@recv.example.com,用户需在各邮箱里把邮件转发到该地址
   RECV_DOMAIN?: string;
+  // 统一转发地址:全站**唯一**的收信地址(如 alle@jkf.kdns.fr)。
+  // 所有邮箱都在原邮箱设置里把收到的邮件转发到这个地址,系统按收件头自动归属。
+  // 一旦配置,就不再为单个邮箱生成任何 f-xxxx 形式的专属地址。
+  UNIFIED_FORWARD_ADDRESS?: string;
   // 兜底账号:所有归属失败的邮件都交给这个 account_id(单人单域场景下"固定写死一个收件箱")
   // 若为空,则未匹配邮件会被拒收并记录到 email_unmatched。
   CATCHALL_ACCOUNT_ID?: string;

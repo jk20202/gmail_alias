@@ -49,15 +49,21 @@ bucket_name = "mail-alias-v2-raw"
 # 变量
 # ------------------------------------------------------------------
 [vars]
-# 收信域名(必填): 用于为每个邮箱生成专属转发地址,形如 f-a1b2c3@<RECV_DOMAIN>
-# 这个域名必须是已经接入 Cloudflare 并开启了 Email Routing 的域名。
+# 收信域名(必填): 已接入 Cloudflare 并开启 Email Routing 的域名。
 RECV_DOMAIN = "jkf.kdns.fr"
 
+# 统一转发地址(强烈建议配置):
+# 全站**唯一**的收信地址。所有外部邮箱都只在自己的设置里把收到的邮件
+# 转发到这一个地址;系统根据邮件的收件头自动归属到对应邮箱/别名。
+# 配置后不再为单个邮箱生成任何 f-xxxx 形式的专属地址。
+UNIFIED_FORWARD_ADDRESS = "alle@jkf.kdns.fr"
+
 # 兜底账号 ID(可选,但强烈建议配置):
-# 当 Email Worker 收到一封邮件、又无法归属到任何别名/主邮箱/专属转发地址时,
+# 当 Email Worker 收到一封邮件、又无法归属到任何别名/主邮箱时,
 # 直接把它交给这个 account_id,而不是拒收。
-# 这实现了「所有外部邮箱统一转发到 alle@域名,最终全部进一个收件箱」的模型。
-CATCHALL_ACCOUNT_ID = "va3d4d01a"
+# ⚠ 注意:这里必须填一个**仍然存在**的邮箱 ID,删除该邮箱后要同步改这里,
+#    否则兜底失效(可在「我的账户」查到邮箱 ID,或到 email_unmatched 诊断里确认)。
+CATCHALL_ACCOUNT_ID = "va6ae88e5"
 
 # 默认管理员(首次部署时初始化用,部署后请立即在「我的账户」修改密码)
 ADMIN_USERNAME = "admin"

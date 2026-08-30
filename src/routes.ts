@@ -615,25 +615,19 @@ export async function accountUpdateMailAccount(ctx: Ctx): Promise<Response> {
   // v2: 别名开关(是否允许为该邮箱生成别名) + 是否公开共享
   const supportsAlias = typeof body.supports_alias === 'boolean' ? body.supports_alias : undefined;
   const isPublic = typeof body.is_public === 'boolean' ? body.is_public : undefined;
-  // 自定义专属转发地址:用户若已在原邮箱配好了某个地址(如 alle@域名),可直接登记过来
-  const forwardAddress = typeof body.forward_address === 'string' ? body.forward_address.trim() : undefined;
   if (aliasTemplate === undefined && notes === undefined
-      && supportsAlias === undefined && isPublic === undefined && forwardAddress === undefined) {
+      && supportsAlias === undefined && isPublic === undefined) {
     return fail('没有需要更新的字段');
   }
-  let res: { forwardAddressTaken?: boolean } = {};
   try {
-    res = await db.updateForwardAccountConfig(ctx.env, user.id, id, {
-      aliasTemplate, notes, supportsAlias, isPublic, forwardAddress,
+    await db.updateForwardAccountConfig(ctx.env, user.id, id, {
+      aliasTemplate, notes, supportsAlias, isPublic,
     });
   } catch (e) {
     return fail((e as Error).message || '更新失败');
   }
   await db.addLog(ctx.env, user.id, user.username, '', 'update_account', `邮箱 ${id} 更新别名规则/备注/开关`);
-  return ok({
-    forward_address_taken: res.forwardAddressTaken === true,
-    msg: res.forwardAddressTaken ? '该转发地址已被其它邮箱占用,未生效;其余设置已保存' : '',
-  });
+  return ok(null);
 }
 
 // 收信自检:给一个收件地址,回报它会被归属到哪个邮箱(纯查询,不实际收信)。
@@ -666,11 +660,11 @@ export async function webEmailUnmatched(ctx: Ctx): Promise<Response> {
   return ok({ list, total: list.length });
 }
 
-// 管理员:批量修复历史数据中域名不正确的转发地址(改过 RECV_DOMAIN 后执行一次)
+// 管理员:把历史数据中仍然持有专属转发地址的邮箱统一重置为环境变量里的统一地址。
 export async function adminFixForwardAddresses(ctx: Ctx): Promise<Response> {
   const user = await requireSession(ctx);
   if (!user.is_admin) return fail('仅管理员可操作', 403);
-  const n = await db.regenerateInvalidForwardAddresses(ctx.env);
+  const n = await db.resetForwardAddressesToUnified(ctx.env);
   return ok({ fixed: n });
 }
 
@@ -690,9 +684,9 @@ export async function accountAuthStatus(ctx: Ctx): Promise<Response> {
   const received = row?.c || 0;
   return ok({
     ok: true,
-    forward_address: account.forward_address || null,
+    forward_address: null,
     received,
-    hint: received === 0 ? '尚未收到转发邮件,请在原邮箱检查「自动转发」设置是否指向上面的专属转发地址' : '',
+    hint: received === 0 ? '尚未收到转发邮件,请在原邮箱检查「自动转发」设置是否指向统一转发地址' : '',
   });
 }
 
@@ -724,12 +718,10 @@ export async function accountBindImap(ctx: Ctx): Promise<Response> {
   });
   await db.addLog(
     ctx.env, user.id, user.username, email, 'bind_mailbox',
-    `绑定了邮箱 ${email}(专属转发地址 ${forward_address})`,
+    `绑定了邮箱 ${email}`,
   );
   return ok({
     id, provider: 'forward', email,
-    // 前端需要把这个地址展示给用户:用户去原邮箱设置「自动转发」到该地址
-    forward_address,
     supports_alias: supportsAlias,
   });
 }
@@ -1038,15 +1030,11 @@ export async function webEmailRaw(ctx: Ctx): Promise<Response> {
   return new Response(obj.body, { status: 200, headers });
 }
 
-// 统一转发地址配置:返回 catch-all 账号的 forward_address,
-// 供前端把所有邮箱的「专属转发地址」统一展示为同一个地址。
+// 统一转发地址配置:返回系统配置的唯一收信地址(来自 UNIFIED_FORWARD_ADDRESS 环境变量)。
+// 该地址对所有邮箱一致,无需再通过 CATCHALL_ACCOUNT_ID 去 DB 查。
 export async function webCatchallConfig(ctx: Ctx): Promise<Response> {
-  await requireSession(ctx);
-  const id = (ctx.env.CATCHALL_ACCOUNT_ID || '').trim();
-  if (!id) return ok({ enabled: false, account_id: null, forward_address: null });
-  // 不校验账号归属:只暴露 forward_address 这个公开收信地址,不暴露主邮箱等隐私。
-  const addr = await db.getAccountForwardAddress(ctx.env, id);
-  return ok({ enabled: true, account_id: id, forward_address: addr, recv_domain: (ctx.env.RECV_DOMAIN || '').trim() });
+  const addr = (ctx.env.UNIFIED_FORWARD_ADDRESS || '').trim() || null;
+  return ok({ enabled: !!addr, forward_address: addr });
 }
 
 // 未读邮件计数:给前端 alias/account 小板块的红点提供数据。
