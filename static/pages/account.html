@@ -38,21 +38,15 @@
     <div class="card-header"><h3>邮箱绑定</h3></div>
     <div class="card-body">
       <p class="form-hint" style="margin-bottom:12px">
-        绑定 Gmail <b>推荐用「应用密码（IMAP）」</b>：无需 Google Cloud OAuth、无需品牌验证，开启两步验证后生成一个 16 位应用密码即可收信；也可走「设备码授权（OAuth）」。
-        当前 IMAP 方式仅支持收信，不支持发信。
+        只需填写<b>主邮箱地址</b>即可添加，<b>无需 OAuth 授权、无需应用密码</b>。
+        添加后系统会为该邮箱生成一个<b>专属转发地址</b>，你去原邮箱（Gmail / Outlook / QQ / 163 等）
+        的设置里把收到的邮件<b>自动转发</b>到该地址，即可在这里统一收信。
+        添加时可设置是否<b>支持别名</b>（默认关闭，关闭时该邮箱只能直接选中收信）以及是否<b>公开共享</b>。
       </p>
       <div class="bind-actions" style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap">
-        <button class="btn" onclick="openBindModal('gmail')">
+        <button class="btn btn-primary" onclick="openBindModal()">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-          绑定 Gmail
-        </button>
-        <button class="btn" onclick="openBindModal('outlook')">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-          绑定 Outlook / Hotmail
-        </button>
-        <button class="btn" onclick="openBindModal('imap')">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
-          绑定 IMAP / 应用密码
+          添加邮箱
         </button>
       </div>
       <h4 style="font-size:13px; color:var(--text-light); margin-bottom:8px">已绑定的邮箱</h4>

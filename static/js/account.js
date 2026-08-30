@@ -109,19 +109,22 @@ function renderMyAccounts(list, box) {
   box.innerHTML = `<div class="table-wrap"><table class="table">
     <thead><tr>
       <th>邮箱</th>
-      <th title="绑定的协议/方式：IMAP（应用密码）或 OAuth（授权登录）">类型</th>
-      <th title="Plus 寻址（加号别名）：在邮箱本地名后加 +标签（如 me+shop@域名）也会收进同一邮箱，是无限别名的基础">Plus 寻址</th>
-      <th title="连接 / 授权是否有效">授权状态</th>
+      <th title="是否允许为该邮箱生成别名地址（绑定时可开启，默认关闭）">别名支持</th>
+      <th title="是否已收到从原邮箱转发过来的邮件">收信状态</th>
       <th>是否公开</th>
       <th>操作</th>
     </tr></thead>
     <tbody>${list.map(a => `
       <tr>
-        <td><span class="mono">${esc(a.email)}</span>${a.notes ? `<div class="row-note">${esc(a.notes)}</div>` : ''}</td>
-        <td>${a.provider === 'imap'
-          ? '<span class="badge" style="background:#7c3aed;color:#fff">IMAP</span>'
-          : '<span class="badge badge-primary">OAuth</span>'}</td>
-        <td>${plusAddrBadge(a)}</td>
+        <td>
+          <span class="mono">${esc(a.email)}</span>
+          ${a.notes ? `<div class="row-note">${esc(a.notes)}</div>` : ''}
+          ${a.forward_address
+            ? `<div class="row-note">专属转发地址：<span class="mono">${esc(a.forward_address)}</span>
+                 <button class="btn btn-ghost btn-sm" onclick="copyText('${esc(a.forward_address)}')">复制</button></div>`
+            : ''}
+        </td>
+        <td>${aliasSupportBadge(a)}</td>
         <td id="acc-status-${esc(a.id)}"><span class="badge badge-gray">检测中...</span></td>
         <td>
           <label class="switch" style="display:inline-flex; align-items:center; gap:6px; cursor:pointer">
@@ -139,6 +142,18 @@ function renderMyAccounts(list, box) {
   list.forEach(a => probeAuthStatus(a.id));
 }
 
+// 别名支持徽章:v2 由用户为每个邮箱单独开关(默认关闭)
+function aliasSupportBadge(a) {
+  return a.supports_alias
+    ? '<span class="badge badge-success" title="已开启：可为该邮箱按别名规则生成别名地址">✓ 支持别名</span>'
+    : '<span class="badge badge-gray" title="未开启：该邮箱只能被直接选中收信，不能生成别名">— 不支持</span>';
+}
+
+function copyText(t) {
+  try { navigator.clipboard.writeText(t); toast('已复制', 'success'); }
+  catch (e) { /* 剪贴板不可用时忽略 */ }
+}
+
 // Plus 寻址(加号别名)状态徽章: 动态反映该邮箱是否支持别名收信
 function plusAddrBadge(a) {
   const domain = (a.email.split('@')[1] || '').toLowerCase();
@@ -152,21 +167,21 @@ function plusAddrBadge(a) {
   return '<span class="badge badge-success" title="加号别名（Plus 寻址），如 前缀+标签@域名">✓ 加号别名</span>';
 }
 
+// v2: 无需授权,状态改为反映「是否已收到原邮箱转发过来的邮件」,
+// 便于用户确认自己在原邮箱里的自动转发设置是否生效。
 async function probeAuthStatus(id) {
   const cell = document.getElementById('acc-status-' + id);
   if (!cell) return;
   try {
     const data = await api('/api/account/mail_accounts/' + id + '/status');
-    if (data && data.ok) { cell.innerHTML = '<span class="badge badge-success">已授权</span>'; }
-    else {
-      cell.innerHTML = '<span class="badge badge-danger">未授权</span>';
-      const btn = document.getElementById('acc-reauth-' + id);
-      if (btn) btn.textContent = '继续授权';
+    const n = (data && data.received) || 0;
+    if (data && data.ok && n > 0) {
+      cell.innerHTML = `<span class="badge badge-success" title="已收到 ${n} 封转发邮件">已收 ${n} 封</span>`;
+    } else {
+      cell.innerHTML = '<span class="badge badge-warning" title="尚未收到转发邮件，请检查原邮箱的自动转发设置是否指向专属转发地址">待配置转发</span>';
     }
   } catch (e) {
-    cell.innerHTML = '<span class="badge badge-danger">未授权</span>';
-    const btn = document.getElementById('acc-reauth-' + id);
-    if (btn) btn.textContent = '继续授权';
+    cell.innerHTML = '<span class="badge badge-gray">未知</span>';
   }
 }
 
@@ -203,35 +218,118 @@ async function deleteAccount(id, email) {
 }
 
 /* ============ 绑定方式弹窗 ============ */
-function openBindModal(provider) {
-  if (provider === 'imap') return openImapForm();
-  const isGmail = provider === 'gmail';
-  const title = isGmail ? '绑定 Gmail' : '绑定 Outlook / Hotmail';
-  if (!isGmail) {
-    // Outlook / Hotmail 只能走设备码授权(Microsoft 已禁用 Basic Auth)
-    const body = `
-      <div class="bind-options">
-        <div class="bind-option" onclick="startDeviceAuth('outlook')">
-          <div class="bind-option-title">⌨️ 设备码授权（推荐）</div>
-          <div class="bind-option-desc">复制弹出的授权码，到授权页输入完成绑定。无需在微软后台登记回调地址，最适配 Cloudflare 部署。</div>
-        </div>
-      </div>`;
-    showModal(title, body, '<button class="btn btn-secondary" onclick="closeModal()">取消</button>');
-    return;
-  }
-  // Gmail: 「应用密码（IMAP）」作为首选推荐, 设备码 OAuth 作为备选
+/* ============ v2: 绑定邮箱(免授权,只需填主邮箱地址) ============
+ * 原理:各邮箱(Gmail / Outlook / QQ / 163 …)在自己的设置里开启「自动转发」,
+ * 把收到的邮件转发到系统为该邮箱分配的【专属转发地址】,系统即可统一收信。
+ * 因此完全不需要 OAuth 授权、也不需要应用密码,不存在授权失败或被审查的问题。
+ */
+function openBindModal() {
   const body = `
-    <div class="bind-options">
-      <div class="bind-option bind-option-recommended" onclick="openGmailAppPasswordForm()">
-        <div class="bind-option-title">🔑 应用密码（IMAP）· 推荐</div>
-        <div class="bind-option-desc">无需创建 Google Cloud OAuth 客户端、无需品牌验证。在 Google 账号开启两步验证后生成一个 16 位应用密码即可收信，最省事（emails-cloud 等自建项目均用此方式）。</div>
-      </div>
-      <div class="bind-option" onclick="openGoogleBindForm()">
-        <div class="bind-option-title">⌨️ 设备码授权（OAuth）</div>
-        <div class="bind-option-desc">需在 Google Cloud 创建「桌面应用」OAuth 客户端并填写 Client ID / Secret。若 Google 强制两步验证导致创建困难，建议用上方应用密码方式。</div>
-      </div>
+    <p class="form-hint" style="margin:0 0 12px">
+      只需填写你的<b>主邮箱地址</b>即可绑定 —— <b>无需授权、无需应用密码</b>。<br>
+      绑定后系统会生成一个<b>专属转发地址</b>，你再去原邮箱设置里把收到的邮件
+      <b>自动转发</b>到该地址，就能在这里统一收信。
+    </p>
+    <div class="form-group">
+      <label class="form-label">主邮箱地址</label>
+      <input type="email" id="bindEmail" class="form-control" placeholder="you@gmail.com" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label class="form-label">备注（可选）</label>
+      <input type="text" id="bindNotes" class="form-control" placeholder="如：工作邮箱 / 主收信箱">
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="bindSupportsAlias">
+        <span>支持别名<small class="form-hint" style="margin-left:6px">关闭时该邮箱只能直接选中收信，不能生成别名</small></span>
+      </label>
+    </div>
+    <div class="form-group" id="bindAliasTplWrap" style="display:none">
+      ${aliasRuleFieldHTML('bindAliasTpl', '{local}+{label}@{domain}')}
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="bindPublic">
+        <span>公开共享<small class="form-hint" style="margin-left:6px">其他用户可使用此邮箱及其别名</small></span>
+      </label>
     </div>`;
-  showModal(title, body, '<button class="btn btn-secondary" onclick="closeModal()">取消</button>');
+  showModal('绑定邮箱（邮件转发方式）', body,
+    '<button class="btn btn-secondary" onclick="closeModal()">取消</button>' +
+    '<button class="btn btn-primary" id="bindMailboxBtn" onclick="submitMailboxBind()">绑定</button>');
+
+  // 「支持别名」开启时才展示别名规则模板
+  const sa = document.getElementById('bindSupportsAlias');
+  const wrap = document.getElementById('bindAliasTplWrap');
+  if (sa && wrap) sa.addEventListener('change', () => { wrap.style.display = sa.checked ? '' : 'none'; });
+  wireAliasPreview('bindEmail', 'bindAliasTpl', 'bindAliasTplPreview', '');
+}
+
+// 提交绑定(免授权)
+async function submitMailboxBind() {
+  const email = getImapField('bindEmail').toLowerCase();
+  const notes = getImapField('bindNotes');
+  const saEl = document.getElementById('bindSupportsAlias');
+  const pbEl = document.getElementById('bindPublic');
+  const supportsAlias = !!(saEl && saEl.checked);
+  const isPublic = !!(pbEl && pbEl.checked);
+  const aliasTpl = getImapField('bindAliasTpl');
+
+  if (!email) { toast('请填写邮箱地址', 'warning'); return; }
+  const btn = document.getElementById('bindMailboxBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '绑定中...'; }
+  try {
+    const res = await api('/api/account/mail_accounts/imap', {
+      method: 'POST',
+      body: {
+        email,
+        is_public: isPublic,
+        supports_alias: supportsAlias,
+        alias_template: aliasTpl || undefined,
+        notes: notes || undefined,
+      },
+    });
+    closeModal();
+    loadMyAccounts(true);
+    if (typeof loadAvailableAccounts === 'function') loadAvailableAccounts();
+    // 绑定成功后,把「专属转发地址」醒目展示出来,引导用户去原邮箱配置转发
+    showForwardAddressModal(res && res.email, res && res.forward_address);
+  } catch (err) {
+    toast(err.message, 'error', 6000);
+    if (btn) { btn.disabled = false; btn.textContent = '绑定'; }
+  }
+}
+
+// 展示专属转发地址 + 各邮箱的配置指引
+function showForwardAddressModal(email, fwd) {
+  const body = `
+    <p class="form-hint" style="margin:0 0 12px">
+      邮箱 <b>${esc(email || '')}</b> 已绑定成功。最后一步：去这个邮箱的设置里，
+      把收到的邮件<b>自动转发</b>到下面的专属地址：
+    </p>
+    <div class="form-group">
+      <label class="form-label">专属转发地址</label>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="fwdAddr" class="form-control mono" value="${esc(fwd || '')}" readonly>
+        <button class="btn btn-secondary" onclick="copyForwardAddress()">复制</button>
+      </div>
+    </div>
+    <div class="gp-steps">
+      <div class="gp-step"><span class="gp-step-n">1</span><div><b>Gmail</b>：设置 → 查看所有设置 → 转发和 POP/IMAP → 添加转发地址</div></div>
+      <div class="gp-step"><span class="gp-step-n">2</span><div><b>Outlook</b>：设置 → 邮件 → 转发 → 启用转发</div></div>
+      <div class="gp-step"><span class="gp-step-n">3</span><div><b>QQ / 163 等</b>：设置 → 收信规则 / 自动转发</div></div>
+    </div>
+    <p class="form-hint" style="margin:12px 0 0">
+      配置完成后，发往该邮箱（及其别名）的邮件就会出现在「邮件查询」中。
+    </p>`;
+  showModal('配置邮件转发', body, '<button class="btn btn-primary" onclick="closeModal()">知道了</button>');
+}
+
+function copyForwardAddress() {
+  const el = document.getElementById('fwdAddr');
+  if (!el) return;
+  el.select();
+  try { navigator.clipboard.writeText(el.value); } catch (e) { /* ignore */ }
+  toast('已复制转发地址', 'success');
 }
 
 /* ============ Gmail 应用密码绑定（推荐首选） ============ */

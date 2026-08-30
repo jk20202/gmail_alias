@@ -1,23 +1,29 @@
 // 全局类型定义
+//
+// v2 (cloudflarev2): 收信方式改为「各邮箱设置自动转发 -> Cloudflare Email Routing -> Email Worker」。
+// 因此不再需要 OAuth / IMAP 凭据,绑定邮箱只需填主邮箱地址即可。
 
 // Cloudflare 绑定资源
 export interface Env {
   DB: D1Database;
   KV: KVNamespace;
   ASSETS: Fetcher;
-  // OAuth 凭据 (通过 wrangler secret 设置,也可在管理后台写入 D1 settings,后者优先)
-  GOOGLE_CLIENT_ID: string;
-  GOOGLE_CLIENT_SECRET: string;
-  // 微软:默认走 Thunderbird 公共客户端(无需 secret),MS_CLIENT_ID 可覆盖,MS_CLIENT_SECRET 已废弃保留兼容
-  MS_CLIENT_ID?: string;
-  MS_CLIENT_SECRET?: string;
+  EMAIL_RAW: R2Bucket;         // 原始邮件(.eml)对象存储
+  // 收信域名:用于为每个邮箱拼接专属转发地址,如 recv.example.com
+  // 生成结果形如 f-a1b2c3@recv.example.com,用户需在各邮箱里把邮件转发到该地址
+  RECV_DOMAIN?: string;
   // 安全密钥
   JWT_SECRET: string;
-  ENCRYPT_KEY: string;        // 32字节 hex,用于 AES-GCM 加密 refresh_token
-  BASE_URL: string;            // Worker 部署地址,用于 OAuth 回调
+  ENCRYPT_KEY: string;        // 32字节 hex(v2 不再加密 OAuth/IMAP 凭据,保留供其它加密用途)
+  BASE_URL: string;            // Worker 部署地址,用于拼接 raw 下载链接
   // 默认管理员
   ADMIN_USERNAME: string;
   ADMIN_PASSWORD: string;
+  // v2 已废弃 OAuth 授权,以下变量保留仅为兼容旧部署,可留空
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  MS_CLIENT_ID?: string;
+  MS_CLIENT_SECRET?: string;
 }
 
 // 用户(对外脱敏)
@@ -33,17 +39,21 @@ export interface SafeUser {
   created_at: string;
 }
 
-// 邮箱账号(对外脱敏,不含 token)
+// 邮箱账号(对外脱敏)
 export interface SafeMailAccount {
   id: string;
-  provider: 'gmail' | 'outlook' | 'imap';
+  provider: 'gmail' | 'outlook' | 'imap' | 'forward';
   email: string;
-  is_public: boolean;
+  is_public: boolean;          // 是否公开共享(公开后其他用户可使用该邮箱/其别名)
   created_at: string;
-  token_masked: string;       // 仅前4后4
+  token_masked: string;       // 仅前4后4(v2 无 token,返回空串占位)
   alias_template?: string | null;  // 别名生成规则模板({local}/{domain}/{label})
   notes?: string;                  // 用户备注
-  imap_host?: string | null;       // IMAP 连接信息(仅 IMAP 账号有,供编辑预填,不含密码)
+  // v2 新增:
+  forward_address?: string | null; // 专属转发地址(用户在原邮箱设置转发到该地址)
+  supports_alias?: boolean;        // 是否支持别名;默认 false,为 false 时只能直接选中该邮箱
+  // 兼容旧字段(v2 未使用)
+  imap_host?: string | null;
   imap_port?: number | null;
 }
 
@@ -51,18 +61,21 @@ export interface SafeMailAccount {
 export interface MailAccountRaw {
   id: string;
   user_id: string;
-  provider: 'gmail' | 'outlook' | 'imap';
+  provider: 'gmail' | 'outlook' | 'imap' | 'forward';
   email: string;
-  access_token: string;        // 已解密
-  refresh_token: string;       // 已解密
+  access_token: string;
+  refresh_token: string;
   token_expires_at: string;
   is_public: boolean;
   created_at: string;
-  // IMAP(应用密码)绑定专用字段
+  // v2 新增
+  forward_address?: string | null;
+  supports_alias?: number | null;   // SQLite 返回 0/1
+  alias_template?: string | null;
   imap_host?: string | null;
   imap_port?: number | null;
   imap_user?: string | null;
-  imap_pass?: string | null;   // 已加密
+  imap_pass?: string | null;
 }
 
 // 兼容旧结构:单别名
@@ -89,11 +102,31 @@ export interface UserAlias {
   created_at: string;
   // 关联查询附带(展示用)
   email?: string;                 // 主邮箱地址
-  provider?: 'gmail' | 'outlook' | 'imap';
+  provider?: 'gmail' | 'outlook' | 'imap' | 'forward';
   remain_ms?: number;             // 剩余有效毫秒(active 才有)
 }
 
-// 邮件对象
+// ============ 已接收邮件(D1 emails 表) ============
+export interface EmailRow {
+  id: string;
+  account_id: string;
+  alias_id: string | null;        // 命中的别名(直接投到主邮箱时为 NULL)
+  message_id: string | null;      // Message-ID,用于去重
+  subject: string | null;
+  from_name: string | null;
+  from_address: string | null;
+  delivered_to: string | null;    // 实际命中的收件地址(原始收件人)
+  recipient: string | null;       // To 原文
+  cc: string | null;
+  sent_at: number;                // UTC 秒级时间戳
+  size: number;                   // raw 字节数
+  raw_key: string | null;         // R2 对象 key
+  has_attachments: number;        // 0/1(仅头部推断,精确列表由前端解析 raw 得出)
+  read: number;                   // 0 未读 / 1 已读
+  created_at: string;
+}
+
+// 邮件对象(对前端/API 输出)
 export interface Email {
   id: string;
   from: string;
@@ -105,8 +138,11 @@ export interface Email {
   html: string;
   unread: boolean;
   attachments: string[];       // 附件文件名列表(用于模糊搜索/展示)
-  provider?: 'gmail' | 'outlook' | 'imap';
+  provider?: 'gmail' | 'outlook' | 'imap' | 'forward';
   alias?: string;              // 命中的别名地址(多别名聚合时使用)
+  // v2: 原始邮件下载地址(前端下载后用 postal-mime 在浏览器解析正文/附件)
+  raw_url?: string;
+  size?: number;
 }
 
 // 邮件查询参数
@@ -116,7 +152,7 @@ export interface FetchParams {
   subject?: string;
   body?: string;
   keyword?: string;            // 兼容旧参数
-  q?: string;                  // 统一模糊搜索: 发件人/收件人/主题/正文/HTML/附件
+  q?: string;                  // 统一模糊搜索: 发件人/收件人/主题
   unseen?: boolean;
   start_time?: string;
   end_time?: string;
@@ -148,9 +184,9 @@ export interface ApiResponse<T = unknown> {
   data: T | null;
 }
 
-// OAuth state (KV 存储)
+// OAuth state (KV 存储) —— v2 已不使用 OAuth,保留类型以兼容
 export interface OAuthState {
-  user_id: string;              // 绑定到哪个用户
+  user_id: string;
   provider: 'gmail' | 'outlook';
   created_at: number;
 }

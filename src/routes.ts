@@ -5,10 +5,9 @@ import {
   buildAuthURL, handleOAuthCallback, checkAccountAuthStatus, startDeviceFlow, pollDeviceFlow,
   startGoogleDeviceFlow, pollGoogleDeviceFlow, getGoogleCreds, saveGoogleCreds, googleConfigStatus,
 } from './oauth';
-import { fetchEmails, markEmailsRead } from './emailService';
-import { sha256, randomLabel, encrypt } from './utils';
+import { fetchEmails, markEmailsRead, markEmailsReadBySender, toEmail } from './emailService';
+import { sha256, randomLabel } from './utils';
 import { pollAndPush, sendTestEvent } from './webhook';
-import { testImapConnection, checkImapAuth, fetchImapEmailDetail } from './imap';
 
 // 路由上下文
 export interface Ctx {
@@ -444,6 +443,15 @@ export async function aliasCreate(ctx: Ctx): Promise<Response> {
   const { mail_account_id, label } = ctx.body || {};
   if (!mail_account_id) return fail('请选择主邮箱');
   if (!label || !String(label).trim()) return fail('别名标签不能为空');
+
+  // v2: 只有开启「支持别名」的邮箱才能派生别名地址。
+  // 该开关默认关闭 —— 关闭时此邮箱只能被直接选中收信,不能生成别名。
+  const account = await db.getMailAccountRaw(ctx.env, user.id, mail_account_id);
+  if (!account) return fail('无权操作该邮箱', 403);
+  if (account.supports_alias !== 1) {
+    return fail('该邮箱未开启「支持别名」,请先在邮箱设置中开启后再创建别名');
+  }
+
   const { alias, err } = await db.createUserAlias(ctx.env, user.id, mail_account_id, String(label).trim());
   if (err) return fail(err);
   await db.addLog(ctx.env, user.id, user.username, alias?.full || '', 'create_alias', `创建了别名 ${alias?.full}`);
@@ -604,9 +612,16 @@ export async function accountUpdateMailAccount(ctx: Ctx): Promise<Response> {
   const body = ctx.body || {};
   const aliasTemplate = typeof body.alias_template === 'string' ? body.alias_template.trim() : undefined;
   const notes = typeof body.notes === 'string' ? body.notes.trim() : undefined;
-  if (aliasTemplate === undefined && notes === undefined) return fail('没有需要更新的字段');
+  // v2: 别名开关(是否允许为该邮箱生成别名) + 是否公开共享
+  const supportsAlias = typeof body.supports_alias === 'boolean' ? body.supports_alias : undefined;
+  const isPublic = typeof body.is_public === 'boolean' ? body.is_public : undefined;
+  if (aliasTemplate === undefined && notes === undefined
+      && supportsAlias === undefined && isPublic === undefined) {
+    return fail('没有需要更新的字段');
+  }
   await db.updateMailAccountConfig(ctx.env, user.id, id, { aliasTemplate, notes });
-  await db.addLog(ctx.env, user.id, user.username, '', 'update_account', `邮箱 ${id} 更新别名规则/备注`);
+  await db.updateForwardAccountConfig(ctx.env, user.id, id, { supportsAlias, isPublic });
+  await db.addLog(ctx.env, user.id, user.username, '', 'update_account', `邮箱 ${id} 更新别名规则/备注/开关`);
   return ok(null);
 }
 
@@ -619,11 +634,17 @@ export async function accountAuthStatus(ctx: Ctx): Promise<Response> {
   // 越权防护:校验邮箱归属(自己的或公开的)
   const account = await db.getMailAccountRaw(ctx.env, user.id, id);
   if (!account) return fail('无权操作该邮箱', 403);
-  // IMAP 走连接测试探测;OAuth 走 token 校验
-  const status = account.provider === 'imap'
-    ? await checkImapAuth(ctx.env, id)
-    : await checkAccountAuthStatus(ctx.env, id);
-  return ok(status);
+  // v2 无需任何授权:绑定即可用。
+  // 状态改为反映「是否已收到过转发邮件」,便于用户确认原邮箱的自动转发设置是否生效。
+  const row = await ctx.env.DB.prepare('SELECT COUNT(*) AS c FROM emails WHERE account_id = ?')
+    .bind(id).first<{ c: number }>();
+  const received = row?.c || 0;
+  return ok({
+    ok: true,
+    forward_address: account.forward_address || null,
+    received,
+    hint: received === 0 ? '尚未收到转发邮件,请在原邮箱检查「自动转发」设置是否指向上面的专属转发地址' : '',
+  });
 }
 
 // 绑定 IMAP(应用密码)收信账号
@@ -631,34 +652,37 @@ export async function accountAuthStatus(ctx: Ctx): Promise<Response> {
 export async function accountBindImap(ctx: Ctx): Promise<Response> {
   const user = await requireSession(ctx);
   const body = ctx.body || {};
-  const email = typeof body.email === 'string' ? body.email.trim() : '';
-  const imapHost = typeof body.imap_host === 'string' ? body.imap_host.trim() : '';
-  // IMAP 登录用户名: 绝大多数邮箱(含 Gmail / Outlook / QQ / 163)就是完整邮箱本身,
-  // 仅少数企业邮箱登录 ID 与邮箱不同。未提供时直接回退为邮箱,免去用户额外填写一个"用户名"。
-  const imapUser = (typeof body.imap_user === 'string' ? body.imap_user.trim() : '') || email;
-  const imapPass = typeof body.imap_pass === 'string' ? body.imap_pass.trim() : '';
-  const portRaw = parseInt(String(body.imap_port || '993'), 10);
+  const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
   const isPublic = body.is_public === true;
-  // 别名规则模板(可空): 每个邮箱可单独配置别名生成规则,如 "{local}+{label}@{domain}" / "{label}@{domain}"
+  // 是否支持别名: 默认 false —— 关闭时该邮箱只能被直接选中,不能生成别名;
+  // 开启后才允许按 alias_template 生成别名(如 Gmail 的 jk+ui@gmail.com 加号别名)。
+  const supportsAlias = body.supports_alias === true;
+  // 别名规则模板(可空): 如 "{local}+{label}@{domain}" / "{label}@{domain}"
   const aliasTemplate = typeof body.alias_template === 'string' ? body.alias_template.trim() : '';
+  const notes = typeof body.notes === 'string' ? body.notes.trim() : '';
 
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return fail('请填写有效的邮箱地址');
-  if (!imapHost) return fail('请填写 IMAP 服务器地址');
-  if (isNaN(portRaw) || portRaw < 1 || portRaw > 65535) return fail('IMAP 端口无效（应为 1-65535）');
-  if (!imapUser) return fail('请填写 IMAP 用户名（通常为完整邮箱）');
-  if (!imapPass) return fail('请填写应用密码（App Password）');
 
-  // 加密密码落库(与 OAuth refresh_token 同一套 AES-GCM)
-  const encPass = await encrypt(imapPass, ctx.env);
-  // 绑定前先测连接:只有能成功登录并选中收件箱才算通过,避免存进无法使用的配置
-  try {
-    await testImapConnection({ host: imapHost, port: portRaw, username: imapUser, password: imapPass });
-  } catch (e) {
-    return fail('IMAP 连接测试失败：' + (e as Error).message);
-  }
-  const accountId = await db.addImapAccount(ctx.env, user.id, email, imapHost, portRaw, imapUser, encPass, isPublic, aliasTemplate || null);
-  await db.addLog(ctx.env, user.id, user.username, email, 'bind_imap', `绑定了 IMAP 邮箱 ${email}`);
-  return ok({ id: accountId, provider: 'imap', email });
+  // 同一用户不要重复绑定同一个邮箱
+  const dup = await db.getMailAccountByUserAndEmail(ctx.env, user.id, 'forward', email);
+  if (dup) return fail('该邮箱已绑定,请勿重复添加');
+
+  const { id, forward_address } = await db.addForwardAccount(ctx.env, user.id, email, {
+    isPublic,
+    supportsAlias,
+    aliasTemplate: aliasTemplate || null,
+    notes: notes || null,
+  });
+  await db.addLog(
+    ctx.env, user.id, user.username, email, 'bind_mailbox',
+    `绑定了邮箱 ${email}(专属转发地址 ${forward_address})`,
+  );
+  return ok({
+    id, provider: 'forward', email,
+    // 前端需要把这个地址展示给用户:用户去原邮箱设置「自动转发」到该地址
+    forward_address,
+    supports_alias: supportsAlias,
+  });
 }
 
 export async function accountAvailableAccounts(ctx: Ctx): Promise<Response> {
@@ -747,7 +771,7 @@ export async function apiMarkRead(ctx: Ctx): Promise<Response> {
   const account = resolveAccountByTo({ ...user, mail_accounts: available } as SafeUser, to);
   if (!account) return fail('未找到对应邮箱或无权使用');
   try {
-    const count = await markEmailsRead(ctx.env, account.id, sender, subject);
+    const count = await markEmailsReadBySender(ctx.env, account.id, sender, subject);
     await db.addLog(ctx.env, user.id, user.username, to, 'mark_read', `标记${count}封已读`);
     return ok({ marked: count });
   } catch (e) {
@@ -816,40 +840,35 @@ export async function webFetchEmails(ctx: Ctx): Promise<Response> {
   }
 
   // 抓取上限:随 offset 增长,但不超过 FETCH_CAP_MAX(保护 Gmail / Graph 配额)
-  const fetchCap = clamp(offset + limit, FETCH_CAP_MIN, FETCH_CAP_MAX);
-  const perTarget = clamp(Math.ceil(fetchCap / targets.length), 20, fetchCap);
-
-  const merged: Array<Email & { alias?: string }> = [];
-  const seen = new Set<string>();
   const errors: string[] = [];
   const touched: string[] = [];
 
-  for (const t of targets) {
-    // 越权防护:校验该邮箱账号归属当前用户(自己的或公开的)
-    const account = await db.getMailAccountRaw(ctx.env, user.id, t.accountId);
-    if (!account) continue;
-    try {
-      const list = await fetchEmails(ctx.env, t.accountId, {
-        ...params,
-        to: t.to,
-        q,
-        limit: perTarget,
-      });
-      for (const e of list) {
-        const key = e.id || `${e.subject}|${e.date_iso}|${e.from}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        merged.push({ ...e, alias: t.aliasFull });
-      }
-      if (list.length > 0 && t.aliasId) touched.push(t.aliasId);
-    } catch (e) {
-      errors.push((e as Error).message);
-    }
+  // ===== v2: 邮件已由 Email Worker 接收并落库,这里直接查本地 D1 =====
+  // 不再实时连 IMAP / 调 Gmail API,因此不会再触发免费套餐的 CPU 超限(error 1102),
+  // 也不再依赖任何 OAuth 授权。
+  //
+  // 权限分离:只能查询「属于自己的邮箱」或「已被公开共享的邮箱」。
+  const available = await db.listAvailableAccounts(ctx.env, user.id);
+  const allowedIds = new Set(available.map(a => a.id));
+  const targetIds = targets.map(t => t.accountId).filter(id => allowedIds.has(id));
+  if (targetIds.length === 0) {
+    return fail('暂无可用邮箱,请先绑定邮箱(或该邮箱未对你公开共享)');
   }
 
-  merged.sort((a, b) => String(b.date_iso || '').localeCompare(String(a.date_iso || '')));
-  const emails = merged.slice(offset, offset + limit);
-  const hasMore = merged.length >= fetchCap;
+  const { rows, total } = await db.listEmails(ctx.env, {
+    accountIds: targetIds,
+    aliasId: params.alias_id,
+    q,
+    startTime: params.start_time,
+    endTime: params.end_time,
+    unreadOnly: params.unseen === true,
+    limit,
+    offset,
+  });
+
+  const emails = rows.map(toEmail);
+  const hasMore = offset + emails.length < total;
+  if (emails.length > 0 && params.alias_id) touched.push(params.alias_id);
 
   // 命中邮件的别名刷新「最后使用时间」(带 60 秒节流,避免自动收件疯狂写库)
   if (touched.length) {
@@ -867,7 +886,7 @@ export async function webFetchEmails(ctx: Ctx): Promise<Response> {
   }
 
   return ok({
-    total: merged.length,
+    total,
     offset,
     limit,
     has_more: hasMore,
@@ -911,7 +930,12 @@ export async function webMarkRead(ctx: Ctx): Promise<Response> {
   if (!account) return fail('无权操作该邮箱', 403);
 
   try {
-    const count = await markEmailsRead(ctx.env, accountId, sender, subject);
+    // v2: 优先按邮件 id 批量标记(列表里直接带 id);
+    // 未传 ids 时退回按「发件人 + 主题」匹配,兼容旧调用方式。
+    const ids: string[] = Array.isArray(ctx.body?.ids) ? ctx.body.ids.map(String) : [];
+    const count = ids.length
+      ? await markEmailsRead(ctx.env, accountId, ids)
+      : await markEmailsReadBySender(ctx.env, accountId, sender, subject);
     // 标记已读不记录日志 (避免自动查看时撑爆日志)
     return ok({ marked: count });
   } catch (e) {
@@ -923,20 +947,37 @@ export async function webMarkRead(ctx: Ctx): Promise<Response> {
 // IMAP 列表只拉头部(轻量),打开详情时再调此接口拉取该封完整邮件(含正文/HTML/附件)。
 export async function webEmailDetail(ctx: Ctx): Promise<Response> {
   const user = await requireSession(ctx);
-  const { mail_account_id, uid } = ctx.body;
-  if (!mail_account_id) return fail('缺少 mail_account_id');
-  if (uid === undefined || uid === null || uid === '') return fail('缺少 uid');
-  const account = await db.getMailAccountRaw(ctx.env, user.id, String(mail_account_id));
-  if (!account) return fail('无权操作该邮箱', 403);
-  if (account.provider !== 'imap') return fail('该邮箱类型不支持按需加载详情(正文已在列表中)');
-  const nUid = parseInt(String(uid), 10);
-  if (isNaN(nUid)) return fail('uid 格式错误');
-  try {
-    const email = await fetchImapEmailDetail(ctx.env, String(mail_account_id), nUid);
-    return ok({ email });
-  } catch (e) {
-    return fail('加载邮件详情失败: ' + ((e as Error).message || '未知错误'), 500);
-  }
+  const { id } = ctx.body || {};
+  if (!id) return fail('缺少邮件 id');
+  const row = await db.getEmailRow(ctx.env, String(id));
+  if (!row) return fail('邮件不存在', 404);
+  // 越权防护:该邮件所属邮箱必须是自己的或已公开共享的
+  const account = await db.getMailAccountRaw(ctx.env, user.id, row.account_id);
+  if (!account) return fail('无权查看该邮件', 403);
+  // 正文/附件不入库,返回 raw 下载地址;前端用 postal-mime 在浏览器解析,
+  // 这样 Worker 完全不做 MIME 解析,不会触碰免费套餐 10ms CPU 上限。
+  return ok({ email: toEmail(row) });
+}
+
+// ============ 下载原始邮件(.eml) ============
+// 只做 R2 流式转发(几乎不耗 CPU),解析工作全部交给浏览器端的 postal-mime。
+export async function webEmailRaw(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const id = ctx.url.searchParams.get('id') || (ctx.body && ctx.body.id);
+  if (!id) return fail('缺少邮件 id');
+  const row = await db.getEmailRow(ctx.env, String(id));
+  if (!row) return fail('邮件不存在', 404);
+  const account = await db.getMailAccountRaw(ctx.env, user.id, row.account_id);
+  if (!account) return fail('无权查看该邮件', 403);
+  if (!row.raw_key) return fail('该邮件未保存原始内容', 404);
+  const obj = await ctx.env.EMAIL_RAW.get(row.raw_key);
+  if (!obj) return fail('原始邮件已丢失', 404);
+  const headers = new Headers({
+    'Content-Type': 'message/rfc822',
+    'Content-Disposition': `attachment; filename="${row.id}.eml"`,
+    'Access-Control-Allow-Origin': '*',
+  });
+  return new Response(obj.body, { status: 200, headers });
 }
 
 // ============ Webhook 管理 ============

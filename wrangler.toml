@@ -1,4 +1,12 @@
-name = "mail-alias"
+# ==================================================================
+# mail-alias v2 —— 邮件转发聚合版
+# 与 v1(mail-alias)完全独立的部署,互不影响。
+#
+# 收信原理: 各邮箱在自己的设置里开启「自动转发」→ 转发到本 Worker 绑定的域名
+#           → Cloudflare Email Routing → Email Worker(src/email.ts) → D1 + R2
+# 因此不需要 OAuth 授权,也不需要 IMAP 应用密码。
+# ==================================================================
+name = "mail-alias-v2"
 main = "src/index.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
@@ -11,41 +19,57 @@ directory = "./static"
 binding = "ASSETS"
 run_worker_first = true
 
-# D1 数据库(用户/邮箱账号/Webhook/日志)
+# ------------------------------------------------------------------
+# 以下三个资源的 ID 需要先创建后填入:
+#   npx wrangler d1 create mail_alias_v2
+#   npx wrangler kv namespace create MAIL_ALIAS_V2_KV
+#   npx wrangler r2 bucket create mail-alias-v2-raw
+# 或直接执行: bash scripts/provision.sh   (自动创建并回填本文件)
+# ------------------------------------------------------------------
+
+# D1 数据库(用户/邮箱账号/邮件元数据/Webhook/日志)
 [[d1_databases]]
 binding = "DB"
-database_name = "mail_alias"
-database_id = "f7b79fd7-055d-4ab7-9151-7f3cbe153a49"
+database_name = "mail_alias_v2"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
 
-# KV(会话/OAuth state 缓存)
+# KV(会话缓存 / Webhook 推送去重)
 [[kv_namespaces]]
 binding = "KV"
-id = "351359d5a2614b28b273465a29bdfd2d"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
 
-# 变量(可在 wrangler secret 中覆盖,或在此明文填入测试值)
+# R2:存放接收到的原始邮件(.eml)
+# 正文与附件不入库,由前端下载 raw 后用 postal-mime 在浏览器解析,
+# 从而把 MIME 解析的 CPU 开销完全移出 Worker(免费套餐仅 10ms CPU)。
+[[r2_buckets]]
+binding = "EMAIL_RAW"
+bucket_name = "mail-alias-v2-raw"
+
+# ------------------------------------------------------------------
+# 变量
+# ------------------------------------------------------------------
 [vars]
-# OAuth 应用凭据 - 实际部署请用 `wrangler secret put` 写入
-# GOOGLE_CLIENT_ID = "xxx"
-# GOOGLE_CLIENT_SECRET = "xxx"
-# 微软: 默认走 Thunderbird 公共客户端(consumers 端点,无需 client_secret),无需配置即可授权 Outlook/Hotmail
-# 如需改用自注册 Azure 应用,可设置 MS_CLIENT_ID 覆盖默认值
-# MS_CLIENT_ID = "xxx"
-# MS_CLIENT_SECRET = "xxx"   # 已废弃: 公共客户端不再使用 client_secret,保留仅为兼容旧部署
-# JWT_SECRET = "随机长字符串"
-# ENCRYPT_KEY = "32字节hex,用于加密refresh_token"
-# BASE_URL = "https://your-worker.workers.dev"
+# 收信域名(必填): 用于为每个邮箱生成专属转发地址,形如 f-a1b2c3@<RECV_DOMAIN>
+# 这个域名必须是已经接入 Cloudflare 并开启了 Email Routing 的域名。
+RECV_DOMAIN = "请填写你的收信域名.com"
 
 # 默认管理员(首次部署时初始化用,部署后请立即在「我的账户」修改密码)
-# 请将下方密码改为自己的强密码,切勿使用示例值
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "请修改为你的强密码"
 
-# Cron Trigger: 每分钟自动轮询所有有活跃 webhook 的邮箱账号
-# 拉取新邮件并推送到订阅的回调 URL (飞书/钉钉/自定义)
+# 安全密钥: 请用 wrangler secret 写入,不要明文提交
+# JWT_SECRET = "随机长字符串"
+# ENCRYPT_KEY = "32字节hex"
+
+# Cron Trigger: 每分钟检查新邮件并推送到已订阅的 Webhook
+# (v2 邮件已由 Email Worker 实时入库,这里只负责把「新收到的」推给 Webhook,
+#  并用 KV 做 1 小时去重,不会重复推送)
 [triggers]
 crons = ["* * * * *"]
 
-# 注意: 不要随意加 [limits] cpu_ms。当前套餐在 wrangler deploy / Workers Builds 阶段会拒收
-# limits 配置导致部署失败(已踩坑: cpu_ms=30000 让 GitHub Actions 与 Cloudflare Workers Builds 双双失败)。
-# CPU 超限(1102)的解决靠代码侧:imap.ts 已对 IMAP 搜索加 SINCE 收敛 + 尾部扫描 + 读取超时,
-# 把单请求 CPU 压到套餐默认限额内。若后续升级到支持 limits 的付费套餐,可在此加回 cpu_ms 留余量。
+# 注意: 不要加 [limits] cpu_ms —— 当前免费套餐会在 deploy 阶段拒收 limits 配置导致部署失败。
+# v2 的三条路径(收信 / 列表 / 详情)都已刻意设计在 10ms CPU 以内,无需调高限额。
+#
+# Email Routing 本身不在 wrangler 里配置,需在 Cloudflare 后台完成:
+#   Email → Email Routing → Routing rules → 添加规则 → 动作选择「Send to Worker」→ mail-alias-v2
+# 详见 README.md

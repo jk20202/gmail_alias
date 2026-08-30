@@ -72,16 +72,26 @@ async function loadAvailableAccounts() {
 }
 
 function openCreateAliasModal() {
-  const accounts = State.availableAccounts || [];
+  const all = State.availableAccounts || [];
+  // v2: 只有开启了「支持别名」的邮箱才能生成别名 —— 该开关在添加邮箱时默认关闭,
+  // 关闭的邮箱只能被直接选中收信,不能派生别名地址。
+  const accounts = all.filter(a => a.supports_alias);
+  if (!all.length) {
+    return showModal('创建别名', '<p>暂无可用的主邮箱，请先到「我的账户」添加邮箱。</p>',
+      '<button class="btn btn-secondary" onclick="closeModal()">关闭</button>');
+  }
   if (!accounts.length) {
-    return showModal('创建别名', '<p>暂无可用的主邮箱，请先到「我的账户」绑定邮箱。</p><p>绑定成功后刷新本页即可创建别名。</p>', '<button class="btn btn-secondary" onclick="closeModal()">关闭</button>');
+    return showModal('创建别名',
+      '<p>当前没有任何邮箱开启「支持别名」。</p>' +
+      '<p>请到「我的账户」编辑对应邮箱，打开 <b>支持别名</b> 开关后再来创建别名。</p>',
+      '<button class="btn btn-secondary" onclick="closeModal()">关闭</button>');
   }
   const listAtQuota = MailState.aliases.length >= (State.aliasMax || 5);
   const body = `
     <div class="form-group">
-      <label class="form-label">主邮箱</label>
+      <label class="form-label">主邮箱（仅显示已开启「支持别名」的邮箱）</label>
       <select id="modalAliasAccount" class="form-control" style="height:40px">
-        ${accounts.map(a => `<option value="${esc(a.id)}">${esc(a.email)} (${esc(a.provider)})</option>`).join('')}
+        ${accounts.map(a => `<option value="${esc(a.id)}">${esc(a.email)}</option>`).join('')}
       </select>
     </div>
     <div class="form-group">
@@ -607,25 +617,67 @@ function stopAutoFetch() {
 }
 
 /* ============ 邮件详情弹窗 ============ */
+// v2: 列表接口只返回元数据(发件人 / 主题 / 时间 …),正文与附件需要下载原始邮件(.eml)
+// 后在**浏览器**里用 postal-mime 解析。
+//
+// 这是绕开 Cloudflare 免费套餐 10ms CPU 上限(error 1102)的关键:
+// Worker 只负责把原始字节从 R2 流式吐出来(几乎不耗 CPU),
+// 真正的 MIME 解析发生在用户浏览器里 —— CPU 限额管不到浏览器。
+let _postalMimePromise = null;
+function loadPostalMime() {
+  if (!_postalMimePromise) {
+    _postalMimePromise = import('https://cdn.jsdelivr.net/npm/postal-mime@2.4.3/+esm')
+      .then(mod => mod.default || mod);
+  }
+  return _postalMimePromise;
+}
+
+// 下载原始邮件并在浏览器端解析
+async function fetchAndParseEmail(id) {
+  const token = (typeof State !== 'undefined' && State.token)
+    || localStorage.getItem('mail_alias_token') || '';
+  const res = await fetch('/api/web/email/raw?id=' + encodeURIComponent(id), {
+    headers: token ? { Authorization: 'Bearer ' + token } : {},
+  });
+  if (!res.ok) throw new Error('下载原始邮件失败 (HTTP ' + res.status + ')');
+  const raw = await res.arrayBuffer();
+  const PostalMime = await loadPostalMime();
+  return await PostalMime.parse(raw);
+}
+
 async function viewMailDetail(i) {
   const m = MailState.emails[i];
   if (!m) return;
-  // IMAP 列表只拉了头部(轻量),打开详情时若缺正文则按需拉取单封完整邮件
-  if (m.provider === 'imap' && !m.body && !m.html) {
+  // 首次打开才解析;解析结果挂在 m 上,再次打开秒开
+  if (!m.body && !m.html) {
     showModal(m.subject || '(无主题)', '<div class="loading"><span class="spinner"></span> 正在加载邮件正文...</div>',
       '<button class="btn btn-secondary" onclick="closeModal()">关闭</button>', true);
     try {
-      const accountId = String(m.id.split(':')[1] || '');
-      const uid = parseInt(String(m.id.split(':')[2] || ''), 10);
-      const data = await api('/api/web/email/detail', { method: 'POST', body: { mail_account_id: accountId, uid } });
-      if (data && data.email) Object.assign(m, data.email);
+      const parsed = await fetchAndParseEmail(m.id);
+      m.body = parsed.text || '';
+      m.html = parsed.html || '';
+      MailState.emailAttachments = MailState.emailAttachments || {};
+      if (parsed.attachments && parsed.attachments.length) {
+        m.attachments = parsed.attachments.map(a => a.filename || '(未命名附件)');
+        // 附件内容转成 blob URL,可直接点击下载
+        MailState.emailAttachments[m.id] = parsed.attachments.map(a => ({
+          filename: a.filename || '(未命名附件)',
+          url: URL.createObjectURL(new Blob([a.content], { type: a.mimeType || 'application/octet-stream' })),
+        }));
+      }
     } catch (e) {
       closeModal();
-      toast(e.message, 'error');
+      toast('加载邮件正文失败: ' + e.message, 'error');
       return;
     }
   }
-  const atts = (m.attachments || []).filter(Boolean);
+  const atts = (MailState.emailAttachments && MailState.emailAttachments[m.id])
+    || (m.attachments || []).filter(Boolean).map(n => ({ filename: n }));
+  const attHtml = atts.length
+    ? atts.map(a => (a.url
+        ? `<a href="${esc(a.url)}" download="${esc(a.filename)}" class="btn btn-ghost btn-sm">⬇ ${esc(a.filename)}</a>`
+        : `<span class="badge badge-gray">${esc(a.filename)}</span>`)).join(' ')
+    : '无';
   const bodyContent = m.html
     ? `<iframe sandbox="allow-same-origin" srcdoc="${esc(m.html)}" style="width:100%;min-height:420px;border:1px solid var(--border);border-radius:8px"></iframe>`
     : `<div class="mail-detail-body">${esc(m.body || '(无正文)')}</div>`;
@@ -635,7 +687,7 @@ async function viewMailDetail(i) {
       <div><strong>发件人:</strong> ${esc(m.from || '-')}</div>
       <div><strong>收件人:</strong> ${esc(m.to || '-')}</div>
       <div><strong>时间:</strong> ${esc(m.date || '-')}</div>
-      <div><strong>附件:</strong> ${atts.length ? esc(atts.join('、')) : '无'}</div>
+      <div><strong>附件:</strong> ${attHtml}</div>
       <div><strong>状态:</strong> ${m.unread ? '<span class="badge badge-primary">未读</span>' : '<span class="badge badge-gray">已读</span>'}</div>
     </div><hr class="divider"><div id="mailDetailBody">${bodyContent}</div>
   </div>`, footer, true);
@@ -650,7 +702,8 @@ async function markMailRead(i, autoMark = false) {
   try {
     await api('/api/web/email/mark_read', {
       method: 'POST',
-      body: { to: m.to, sender: m.from, subject: m.subject, mail_account_id: accountId },
+      // v2: 优先按邮件 id 精确标记(列表已返回 id),其余字段作为兼容兜底
+      body: { ids: [m.id], to: m.to, sender: m.from, subject: m.subject, mail_account_id: accountId },
     });
     m.unread = false;
     const item = document.getElementById('mail-' + i);

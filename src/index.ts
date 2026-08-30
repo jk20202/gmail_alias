@@ -9,6 +9,7 @@ import * as routes from './routes';
 import { HTTPError, type Ctx } from './routes';
 import { getActiveWebhookAccountIds } from './db';
 import { pollAndPush } from './webhook';
+import { emailHandler } from './email';
 
 // CORS 头
 const CORS_HEADERS: Record<string, string> = {
@@ -100,6 +101,7 @@ const ROUTE_TABLE: RouteEntry[] = [
   buildRoute('POST', '/api/email/mark_read',     routes.apiMarkRead),
   buildRoute('POST', '/api/web/email/fetch',     routes.webFetchEmails),
   buildRoute('POST', '/api/web/email/detail',    routes.webEmailDetail),
+  buildRoute('GET',  '/api/web/email/raw',       routes.webEmailRaw),
   buildRoute('POST', '/api/web/email/mark_read', routes.webMarkRead),
   // Webhook
   buildRoute('GET',  '/api/webhooks',            routes.webhookList),
@@ -205,6 +207,16 @@ export default {
     } catch (e) {
       console.error('Scheduled webhook poll error:', e);
     }
+  },
+
+  // ============ Email Worker (Cloudflare Email Routing 收信) ============
+  // 各邮箱把邮件「自动转发」到本 Worker 绑定的域名后,Cloudflare 会把每封邮件交给这里处理。
+  // 需在 Cloudflare 后台 Email → Email Routing → Routing rules 把规则指向本 Worker。
+  //
+  // 实现刻意保持极轻:只提取头字段 + 原始邮件流式存 R2 + 元数据入库,
+  // 不做 MIME 解析(免费套餐 Email Worker 同样只有 10ms CPU 限额)。
+  async email(message: ForwardableEmailMessage, env: Env, ctx: ExecutionContext): Promise<void> {
+    return emailHandler(message, env, ctx);
   },
 };
 

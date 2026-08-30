@@ -259,7 +259,7 @@ async function getMicrosoftEmail(accessToken: string): Promise<string> {
 
 // ============ Token 刷新 (在邮件查询前调用) ============
 // 自动检测过期并刷新,返回解密后的可访问 token
-export async function ensureValidToken(env: Env, accountId: string): Promise<{ token: string; provider: 'gmail' | 'outlook' | 'imap'; email: string }> {
+export async function ensureValidToken(env: Env, accountId: string): Promise<{ token: string; provider: 'gmail' | 'outlook' | 'imap' | 'forward'; email: string }> {
   const account = await getMailAccountById(env, accountId);
   if (!account) throw new Error('邮箱账号不存在');
 

@@ -1,5 +1,5 @@
 // D1 数据访问层 - 封装所有 SQL 操作
-import type { Env, SafeUser, SafeMailAccount, MailAccountRaw, Alias, Webhook, UserAlias } from './types';
+import type { Env, SafeUser, SafeMailAccount, MailAccountRaw, Alias, AliasStatus, Webhook, UserAlias, EmailRow } from './types';
 import { sha256, randomHex, maskToken, nowISO, buildAliasFull, decrypt, encrypt, splitEmail, isAliasUnsupportedDomain } from './utils';
 
 const SESSION_TTL_DAYS = 7;
@@ -90,6 +90,50 @@ export async function ensureSchema(env: Env): Promise<void> {
     await env.DB.prepare('ALTER TABLE mail_accounts ADD COLUMN notes TEXT').run();
   } catch { /* 列已存在 */ }
 
+  // ===== v2: 邮件转发聚合所需字段/表 =====
+  // forward_address: 该邮箱的「专属转发地址」。用户在原邮箱(Gmail/Outlook/QQ等)里把邮件
+  //   自动转发到这个地址,系统凭信封收件人即可判定邮件归属哪个邮箱。
+  // supports_alias: 该邮箱是否支持别名。默认 0(不支持)—— 不支持时只能直接选中该邮箱,
+  //   不能生成别名;置 1 后才允许按 alias_template 生成别名。
+  for (const col of [
+    'ALTER TABLE mail_accounts ADD COLUMN forward_address TEXT',
+    'ALTER TABLE mail_accounts ADD COLUMN supports_alias INTEGER NOT NULL DEFAULT 0',
+  ]) {
+    try { await env.DB.prepare(col).run(); } catch { /* 列已存在 */ }
+  }
+  try {
+    await env.DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_mail_accounts_forward ON mail_accounts(forward_address)').run();
+  } catch { /* 已存在 */ }
+
+  // emails: 已接收邮件。只存「元数据 + R2 对象 key」,不存正文 —— 正文/附件由前端
+  // 下载 raw 后用 postal-mime 在浏览器解析,避免 Worker 解析 MIME 超出免费套餐 10ms CPU。
+  const emailDdl: string[] = [
+    `CREATE TABLE IF NOT EXISTS emails (
+      id              TEXT PRIMARY KEY,
+      account_id      TEXT NOT NULL,
+      alias_id        TEXT,
+      message_id      TEXT,
+      subject         TEXT,
+      from_name       TEXT,
+      from_address    TEXT,
+      delivered_to    TEXT,
+      recipient       TEXT,
+      cc              TEXT,
+      sent_at         INTEGER NOT NULL DEFAULT 0,
+      size            INTEGER NOT NULL DEFAULT 0,
+      raw_key         TEXT,
+      has_attachments INTEGER NOT NULL DEFAULT 0,
+      read            INTEGER NOT NULL DEFAULT 0,
+      created_at      TEXT NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_emails_account_sent ON emails(account_id, sent_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_emails_alias_sent ON emails(alias_id, sent_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_emails_account_read ON emails(account_id, read)`,
+  ];
+  for (const sql of emailDdl) {
+    try { await env.DB.prepare(sql).run(); } catch { /* 已存在则忽略 */ }
+  }
+
   // 迁移旧版单别名数据 -> user_aliases(给 1 小时有效期,避免一升级就全部过期)
   // 注意:时间统一用 JS 生成的 ISO 字符串,不能用 SQLite 的 datetime('now')(格式不同会导致比较失效)
   try {
@@ -122,6 +166,9 @@ interface MailAccountRow {
   imap_user?: string | null; imap_pass?: string | null;
   alias_template?: string | null;
   notes?: string | null;
+  // v2: 专属转发地址 / 是否支持别名
+  forward_address?: string | null;
+  supports_alias?: number | null;
 }
 interface AliasRow {
   user_id: string; mail_account_id: string; label: string;
@@ -158,6 +205,9 @@ function toSafeMailAccount(row: MailAccountRow): SafeMailAccount {
     // 别名规则模板 / 备注 / IMAP 连接(供前端编辑弹窗预填;不含密码)
     alias_template: row.alias_template || null,
     notes: row.notes || '',
+    // v2: 专属转发地址(用户在原邮箱设置转发到该地址) + 是否支持别名
+    forward_address: row.forward_address || null,
+    supports_alias: row.supports_alias === 1,
     imap_host: row.imap_host || null,
     imap_port: row.imap_port || null,
   };
@@ -1079,4 +1129,202 @@ export async function saveUserGoogleCreds(env: Env, userId: string, clientId: st
     clientSecret ? await encrypt(clientSecret, env) : '',
     userId
   ).run();
+}
+
+// ==================================================================
+// v2: 邮件转发聚合
+//   - 绑定邮箱免授权(只填主邮箱地址),系统分配一个「专属转发地址」
+//   - 收信时按 别名 > 主邮箱 > 专属转发地址 的顺序判定归属
+//   - 邮件元数据入库,原始 .eml 存 R2(正文/附件由浏览器端解析)
+// ==================================================================
+
+const FORWARD_DOMAIN_FALLBACK = 'example.com';
+
+function recvDomain(env: Env): string {
+  return (env.RECV_DOMAIN || '').trim() || FORWARD_DOMAIN_FALLBACK;
+}
+
+// 生成一个未被占用的专属转发地址,形如 f-a1b2c3@recv.example.com
+async function uniqueForwardAddress(env: Env): Promise<string> {
+  const domain = recvDomain(env);
+  for (let i = 0; i < 8; i++) {
+    const addr = `f-${randomHex(5)}@${domain}`;
+    const dup = await env.DB.prepare('SELECT id FROM mail_accounts WHERE forward_address = ?')
+      .bind(addr).first<{ id: string }>();
+    if (!dup) return addr;
+  }
+  return `f-${randomHex(10)}@${domain}`;
+}
+
+// 绑定邮箱(v2 免授权)。返回账号 id 与系统分配的专属转发地址,
+// 用户需去原邮箱(Gmail/Outlook/QQ…)把收到的邮件「自动转发」到该地址。
+export async function addForwardAccount(
+  env: Env, userId: string, email: string,
+  opts: { isPublic?: boolean; supportsAlias?: boolean; aliasTemplate?: string | null; notes?: string | null } = {},
+): Promise<{ id: string; forward_address: string }> {
+  const id = 'v' + randomHex(4);
+  const forward = await uniqueForwardAddress(env);
+  // mail_accounts 的 access_token/refresh_token/token_expires_at 是 NOT NULL,
+  // v2 不使用 OAuth,统一写入空串占位。
+  await env.DB.prepare(
+    `INSERT INTO mail_accounts
+       (id, user_id, provider, email, access_token, refresh_token, token_expires_at,
+        is_public, created_at, alias_template, notes, forward_address, supports_alias)
+     VALUES(?,?, 'forward', ?, '', '', '', ?, ?, ?, ?, ?, ?)`
+  ).bind(
+    id, userId, email,
+    opts.isPublic === true ? 1 : 0,
+    nowISO(),
+    opts.aliasTemplate || null,
+    opts.notes || null,
+    forward,
+    opts.supportsAlias === true ? 1 : 0,
+  ).run();
+  return { id, forward_address: forward };
+}
+
+// 更新转发邮箱的「别名开关 / 公开共享 / 别名规则 / 备注」
+export async function updateForwardAccountConfig(
+  env: Env, userId: string, accountId: string,
+  opts: { supportsAlias?: boolean; isPublic?: boolean; aliasTemplate?: string | null; notes?: string | null },
+): Promise<void> {
+  const sets: string[] = [];
+  const binds: any[] = [];
+  if (opts.supportsAlias !== undefined) { sets.push('supports_alias = ?'); binds.push(opts.supportsAlias ? 1 : 0); }
+  if (opts.isPublic !== undefined) { sets.push('is_public = ?'); binds.push(opts.isPublic ? 1 : 0); }
+  if (opts.aliasTemplate !== undefined) { sets.push('alias_template = ?'); binds.push(opts.aliasTemplate); }
+  if (opts.notes !== undefined) { sets.push('notes = ?'); binds.push(opts.notes); }
+  if (!sets.length) return;
+  binds.push(accountId, userId);
+  await env.DB.prepare(
+    `UPDATE mail_accounts SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`
+  ).bind(...binds).run();
+}
+
+function toMailAccountRaw(row: MailAccountRow): MailAccountRaw {
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    provider: (row.provider as MailAccountRaw['provider']) || 'forward',
+    email: row.email,
+    access_token: row.access_token || '',
+    refresh_token: row.refresh_token || '',
+    token_expires_at: row.token_expires_at || '',
+    is_public: row.is_public === 1,
+    created_at: row.created_at,
+    forward_address: row.forward_address || null,
+    supports_alias: row.supports_alias ?? 0,
+    alias_template: row.alias_template || null,
+    imap_host: row.imap_host || null,
+    imap_port: row.imap_port || null,
+    imap_user: row.imap_user || null,
+    imap_pass: row.imap_pass || null,
+  };
+}
+
+// 按「专属转发地址」定位邮箱(信封收件人命中,最可靠的兜底判定)
+export async function getAccountByForwardAddress(env: Env, addr: string): Promise<MailAccountRaw | null> {
+  const row = await env.DB.prepare('SELECT * FROM mail_accounts WHERE forward_address = ?')
+    .bind(addr).first<MailAccountRow>();
+  return row ? toMailAccountRaw(row) : null;
+}
+
+// 按主邮箱地址定位(转发邮件保留了原始收件人时命中)
+export async function getAccountByEmail(env: Env, email: string): Promise<MailAccountRaw | null> {
+  const row = await env.DB.prepare('SELECT * FROM mail_accounts WHERE email = ?')
+    .bind(email).first<MailAccountRow>();
+  return row ? toMailAccountRaw(row) : null;
+}
+
+// 按别名完整地址定位别名(仅返回生效中的)
+export async function getAliasByFull(env: Env, full: string): Promise<UserAlias | null> {
+  const row = await env.DB.prepare(
+    `SELECT * FROM user_aliases WHERE full = ? AND status = 'active'`
+  ).bind(full).first<UserAliasRow>();
+  if (!row) return null;
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    mail_account_id: row.mail_account_id,
+    label: row.label,
+    full: row.full,
+    is_favorite: row.is_favorite === 1,
+    status: row.status as AliasStatus,
+    expires_at: row.expires_at,
+    last_used_at: row.last_used_at,
+    created_at: row.created_at,
+  };
+}
+
+// 写入一封已接收邮件(Email Worker 调用;同 message_id 重复收信会被忽略)
+export async function insertEmail(env: Env, row: EmailRow): Promise<void> {
+  await env.DB.prepare(
+    `INSERT OR IGNORE INTO emails
+       (id, account_id, alias_id, message_id, subject, from_name, from_address,
+        delivered_to, recipient, cc, sent_at, size, raw_key, has_attachments, read, created_at)
+     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)`
+  ).bind(
+    row.id, row.account_id, row.alias_id, row.message_id, row.subject,
+    row.from_name, row.from_address, row.delivered_to, row.recipient, row.cc,
+    row.sent_at, row.size, row.raw_key, row.has_attachments, row.created_at
+  ).run();
+}
+
+// 邮件列表查询(只查元数据,不解析 MIME —— 保证免费套餐 10ms CPU 内完成)
+export interface ListEmailsOpts {
+  accountIds: string[];            // 允许查看的邮箱(自己的 + 公开的)
+  accountId?: string;              // 指定某个邮箱
+  aliasId?: string;                // 指定某个别名
+  q?: string;                      // 模糊搜索(主题/发件人/收件人)
+  startTime?: string;
+  endTime?: string;
+  unreadOnly?: boolean;
+  limit: number;
+  offset: number;
+}
+
+export async function listEmails(env: Env, opts: ListEmailsOpts): Promise<{ rows: EmailRow[]; total: number }> {
+  if (!opts.accountIds.length) return { rows: [], total: 0 };
+  const where: string[] = [`account_id IN (${opts.accountIds.map(() => '?').join(',')})`];
+  const binds: any[] = [...opts.accountIds];
+
+  if (opts.accountId) { where.push('account_id = ?'); binds.push(opts.accountId); }
+  if (opts.aliasId) { where.push('alias_id = ?'); binds.push(opts.aliasId); }
+  if (opts.unreadOnly) where.push('read = 0');
+
+  if (opts.startTime) {
+    const t = Math.floor(Date.parse(opts.startTime) / 1000);
+    if (!isNaN(t)) { where.push('sent_at >= ?'); binds.push(t); }
+  }
+  if (opts.endTime) {
+    const t = Math.floor(Date.parse(opts.endTime) / 1000);
+    if (!isNaN(t)) { where.push('sent_at <= ?'); binds.push(t); }
+  }
+  if (opts.q) {
+    const like = `%${opts.q}%`;
+    where.push('(subject LIKE ? OR from_address LIKE ? OR from_name LIKE ? OR recipient LIKE ? OR delivered_to LIKE ?)');
+    binds.push(like, like, like, like, like);
+  }
+
+  const whereSql = where.join(' AND ');
+  const cnt = await env.DB.prepare(`SELECT COUNT(*) AS c FROM emails WHERE ${whereSql}`)
+    .bind(...binds).first<{ c: number }>();
+  const { results } = await env.DB.prepare(
+    `SELECT * FROM emails WHERE ${whereSql} ORDER BY sent_at DESC, created_at DESC LIMIT ? OFFSET ?`
+  ).bind(...binds, opts.limit, opts.offset).all<EmailRow>();
+
+  return { rows: results || [], total: cnt?.c || 0 };
+}
+
+export async function getEmailRow(env: Env, id: string): Promise<EmailRow | null> {
+  return await env.DB.prepare('SELECT * FROM emails WHERE id = ?').bind(id).first<EmailRow>();
+}
+
+// 标记已读(按邮件 id)
+export async function markEmailRead(env: Env, ids: string[]): Promise<number> {
+  if (!ids.length) return 0;
+  const r = await env.DB.prepare(
+    `UPDATE emails SET read = 1 WHERE id IN (${ids.map(() => '?').join(',')})`
+  ).bind(...ids).run();
+  return r.meta?.changes || 0;
 }

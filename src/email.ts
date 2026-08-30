@@ -1,0 +1,222 @@
+// Email Worker: 接收 Cloudflare Email Routing 转发过来的邮件
+//
+// 设计约束(关键):
+//   Cloudflare 免费套餐下,Email Worker 与 HTTP 请求共享同样的 10ms CPU 限额
+//   (官方文档: "Routing to Workers on the Workers Free plan ... count toward the
+//   standard Workers CPU and memory limits ... complex handlers may exceed these limits")。
+//   因此这里**绝不做完整 MIME 解析**:
+//     - message.headers 由 Cloudflare 预先解析好,取字段几乎零成本;
+//     - 原始邮件以 ReadableStream 直接流式写入 R2,不做拼接/解码;
+//     - 正文与附件交给浏览器端 postal-mime 解析(Worker 只负责把 raw 吐出去)。
+//
+// 归属判定顺序(决定这封邮件属于哪个邮箱/别名):
+//   1) 原始收件人优先匹配「别名」(转发场景: 别人发到 jk+ui@gmail.com,Gmail 再转发给我们)
+//   2) 其次匹配「主邮箱地址」
+//   3) 最后用信封收件人匹配「专属转发地址」(原始收件人丢失时的兜底)
+//   参考开源项目 Alle 的候选头优先级(duck-original-to / x-original-to / ... / x-forwarded-to)。
+
+import type { Env, EmailRow } from './types';
+import { insertEmail } from './db';
+
+// 候选收件人所在头,按优先级从高到低。
+// 注意: 信封收件人 message.to 不在这里 —— 它等于我们的专属转发地址,
+// 若参与候选会永远只命中主邮箱、掩盖真实别名,因此仅作为最后兜底。
+const CANDIDATE_HEADERS = [
+  'duck-original-to',          // DuckDuckGo 邮件保护
+  'x-original-to',
+  'original-recipient',
+  'x-github-recipient-address',
+  'destinations',
+  'resent-to',
+  'to',
+  'delivered-to',
+  'x-forwarded-to',
+  'x-envelope-to',
+  'cc',
+];
+
+function headerValue(headers: Headers, name: string): string | null {
+  const v = headers.get(name);
+  return v ? v.trim() : null;
+}
+
+// 从任意文本里抽出邮箱地址(小写去重)
+function extractEmails(value: string | null | undefined): string[] {
+  if (!value) return [];
+  const m = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi);
+  if (!m) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of m) {
+    const s = raw.toLowerCase();
+    if (seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
+
+// 按优先级收集候选收件人(去重)
+function collectCandidates(headers: Headers): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const key of CANDIDATE_HEADERS) {
+    for (const addr of extractEmails(headerValue(headers, key))) {
+      if (seen.has(addr)) continue;
+      seen.add(addr);
+      out.push(addr);
+    }
+  }
+  return out;
+}
+
+// 解析 From 头 -> { 显示名, 邮箱地址 }
+function parseFrom(value: string | null): { name: string | null; address: string | null } {
+  if (!value) return { name: null, address: null };
+  const addrMatch = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  const address = addrMatch ? addrMatch[0].toLowerCase() : null;
+  let name: string | null = null;
+  const angle = value.match(/^\s*"?([^"<]*?)"?\s*</);
+  if (angle && angle[1] && angle[1].trim()) name = angle[1].trim();
+  else if (!address) name = value.trim().slice(0, 120);
+  return { name, address };
+}
+
+// RFC2047 解码(=?charset?b|q?...?=),仅处理主题这类短字符串
+function decodeRfc2047(s: string): string {
+  if (!s || s.indexOf('=?') < 0) return s;
+  return s.replace(/=\?([^?]+)\?([bqBQ])\?([^?]*)\?=/g, (_m, _cs: string, enc: string, data: string) => {
+    try {
+      if (enc.toLowerCase() === 'b') {
+        const bin = atob(data);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return new TextDecoder('utf-8').decode(bytes);
+      }
+      return data.replace(/_/g, ' ').replace(/=([0-9A-Fa-f]{2})/g, (_x, h: string) =>
+        String.fromCharCode(parseInt(h, 16)));
+    } catch {
+      return data;
+    }
+  });
+}
+
+// Date 头 -> UTC 秒
+function parseSentAt(value: string | null): number {
+  const t = value ? Date.parse(value) : NaN;
+  return Number.isNaN(t) ? Math.floor(Date.now() / 1000) : Math.floor(t / 1000);
+}
+
+interface Resolved {
+  accountId: string;
+  aliasId: string | null;
+}
+
+// 归属判定:别名 > 主邮箱 > 专属转发地址
+// 全程只发 3 条 SQL(批量 IN 查询),避免逐候选查询拖长收信耗时。
+async function resolveOwner(env: Env, candidates: string[], envelopeTo: string): Promise<Resolved | null> {
+  // 1) 批量匹配别名
+  if (candidates.length) {
+    const ph = candidates.map(() => '?').join(',');
+    const { results } = await env.DB.prepare(
+      `SELECT id, mail_account_id, full FROM user_aliases WHERE full IN (${ph}) AND status = 'active'`
+    ).bind(...candidates).all<{ id: string; mail_account_id: string; full: string }>();
+    const rows = results || [];
+    for (const cand of candidates) {          // 按优先级取第一个命中的
+      const hit = rows.find(r => (r.full || '').toLowerCase() === cand);
+      if (hit) return { accountId: hit.mail_account_id, aliasId: hit.id };
+    }
+  }
+  // 2) 批量匹配主邮箱
+  if (candidates.length) {
+    const ph = candidates.map(() => '?').join(',');
+    const { results } = await env.DB.prepare(
+      `SELECT id, email FROM mail_accounts WHERE email IN (${ph})`
+    ).bind(...candidates).all<{ id: string; email: string }>();
+    const rows = results || [];
+    for (const cand of candidates) {
+      const hit = rows.find(r => (r.email || '').toLowerCase() === cand);
+      if (hit) return { accountId: hit.id, aliasId: null };
+    }
+  }
+  // 3) 兜底: 信封收件人 = 专属转发地址
+  const env3 = extractEmails(envelopeTo);
+  if (env3.length) {
+    const row = await env.DB.prepare('SELECT id FROM mail_accounts WHERE forward_address = ?')
+      .bind(env3[0]).first<{ id: string }>();
+    if (row) return { accountId: row.id, aliasId: null };
+  }
+  return null;
+}
+
+/**
+ * Email Worker 入口。
+ * 在 wrangler 里无需额外配置;需在 Cloudflare 后台
+ * 「Email → Email Routing → Routing rules」把收信规则指向本 Worker。
+ */
+export async function emailHandler(
+  message: ForwardableEmailMessage,
+  env: Env,
+  _ctx: ExecutionContext,
+): Promise<void> {
+  try {
+    if (!message || message.rawSize <= 0) {
+      message.setReject('Empty message');
+      return;
+    }
+    if (message.rawSize > 25 * 1024 * 1024) {
+      message.setReject('Message too large (max 25 MiB)');
+      return;
+    }
+
+    const candidates = collectCandidates(message.headers);
+    const owner = await resolveOwner(env, candidates, message.to || '');
+    if (!owner) {
+      // 没有任何已登记邮箱/别名与之对应:拒收,避免垃圾邮件入库
+      message.setReject('No matching mailbox or alias for this message');
+      return;
+    }
+
+    const id = crypto.randomUUID();
+    const month = new Date().toISOString().slice(0, 7);   // yyyy-mm
+    const rawKey = `emails/${owner.accountId}/${month}/${id}.eml`;
+
+    // 原始邮件流式写入 R2(不做拼接/解码,CPU 开销极低)
+    let storedKey: string | null = null;
+    try {
+      await env.EMAIL_RAW.put(rawKey, message.raw, {
+        httpMetadata: { contentType: 'message/rfc822' },
+      });
+      storedKey = rawKey;
+    } catch (e) {
+      console.error('R2 put failed:', e);
+    }
+
+    const fromRaw = headerValue(message.headers, 'from');
+    const { name: fromName, address: fromAddr } = parseFrom(fromRaw);
+    const ct = (headerValue(message.headers, 'content-type') || '').toLowerCase();
+    const row: EmailRow = {
+      id,
+      account_id: owner.accountId,
+      alias_id: owner.aliasId,
+      message_id: headerValue(message.headers, 'message-id'),
+      subject: decodeRfc2047(headerValue(message.headers, 'subject') || '').slice(0, 500) || null,
+      from_name: fromName ? fromName.slice(0, 200) : null,
+      from_address: fromAddr,
+      delivered_to: candidates[0] || extractEmails(message.to)[0] || null,
+      recipient: (headerValue(message.headers, 'to') || '').slice(0, 500) || null,
+      cc: (headerValue(message.headers, 'cc') || '').slice(0, 500) || null,
+      sent_at: parseSentAt(headerValue(message.headers, 'date')),
+      size: message.rawSize,
+      raw_key: storedKey,
+      has_attachments: /multipart\/(mixed|related)/.test(ct) ? 1 : 0,
+      read: 0,
+      created_at: new Date().toISOString(),
+    };
+
+    await insertEmail(env, row);
+  } catch (e) {
+    console.error('emailHandler error:', e);
+    try { message.setReject('Failed to process inbound email'); } catch { /* ignore */ }
+  }
+}
