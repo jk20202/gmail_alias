@@ -31,12 +31,12 @@ run_worker_first = true
 [[d1_databases]]
 binding = "DB"
 database_name = "mail_alias_v2"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "db27fd65-d40f-45fb-8118-a27049ba2606"
 
 # KV(会话缓存 / Webhook 推送去重)
 [[kv_namespaces]]
 binding = "KV"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "abf683838fbf4af3ae8d033c10052d44"
 
 # R2:存放接收到的原始邮件(.eml)
 # 正文与附件不入库,由前端下载 raw 后用 postal-mime 在浏览器解析,

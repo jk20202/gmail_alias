@@ -41,6 +41,24 @@ CREATE TABLE IF NOT EXISTS mail_accounts (
 CREATE INDEX IF NOT EXISTS idx_mail_accounts_user ON mail_accounts(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mail_accounts_forward ON mail_accounts(forward_address);
 
+-- ============ 遗留单别名表(必须保留) ============
+-- v1 的「一用户一别名」表。v2 已改用下面的 user_aliases(多别名),
+-- 但代码里的 getAlias / clearAlias / setAlias / adminSetAlias 以及 ensureSchema 的历史数据迁移
+-- 仍会读写它;缺失会直接导致 D1_ERROR: no such table: aliases(health/登录全挂)。
+CREATE TABLE IF NOT EXISTS aliases (
+  user_id          TEXT PRIMARY KEY,                -- 一用户一别名
+  mail_account_id  TEXT NOT NULL,
+  label            TEXT NOT NULL,
+  full             TEXT NOT NULL,                   -- prefix+label@domain
+  updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (mail_account_id) REFERENCES mail_accounts(id) ON DELETE CASCADE
+);
+CREATE TRIGGER IF NOT EXISTS trg_alias_updated
+AFTER UPDATE ON aliases
+BEGIN
+  UPDATE aliases SET updated_at = datetime('now') WHERE user_id = NEW.user_id;
+END;
+
 -- ============ 别名表(每用户可有多个,1小时有效期) ============
 CREATE TABLE IF NOT EXISTS user_aliases (
   id              TEXT PRIMARY KEY,

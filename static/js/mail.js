@@ -178,11 +178,29 @@ function renderActiveAliases() {
     quota.innerHTML = `生效中 <strong>${list.length}</strong> / ${max}` +
       (list.length >= max ? ' · <span class="text-danger">满</span>' : '');
   }
+  // v2: 「直接收信的邮箱」区块。
+  // 关闭「支持别名」的邮箱无法生成别名,只能在这里被直接选中收信 —— 这是它唯一的入口。
+  const accts = State.availableAccounts || [];
+  const acctHtml = accts.length ? `
+    <div style="font-size:12px;color:var(--text-light);margin:10px 0 6px">直接收信的邮箱</div>
+    ${accts.map(a => `
+      <div class="alias-row ${a.id === MailState.selectedAccountId ? 'selected' : ''}"
+           onclick="selectAccount('${esc(a.id)}')" title="点击查看该邮箱收到的全部邮件">
+        <div class="ar-info">
+          <div class="ar-addr">${esc(a.email)}${
+            a.supports_alias ? '' : ' <span class="badge badge-gray" title="该邮箱未开启别名支持，只能直接选中收信">无别名</span>'
+          }</div>
+          ${a.forward_address ? `<div class="form-hint" style="font-size:11px">转发地址：${esc(a.forward_address)}</div>` : ''}
+        </div>
+      </div>`).join('')}
+  ` : '';
+
   if (!list.length) {
-    box.innerHTML = '<div class="mail-empty">暂无效中的别名，点击右上角「创建别名」添加。</div>';
+    box.innerHTML = acctHtml
+      || '<div class="mail-empty">暂无效中的别名，点击右上角「创建别名」添加。</div>';
     return;
   }
-  box.innerHTML = list.map(a => {
+  box.innerHTML = acctHtml + list.map(a => {
     const pct = Math.max(0, Math.min(100, ((a.remain_ms || 0) / (State.aliasTtlMs || 3600000)) * 100));
     const isSel = a.id === MailState.selectedAliasId;
     return `
@@ -234,6 +252,7 @@ async function deleteAliasById(id, full) {
 // 清空当前选中的邮件视图,回到空状态
 function resetMailView() {
   MailState.selectedAliasId = '';
+  MailState.selectedAccountId = '';
   MailState.emails = [];
   MailState.offset = 0;
   MailState.hasMore = false;
@@ -243,11 +262,30 @@ function resetMailView() {
 
 function selectAlias(id) {
   MailState.selectedAliasId = id;
+  // 选中别名时取消「直接选中邮箱」状态,两种模式互斥
+  MailState.selectedAccountId = '';
   renderActiveAliases();
   // 滚动到顶部
   const main = document.getElementById('mailMain');
   if (main) main.scrollTop = 0;
   // 重置邮件列表并加载
+  MailState.emails = [];
+  MailState.offset = 0;
+  MailState.hasMore = false;
+  renderMailList();
+  fetchMails();
+}
+
+// v2: 直接选中某个邮箱收信(不按别名过滤)
+// 关闭「支持别名」的邮箱无法生成别名,**只能通过这里被选中**;
+// 已开启别名的邮箱也可以用这种方式查看它收到的全部邮件(不区分别名)。
+function selectAccount(id) {
+  MailState.selectedAccountId = id;
+  // 与「选中别名」模式互斥
+  MailState.selectedAliasId = '';
+  renderActiveAliases();
+  const main = document.getElementById('mailMain');
+  if (main) main.scrollTop = 0;
   MailState.emails = [];
   MailState.offset = 0;
   MailState.hasMore = false;
@@ -477,6 +515,13 @@ function buildFetchBody(silent = false, isLoadMore = false) {
     unseen: MailState.unseen ? true : undefined,
     silent: silent ? true : undefined,
   };
+  // v2: 直接选中某个邮箱整箱查询。
+  // 关闭「支持别名」的邮箱无法生成别名,只能被直接选中收信 —— 这是它唯一的查询方式。
+  if (MailState.selectedAccountId) {
+    body.all_aliases = false;
+    body.mail_account_id = MailState.selectedAccountId;
+    return body;
+  }
   if (alias) {
     body.alias_id = alias.id;
     // 查询范围: 从别名创建(激活)时间起,一直到当前;续期不改变 created_at,因此旧邮件仍在范围内

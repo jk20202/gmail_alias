@@ -815,10 +815,11 @@ export async function webFetchEmails(ctx: Ctx): Promise<Response> {
     targets = [{ accountId: a.mail_account_id, to: a.full, aliasId: a.id, aliasFull: a.full, aliasCreated: a.created_at }];
     scopeLabel = a.full;
     aliasCreatedAt = a.created_at;
-  } else if (ctx.body?.all_aliases === false) {
-    // 管理员整箱查询
-    if (!user.is_admin) return fail('仅管理员可查询整箱邮件', 403);
-    if (!params.mail_account_id) return fail('请选择查询邮箱');
+  } else if (ctx.body?.all_aliases === false && params.mail_account_id) {
+    // 直接选中某个邮箱查询(不按别名过滤)
+    // v2 关键: 关闭「支持别名」的邮箱无法生成别名,只能被直接选中收信,
+    // 因此**普通用户也必须能按邮箱整箱查询**,不能再限制为管理员。
+    // 权限由后文 listAvailableAccounts 校验:只能是自己的,或已被公开共享的。
     targets = [{ accountId: params.mail_account_id, to: params.to }];
     scopeLabel = '(整箱)';
   } else if (activeAliases.length > 0) {
