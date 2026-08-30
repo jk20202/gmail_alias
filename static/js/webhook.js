@@ -1,6 +1,5 @@
 /* ============================================================
- * webhook.js — Webhook 订阅页
- * 重构：支持按「主邮箱 → 存活别名/整箱」粒度选择监听范围
+ * webhook.js — Webhook 订阅页 (v2: 区分自己/他人公开邮箱)
  * ============================================================ */
 
 const WH_FORMAT_LABEL = {
@@ -10,7 +9,7 @@ const WH_FORMAT_LABEL = {
   json: '原始 JSON',
 };
 
-// ============ 本地缓存: 减少重复查库,页面切换瞬时渲染 ============
+// ============ 本地缓存 ============
 const WH_CACHE_KEY = 'mail_alias_webhooks_v1';
 function getCachedWebhooks() {
   try { return JSON.parse(localStorage.getItem(WH_CACHE_KEY) || 'null'); } catch { return null; }
@@ -19,32 +18,13 @@ function setCachedWebhooks(list) {
   try { localStorage.setItem(WH_CACHE_KEY, JSON.stringify(list || [])); } catch {}
 }
 
-// 已绑定邮箱列表（只包含自己绑定的），key=id, value=account
-let myAccounts = {};
-// 存活别名列表，key=mail_account_id, value=[{id, full}]
-let aliasMap = {};
-
 async function initWebhookPage() {
-  // 加载自己的邮箱
-  try {
-    const accounts = await api('/api/account/mail_accounts');
-    myAccounts = {};
-    (accounts || []).forEach(a => { myAccounts[a.id] = a; });
-  } catch { myAccounts = {}; }
-  // 加载存活别名
-  try {
-    const aliases = await api('/api/account/aliases?all_aliases=true');
-    aliasMap = {};
-    (aliases || []).forEach(al => {
-      if (!aliasMap[al.mail_account_id]) aliasMap[al.mail_account_id] = [];
-      aliasMap[al.mail_account_id].push({ id: al.id, full: al.full });
-    });
-  } catch { aliasMap = {}; }
-
-  renderWhAccountOptions(Object.values(myAccounts));
+  if (!State.availableAccounts || !State.availableAccounts.length) {
+    try { State.availableAccounts = await api('/api/account/mail_accounts/available'); }
+    catch { State.availableAccounts = []; }
+  }
+  renderWhAccountOptions(State.availableAccounts || []);
   onWhAccountChange();
-  onWhScopeChange();
-  // 先用本地缓存瞬时渲染(无转圈),随后后台静默刷新线上数据
   const cached = getCachedWebhooks();
   if (cached) renderWebhooks(cached);
   loadWebhooks(true);
@@ -54,42 +34,78 @@ function renderWhAccountOptions(list) {
   const sel = document.getElementById('whAccount');
   if (!sel) return;
   if (!list || !list.length) {
-    sel.innerHTML = '<option value="">尚未绑定任何邮箱</option>';
-  } else {
-    sel.innerHTML = list.map(a =>
-      `<option value="${esc(a.id)}">${esc(a.email)}${a.notes ? ' · ' + esc(a.notes) : ''}</option>`
-    ).join('');
+    sel.innerHTML = '<option value="">无可用邮箱</option>';
+    return;
   }
+  // 分组渲染：自己绑定的 + 别人公开的
+  const own = list.filter(a => a.is_own);
+  const other = list.filter(a => !a.is_own);
+  const parts = [];
+  if (own.length) {
+    parts.push(`<optgroup label="我自己的 (${own.length})">`);
+    parts.push(own.map(a => `<option value="${esc(a.id)}">${esc(a.email)} <small style="opacity:.6">(${esc(a.provider)})</small></option>`).join(''));
+    parts.push('</optgroup>');
+  }
+  if (other.length) {
+    parts.push(`<optgroup label="他人公开 (${other.length})">`);
+    parts.push(other.map(a => `<option value="${esc(a.id)}">[${esc(a.owner)}] ${esc(a.email)} <small style="opacity:.6">(${esc(a.provider)})</small></option>`).join(''));
+    parts.push('</optgroup>');
+  }
+  sel.innerHTML = parts.join('');
   sel.onchange = onWhAccountChange;
 }
 
 function onWhAccountChange() {
   const sel = document.getElementById('whAccount');
   const scopeSel = document.getElementById('whScope');
-  const aliasSel = document.getElementById('whAlias');
   const aliasWrap = document.getElementById('whAliasWrap');
+  const aliasSel = document.getElementById('whAlias');
   if (!sel || !scopeSel) return;
-  const accountId = sel.value;
-  // 别名下拉
-  if (aliasSel && aliasWrap) {
-    if (!accountId) {
-      aliasSel.innerHTML = '<option value="">请先选择主邮箱</option>';
-      aliasWrap.style.display = 'none';
-    } else {
-      const aliases = aliasMap[accountId] || [];
-      aliasSel.innerHTML = aliases.length
-        ? aliases.map(a => `<option value="${esc(a.id)}">${esc(a.full)}</option>`).join('')
-        : '<option value="">无存活别名</option>';
-      onWhScopeChange();
-    }
+  const opt = sel.options[sel.selectedIndex];
+  if (!opt || !opt.value) return;
+  const acc = (State.availableAccounts || []).find(a => a.id === opt.value);
+  const isOwn = acc ? acc.is_own : true;
+  // 自己的邮箱: 三种 scope 可选
+  // 别人的公开: 只能「指定别名」
+  if (isOwn) {
+    scopeSel.disabled = false;
+    scopeSel.value = 'alias_all';
+    onWhScopeChange();
+  } else {
+    scopeSel.value = 'alias';
+    scopeSel.disabled = true;
+    aliasWrap.style.display = 'block';
+    // 预填当前用户自己的别名
+    const myAlias = State.user && State.user.alias ? State.user.alias.full : '';
+    aliasSel.innerHTML = myAlias
+      ? `<option value="${esc(myAlias)}" selected>${esc(myAlias)} (你已绑定的别名)</option>`
+      : '<option value="">你还没有创建别名,请先去「我的别名」页面创建</option>';
   }
 }
 
 function onWhScopeChange() {
-  const scopeSel = document.getElementById('whScope');
+  const sel = document.getElementById('whScope');
   const aliasWrap = document.getElementById('whAliasWrap');
-  if (!scopeSel || !aliasWrap) return;
-  aliasWrap.style.display = scopeSel.value === 'alias' ? '' : 'none';
+  const aliasSel = document.getElementById('whAlias');
+  if (!sel || !aliasWrap || !aliasSel) return;
+  if (sel.value === 'alias') {
+    aliasWrap.style.display = 'block';
+    loadAliasesForSelect(aliasSel);
+  } else {
+    aliasWrap.style.display = 'none';
+  }
+}
+
+async function loadAliasesForSelect(sel) {
+  if (!sel) return;
+  try {
+    const aliases = await api('/api/account/aliases?active_only=true&all_aliases=false');
+    sel.innerHTML = aliases.length
+      ? aliases.map(a => `<option value="${esc(a.full)}">${esc(a.full)} <small style="opacity:.6">(${esc(a.email)})</small></option>`).join('')
+      : '<option value="">暂无活跃别名</option>';
+  } catch {
+    sel.innerHTML = '<option value="">加载失败</option>';
+  }
 }
 
 async function loadWebhooks(silent) {
@@ -116,17 +132,10 @@ function renderWebhooks(list) {
     const fmt = w.format || 'card';
     const fmtOptions = Object.keys(WH_FORMAT_LABEL)
       .map(k => `<option value="${k}" ${k === fmt ? 'selected' : ''}>${WH_FORMAT_LABEL[k]}</option>`).join('');
-    // 解析 scope 展示
-    const scopeLabel = w.scope === 'alias_all' ? '全部别名'
-      : w.scope === 'account' ? '整箱' : '指定别名';
-    const accountInfo = myAccounts[w.mail_account_id]
-      ? esc(myAccounts[w.mail_account_id].email)
-      : esc(w.mail_account_id);
-    const aliasInfo = w.target_alias
-      ? `<span>别名: ${esc(w.target_alias)}</span>`
-      : w.scope !== 'account'
-        ? '<span class="form-hint">全部别名</span>'
-        : '';
+    const scopeLabel = w.target_alias
+      ? `指定别名: ${esc(w.target_alias)}`
+      : '监听整箱';
+    const ownerInfo = w.mail_account_id ? ` (ID: ${esc(w.mail_account_id)})` : '';
     return `
       <div class="mail-item" style="margin-bottom:10px">
         <div class="mail-head" style="cursor:default; flex-wrap:wrap">
@@ -136,14 +145,12 @@ function renderWebhooks(list) {
         </div>
         <div class="mail-body" style="display:block; border-top:1px solid var(--border)">
           <div class="meta-row">
-            <span>邮箱: ${accountInfo}</span>
             <span>范围: ${esc(scopeLabel)}</span>
-            ${aliasInfo}
             <span>事件: ${esc(w.events)}</span>
             ${w.secret ? '<span class="badge badge-primary">已设签名</span>' : ''}
             <span>创建: ${fmtTime(w.created_at)}</span>
           </div>
-          <div class="actions" style="margin-top:12px">
+          <div class="actions" style="margin-top:10px">
             <button class="btn btn-secondary btn-sm" onclick="testWebhook('${esc(w.id)}')">测试推送</button>
             <button class="btn btn-danger btn-sm" onclick="deleteWebhook('${esc(w.id)}')">删除</button>
           </div>
@@ -153,21 +160,22 @@ function renderWebhooks(list) {
 }
 
 async function createWebhook() {
+  const sel = document.getElementById('whAccount');
+  const scopeSel = document.getElementById('whScope');
+  const aliasSel = document.getElementById('whAlias');
   const events = [];
   if (document.getElementById('whEvNew').checked) events.push('new_mail');
   if (document.getElementById('whEvUnread').checked) events.push('unread');
   const body = {
-    mail_account_id: document.getElementById('whAccount').value,
-    scope: document.getElementById('whScope')?.value || 'alias',
+    mail_account_id: sel.value,
+    scope: scopeSel ? scopeSel.value : 'alias',
     url: document.getElementById('whUrl').value.trim(),
     format: document.getElementById('whFormat').value,
     events: events.join(','),
-    target_alias: document.getElementById('whScope')?.value === 'alias'
-      ? document.getElementById('whAlias')?.value || undefined
-      : undefined,
+    target_alias: aliasSel ? aliasSel.value.trim() || undefined : undefined,
     secret: document.getElementById('whSecret').value.trim() || undefined,
   };
-  if (!body.mail_account_id) { toast('请选择监听主邮箱', 'warning'); return; }
+  if (!body.mail_account_id) { toast('请选择监听的邮箱', 'warning'); return; }
   if (!body.url) { toast('请填写回调 URL', 'warning'); return; }
   if (!events.length) { toast('请至少选择一个事件', 'warning'); return; }
   try {
@@ -175,7 +183,6 @@ async function createWebhook() {
     toast('订阅创建成功', 'success');
     ['whUrl', 'whSecret'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     onWhAccountChange();
-    onWhScopeChange();
     loadWebhooks();
   } catch (err) { toast(err.message, 'error'); }
 }

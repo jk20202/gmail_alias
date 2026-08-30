@@ -1077,16 +1077,28 @@ export async function webhookCreate(ctx: Ctx): Promise<Response> {
   const validScope = ['alias', 'alias_all', 'account'].includes(String(scope || 'alias'));
   if (!validScope) return fail('无效的监听范围');
 
-  // 只允许选择自己绑定的邮箱
+  // 权限: 邮箱必须存在且可见(自己的 或 公开的)
   const account = await db.getMailAccountRaw(ctx.env, user.id, mail_account_id);
   if (!account) return fail('无权操作该邮箱', 403);
+  const isOwn = account.user_id === user.id;
 
-  // 权限校验：指定别名时，该别名必须属于自己绑定的邮箱
-  if (scope === 'alias' && target_alias) {
+  // 权限校验: 别人的公开邮箱 只能监听自己的别名
+  if (!isOwn) {
+    if (scope !== 'alias') return fail('监听他人公开邮箱只能选择「指定别名」');
+    // target_alias 必须是当前用户自己的活跃别名
+    if (!target_alias) return fail('请选择你要监听的别名');
     const aliasRow = await ctx.env.DB.prepare(
-      "SELECT id FROM user_aliases WHERE full = ? AND mail_account_id = ? AND status = 'active'"
-    ).bind(target_alias, mail_account_id).first<{ id: string }>();
-    if (!aliasRow) return fail('该别名不属于你绑定的邮箱或已过期', 403);
+      "SELECT id FROM user_aliases WHERE full = ? AND user_id = ? AND status = 'active'"
+    ).bind(target_alias, user.id).first<{ id: string }>();
+    if (!aliasRow) return fail('该别名不是你存活的别名', 403);
+  } else {
+    // 自己的邮箱: alias/alias_all 时 target_alias 可选
+    if ((scope === 'alias' || scope === 'alias_all') && target_alias) {
+      const aliasRow = await ctx.env.DB.prepare(
+        "SELECT id FROM user_aliases WHERE full = ? AND mail_account_id = ? AND status = 'active'"
+      ).bind(target_alias, mail_account_id).first<{ id: string }>();
+      if (!aliasRow) return fail('该别名不存在或已过期', 403);
+    }
   }
 
   // SSRF 防护:拒绝内网/元数据地址
