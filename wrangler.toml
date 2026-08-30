@@ -51,7 +51,7 @@ bucket_name = "mail-alias-v2-raw"
 [vars]
 # 收信域名(必填): 用于为每个邮箱生成专属转发地址,形如 f-a1b2c3@<RECV_DOMAIN>
 # 这个域名必须是已经接入 Cloudflare 并开启了 Email Routing 的域名。
-RECV_DOMAIN = "请填写你的收信域名.com"
+RECV_DOMAIN = "jkf.kdns.fr"
 
 # 默认管理员(首次部署时初始化用,部署后请立即在「我的账户」修改密码)
 ADMIN_USERNAME = "admin"

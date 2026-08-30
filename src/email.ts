@@ -149,6 +149,32 @@ async function resolveOwner(env: Env, candidates: string[], envelopeTo: string):
   return null;
 }
 
+// 记录一条「未识别收件」(收信诊断用)。
+// 只写头字段,单次 INSERT,CPU 开销可忽略。诊断表保留最近 100 条,超出即清理。
+async function recordUnmatched(env: Env, message: ForwardableEmailMessage): Promise<void> {
+  try {
+    const { address } = parseFrom(headerValue(message.headers, 'from'));
+    await env.DB.prepare(
+      `INSERT INTO email_unmatched (id, envelope_to, header_to, from_address, subject, reason)
+       VALUES(?,?,?,?,?,?)`
+    ).bind(
+      crypto.randomUUID(),
+      (message.to || '').slice(0, 200) || null,
+      (headerValue(message.headers, 'to') || '').slice(0, 300) || null,
+      address,
+      decodeRfc2047(headerValue(message.headers, 'subject') || '').slice(0, 200) || null,
+      'no_matching_mailbox',
+    ).run();
+    // 控制表体积:只保留最近 100 条
+    await env.DB.prepare(
+      `DELETE FROM email_unmatched WHERE id NOT IN
+         (SELECT id FROM email_unmatched ORDER BY created_at DESC LIMIT 100)`
+    ).run();
+  } catch (e) {
+    console.error('recordUnmatched failed:', e);
+  }
+}
+
 /**
  * Email Worker 入口。
  * 在 wrangler 里无需额外配置;需在 Cloudflare 后台
@@ -172,7 +198,11 @@ export async function emailHandler(
     const candidates = collectCandidates(message.headers);
     const owner = await resolveOwner(env, candidates, message.to || '');
     if (!owner) {
-      // 没有任何已登记邮箱/别名与之对应:拒收,避免垃圾邮件入库
+      // 没有任何已登记邮箱/别名与之对应:拒收,避免垃圾邮件入库。
+      // 但先记一行诊断 —— 用户排查「自动转发是否生效」时全靠它:
+      // 只要这里出现记录,就证明 Cloudflare Email Routing 与路由规则都是通的,
+      // 问题只在于该收件地址没有登记到任何邮箱上。
+      await recordUnmatched(env, message);
       message.setReject('No matching mailbox or alias for this message');
       return;
     }

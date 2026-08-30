@@ -103,6 +103,10 @@ const ROUTE_TABLE: RouteEntry[] = [
   buildRoute('POST', '/api/web/email/detail',    routes.webEmailDetail),
   buildRoute('GET',  '/api/web/email/raw',       routes.webEmailRaw),
   buildRoute('POST', '/api/web/email/mark_read', routes.webMarkRead),
+  // 收信排查:自检某个收件地址能否被归属 / 查看最近未识别的收件
+  buildRoute('POST', '/api/web/email/probe',     routes.webEmailProbe),
+  buildRoute('POST', '/api/web/email/unmatched', routes.webEmailUnmatched),
+  buildRoute('POST', '/api/admin/fix_forward',   routes.adminFixForwardAddresses),
   // Webhook
   buildRoute('GET',  '/api/webhooks',            routes.webhookList),
   buildRoute('POST', '/api/webhooks',            routes.webhookCreate),

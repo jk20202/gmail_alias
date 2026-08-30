@@ -517,20 +517,35 @@ async function submitImapBind() {
 async function openEditAccount(id) {
   const acc = (State.mailAccounts || []).find(a => a.id === id);
   if (!acc) { toast('未找到该邮箱', 'error'); return; }
-  const isImap = acc.provider === 'imap';
   const domain = (acc.email.split('@')[1] || '').toLowerCase();
-  const defaultTpl = acc.alias_template || (isImap ? '{local}+{label}@{domain}' : '{local}+{label}@gmail.com');
+  const defaultTpl = acc.alias_template || '{local}+{label}@{domain}';
   const unsupported = UNSUPPORTED_ALIAS_DOMAINS.includes(domain);
-  const connInfo = isImap ? `
-    <div class="form-group">
-      <label class="form-label">当前 IMAP 连接</label>
-      <div class="readonly-box">${esc(acc.imap_host || '?')} : ${esc(String(acc.imap_port || '993'))}</div>
-      <p class="form-hint" style="margin-top:6px">要修改服务器、端口或密码，请点右下角「重新授权」重新连接并验证。</p>
-    </div>` : '';
   showModal(`编辑邮箱 · ${esc(acc.email)}`, `
-    <p class="form-hint" style="margin:0 0 12px">可修改「别名生成方式」与「备注」。仅改这两项直接点 <b>保存</b> 即可，无需重新授权；若修改了连接方式（IMAP 服务器/密码或重新 OAuth 授权），请点 <b>重新授权</b>。</p>
+    <div class="form-group">
+      <label class="form-label">专属转发地址</label>
+      <input type="text" id="editForward" class="form-control" value="${esc(acc.forward_address || '')}" placeholder="f-xxxxx@收信域名" autocomplete="off">
+      <p class="form-hint" style="margin-top:6px">
+        原邮箱的「自动转发」必须指向这个地址，系统靠它判定邮件归属。
+        若你已在原邮箱配好了别的地址（例如 <span class="mono">alle@你的域名</span>），
+        直接把它填在这里保存即可，<b>不用去改原邮箱的设置</b>。地址在系统内必须唯一。
+      </p>
+      <p class="form-hint" style="margin-top:6px">
+        <a href="javascript:void(0)" onclick="probeForwardAddress('editForward')">检测这个地址能否收信</a>
+      </p>
+    </div>
+    <div class="form-group">
+      <label class="form-label" style="display:flex; align-items:center; gap:8px">
+        <input type="checkbox" id="editSupportsAlias" ${acc.supports_alias ? 'checked' : ''}>
+        支持别名（关闭后只能直接选中该邮箱收信）
+      </label>
+    </div>
+    <div class="form-group">
+      <label class="form-label" style="display:flex; align-items:center; gap:8px">
+        <input type="checkbox" id="editIsPublic" ${acc.is_public ? 'checked' : ''}>
+        公开共享（其他用户可选用它收信）
+      </label>
+    </div>
     ${aliasRuleFieldHTML('editAliasTpl', defaultTpl)}
-    ${connInfo}
     <div class="form-group">
       <label class="form-label">备注</label>
       <input type="text" id="editNotes" class="form-control" value="${esc(acc.notes || '')}" placeholder="如：工作邮箱 / 主收信箱" autocomplete="off">
@@ -538,31 +553,32 @@ async function openEditAccount(id) {
     ${unsupported ? '<p class="form-hint" style="color:#dc2626">⚠ 该域名不支持别名收信，别名规则不生效，仅作记录保存。</p>' : ''}
   `, `
     <button class="btn btn-secondary" onclick="closeModal()">取消</button>
-    <button class="btn btn-outline" id="editReauthBtn">重新授权</button>
     <button class="btn" id="editSaveBtn">保存</button>
   `);
   wireAliasPreview(null, 'editAliasTpl', 'editAliasTplPreview', domain);
   const saveBtn = document.getElementById('editSaveBtn');
   if (saveBtn) saveBtn.onclick = () => submitEditSave(id);
-  const reBtn = document.getElementById('editReauthBtn');
-  if (reBtn) reBtn.onclick = () => editReauth(acc);
 }
 
-// 仅保存「别名规则 / 备注」配置(不涉及重新授权)
+// 保存 v2 邮箱配置:转发地址 / 别名开关 / 公开共享 / 别名规则 / 备注
 async function submitEditSave(id) {
-  const aliasTpl = getImapField('editAliasTpl');
-  const notes = getImapField('editNotes');
   const btn = document.getElementById('editSaveBtn');
+  const fwdEl = document.getElementById('editForward');
+  const body = {
+    forward_address: fwdEl ? fwdEl.value.trim() : undefined,
+    supports_alias: document.getElementById('editSupportsAlias')?.checked,
+    is_public: document.getElementById('editIsPublic')?.checked,
+    alias_template: getImapField('editAliasTpl') || undefined,
+    notes: getImapField('editNotes') || undefined,
+  };
   if (btn) { btn.disabled = true; btn.textContent = '保存中...'; }
   try {
-    await api('/api/account/mail_accounts/' + id, {
-      method: 'PATCH',
-      body: {
-        alias_template: aliasTpl || undefined,
-        notes: notes || undefined,
-      },
-    });
-    toast('已保存', 'success');
+    const data = await api('/api/account/mail_accounts/' + id, { method: 'PATCH', body });
+    if (data && data.data && data.data.forward_address_taken) {
+      toast('转发地址已被其它邮箱占用，未生效；其余设置已保存', 'error');
+    } else {
+      toast('已保存', 'success');
+    }
     closeModal();
     loadMyAccounts(true);
     if (typeof loadAvailableAccounts === 'function') loadAvailableAccounts();
@@ -570,6 +586,86 @@ async function submitEditSave(id) {
     toast(err.message, 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '保存'; }
+  }
+}
+
+// 收信自检:验证某个收件地址是否会被系统正确归属
+async function probeForwardAddress(inputId) {
+  const el = document.getElementById(inputId);
+  const addr = el ? el.value.trim() : '';
+  if (!addr) { toast('请先填写转发地址', 'error'); return; }
+  try {
+    const data = await api('/api/web/email/probe', { method: 'POST', body: { addr } });
+    const r = data.data || {};
+    if (r.matched) {
+      toast(`✓ 该地址可正常收信（归属 ${r.accountEmail}）`, 'success');
+    } else {
+      toast(`✗ ${r.hint || '该地址未登记到任何邮箱'}`, 'error');
+    }
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// 收信诊断:① 自检某个地址能否归属 ② 查看最近到达 Worker 但没匹配上的收件
+// 用途:判断「原邮箱的自动转发到底有没有生效」
+//   - 未识别列表里有记录 → Cloudflare Email Routing 已通,只是地址没登记
+//   - 列表为空且收信状态仍为 0 → 说明邮件根本没到 Worker(转发未确认 / 路由规则没生效)
+async function openForwardDiagnose() {
+  showModal('收信诊断', `
+    <div class="form-group">
+      <label class="form-label">转发自检</label>
+      <div style="display:flex; gap:8px">
+        <input type="text" id="diagAddr" class="form-control" placeholder="粘贴你在原邮箱里填的转发目标地址">
+        <button class="btn btn-secondary" onclick="runDiagProbe()" style="white-space:nowrap">检测</button>
+      </div>
+      <div id="diagProbeResult" style="margin-top:8px"></div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">最近到达但未识别的收件</label>
+      <p class="form-hint" style="margin:0 0 8px">
+        只要这里有记录，就说明 Cloudflare Email Routing 已正常把邮件投递到 Worker；
+        把对应的「投递到」地址设为某个邮箱的专属转发地址即可正常收下。
+      </p>
+      <div id="diagUnmatched"><div class="loading"><span class="spinner"></span> 加载中...</div></div>
+    </div>
+  `, '<button class="btn btn-secondary" onclick="closeModal()">关闭</button>');
+
+  const box = document.getElementById('diagUnmatched');
+  try {
+    const data = await api('/api/web/email/unmatched', { method: 'POST', body: { limit: 20 } });
+    const list = (data.data && data.data.list) || [];
+    if (!list.length) {
+      box.innerHTML = '<div class="mail-empty">暂无记录。若你的邮箱「收信状态」也是 0，说明邮件还没到达 Worker——请检查原邮箱的转发是否已确认生效、以及 Cloudflare 的路由规则是否指向了本 Worker。</div>';
+      return;
+    }
+    box.innerHTML = `<div class="table-wrap"><table class="table">
+      <thead><tr><th>投递到</th><th>发件人</th><th>主题</th><th>时间</th></tr></thead>
+      <tbody>${list.map(r => `
+        <tr>
+          <td class="mono">${esc(r.envelope_to || '-')}</td>
+          <td class="mono">${esc(r.from_address || '-')}</td>
+          <td>${esc(r.subject || '(无主题)')}</td>
+          <td>${esc(r.created_at || '-')}</td>
+        </tr>`).join('')}</tbody>
+    </table></div>`;
+  } catch (e) {
+    box.innerHTML = `<div class="mail-empty">加载失败：${esc(e.message)}（仅管理员可查看）</div>`;
+  }
+}
+
+async function runDiagProbe() {
+  const el = document.getElementById('diagAddr');
+  const out = document.getElementById('diagProbeResult');
+  const addr = el ? el.value.trim() : '';
+  if (!addr) { out.innerHTML = '<span style="color:#dc2626">请先填写地址</span>'; return; }
+  out.innerHTML = '<span class="badge badge-gray">检测中...</span>';
+  try {
+    const data = await api('/api/web/email/probe', { method: 'POST', body: { addr } });
+    const r = data.data || {};
+    out.innerHTML = r.matched
+      ? `<span class="badge badge-success">✓ 可正常收信</span> 归属邮箱：<span class="mono">${esc(r.accountEmail || r.accountId || '')}</span>${r.matched === 'alias' ? '（命中别名）' : ''}`
+      : `<span class="badge badge-danger">✗ 无法归属</span> ${esc(r.hint || '')}<br><span class="form-hint">当前收信域名：<span class="mono">${esc(r.recv_domain || '')}</span></span>`;
+  } catch (e) {
+    out.innerHTML = `<span style="color:#dc2626">${esc(e.message)}</span>`;
   }
 }
 

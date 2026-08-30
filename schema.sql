@@ -163,3 +163,19 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 INSERT OR IGNORE INTO settings(key, value) VALUES('allow_registration', 'true');
+
+-- ============ 未识别收件(收信诊断) ============
+-- Email Worker 收到了邮件、但没有任何已登记邮箱/别名与之对应时记录一行,
+-- 用于排查「原邮箱的自动转发到底有没有生效」。只存头字段,不存正文。
+-- 若这里出现记录,说明 Cloudflare Email Routing 已经正常投递到 Worker,
+-- 只需把该 envelope_to 配成某个邮箱的转发地址即可正常收下。
+CREATE TABLE IF NOT EXISTS email_unmatched (
+  id           TEXT PRIMARY KEY,
+  envelope_to  TEXT,
+  header_to    TEXT,
+  from_address TEXT,
+  subject      TEXT,
+  reason       TEXT,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_unmatched_created ON email_unmatched(created_at DESC);

@@ -1183,22 +1183,96 @@ export async function addForwardAccount(
   return { id, forward_address: forward };
 }
 
-// 更新转发邮箱的「别名开关 / 公开共享 / 别名规则 / 备注」
+// 更新转发邮箱的「别名开关 / 公开共享 / 别名规则 / 备注 / 专属转发地址」
+// forward_address 允许自定义(例如用户已在原邮箱配置了 alle@域名),但必须在系统内唯一,
+// 否则两封信的信封收件人相同会导致归属判定歧义。
 export async function updateForwardAccountConfig(
   env: Env, userId: string, accountId: string,
-  opts: { supportsAlias?: boolean; isPublic?: boolean; aliasTemplate?: string | null; notes?: string | null },
-): Promise<void> {
+  opts: {
+    supportsAlias?: boolean; isPublic?: boolean; aliasTemplate?: string | null;
+    notes?: string | null; forwardAddress?: string | null;
+  },
+): Promise<{ forwardAddressTaken?: boolean }> {
   const sets: string[] = [];
   const binds: any[] = [];
+  let forwardAddressTaken = false;
+
+  if (opts.forwardAddress !== undefined) {
+    const addr = (opts.forwardAddress || '').trim().toLowerCase();
+    if (addr) {
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) throw new Error('转发地址格式无效');
+      const dup = await env.DB.prepare(
+        'SELECT id FROM mail_accounts WHERE forward_address = ? AND id != ?'
+      ).bind(addr, accountId).first<{ id: string }>();
+      if (dup) {
+        // 已被别的邮箱占用:忽略本次修改并回报,不抛错(其它字段照常保存)
+        forwardAddressTaken = true;
+      } else {
+        sets.push('forward_address = ?'); binds.push(addr);
+      }
+    }
+  }
   if (opts.supportsAlias !== undefined) { sets.push('supports_alias = ?'); binds.push(opts.supportsAlias ? 1 : 0); }
   if (opts.isPublic !== undefined) { sets.push('is_public = ?'); binds.push(opts.isPublic ? 1 : 0); }
   if (opts.aliasTemplate !== undefined) { sets.push('alias_template = ?'); binds.push(opts.aliasTemplate); }
   if (opts.notes !== undefined) { sets.push('notes = ?'); binds.push(opts.notes); }
-  if (!sets.length) return;
+  if (!sets.length) return { forwardAddressTaken };
   binds.push(accountId, userId);
   await env.DB.prepare(
     `UPDATE mail_accounts SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`
   ).bind(...binds).run();
+  return { forwardAddressTaken };
+}
+
+// 把占位域名下生成的无效转发地址批量重发(改了 RECV_DOMAIN 后修复历史数据用)
+export async function regenerateInvalidForwardAddresses(env: Env): Promise<number> {
+  const domain = recvDomain(env);
+  const { results } = await env.DB.prepare(
+    `SELECT id, forward_address FROM mail_accounts
+      WHERE (forward_address IS NULL OR forward_address = ''
+             OR forward_address NOT LIKE '%@${domain}')`
+  ).all<{ id: string; forward_address: string | null }>();
+  const rows = results || [];
+  for (const r of rows) {
+    const addr = await uniqueForwardAddress(env);
+    await env.DB.prepare('UPDATE mail_accounts SET forward_address = ? WHERE id = ?')
+      .bind(addr, r.id).run();
+  }
+  return rows.length;
+}
+
+// 收信诊断:列出最近未识别的收件(证明邮件已到达 Worker,但没匹配到任何邮箱)
+export async function listUnmatchedEmails(env: Env, limit = 20): Promise<Array<{
+  id: string; envelope_to: string | null; header_to: string | null;
+  from_address: string | null; subject: string | null; created_at: string;
+}>> {
+  const { results } = await env.DB.prepare(
+    `SELECT id, envelope_to, header_to, from_address, subject, created_at
+       FROM email_unmatched ORDER BY created_at DESC LIMIT ?`
+  ).bind(limit).all<any>();
+  return (results || []) as any;
+}
+
+// 收信自检:给一个收件地址,回报它能否被归属到某个邮箱(不实际收信,纯查询)
+export async function probeRecipient(
+  env: Env, addr: string,
+): Promise<{ addr: string; matched: 'alias' | 'account' | 'forward' | null; accountId: string | null; accountEmail: string | null; aliasId: string | null }> {
+  const a = (addr || '').trim().toLowerCase();
+  const alias = await env.DB.prepare(
+    "SELECT id, mail_account_id FROM user_aliases WHERE lower(full) = ? AND status = 'active'"
+  ).bind(a).first<{ id: string; mail_account_id: string }>();
+  if (alias) {
+    const acc = await env.DB.prepare('SELECT email FROM mail_accounts WHERE id = ?')
+      .bind(alias.mail_account_id).first<{ email: string }>();
+    return { addr: a, matched: 'alias', accountId: alias.mail_account_id, accountEmail: acc?.email || null, aliasId: alias.id };
+  }
+  const acc2 = await env.DB.prepare('SELECT id, email FROM mail_accounts WHERE lower(email) = ?')
+    .bind(a).first<{ id: string; email: string }>();
+  if (acc2) return { addr: a, matched: 'account', accountId: acc2.id, accountEmail: acc2.email, aliasId: null };
+  const acc3 = await env.DB.prepare('SELECT id, email FROM mail_accounts WHERE lower(forward_address) = ?')
+    .bind(a).first<{ id: string; email: string }>();
+  if (acc3) return { addr: a, matched: 'forward', accountId: acc3.id, accountEmail: acc3.email, aliasId: null };
+  return { addr: a, matched: null, accountId: null, accountEmail: null, aliasId: null };
 }
 
 function toMailAccountRaw(row: MailAccountRow): MailAccountRaw {

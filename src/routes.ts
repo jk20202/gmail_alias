@@ -615,14 +615,63 @@ export async function accountUpdateMailAccount(ctx: Ctx): Promise<Response> {
   // v2: 别名开关(是否允许为该邮箱生成别名) + 是否公开共享
   const supportsAlias = typeof body.supports_alias === 'boolean' ? body.supports_alias : undefined;
   const isPublic = typeof body.is_public === 'boolean' ? body.is_public : undefined;
+  // 自定义专属转发地址:用户若已在原邮箱配好了某个地址(如 alle@域名),可直接登记过来
+  const forwardAddress = typeof body.forward_address === 'string' ? body.forward_address.trim() : undefined;
   if (aliasTemplate === undefined && notes === undefined
-      && supportsAlias === undefined && isPublic === undefined) {
+      && supportsAlias === undefined && isPublic === undefined && forwardAddress === undefined) {
     return fail('没有需要更新的字段');
   }
-  await db.updateMailAccountConfig(ctx.env, user.id, id, { aliasTemplate, notes });
-  await db.updateForwardAccountConfig(ctx.env, user.id, id, { supportsAlias, isPublic });
+  let res: { forwardAddressTaken?: boolean } = {};
+  try {
+    res = await db.updateForwardAccountConfig(ctx.env, user.id, id, {
+      aliasTemplate, notes, supportsAlias, isPublic, forwardAddress,
+    });
+  } catch (e) {
+    return fail((e as Error).message || '更新失败');
+  }
   await db.addLog(ctx.env, user.id, user.username, '', 'update_account', `邮箱 ${id} 更新别名规则/备注/开关`);
-  return ok(null);
+  return ok({
+    forward_address_taken: res.forwardAddressTaken === true,
+    msg: res.forwardAddressTaken ? '该转发地址已被其它邮箱占用,未生效;其余设置已保存' : '',
+  });
+}
+
+// 收信自检:给一个收件地址,回报它会被归属到哪个邮箱(纯查询,不实际收信)。
+// 用于排查「原邮箱自动转发设置是否正确」—— 把原邮箱里填的转发目标贴进来即可验证。
+export async function webEmailProbe(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const addr = String(ctx.body?.addr || '').trim();
+  if (!addr) return fail('缺少 addr');
+  const r = await db.probeRecipient(ctx.env, addr);
+  return ok({
+    ...r,
+    recv_domain: (ctx.env.RECV_DOMAIN || '').trim() || '(未配置)',
+    hint: r.matched === null
+      ? `该地址未登记到任何邮箱/别名,邮件会被拒收。请在「我的账户」把它设为某个邮箱的专属转发地址。`
+      : `该地址可正常收信,归属邮箱 ${r.accountEmail || r.accountId}`,
+  });
+}
+
+// 收信诊断:列出最近到达 Worker 但没匹配到任何邮箱的收件(仅管理员)。
+// 只要这里有记录,就证明 Cloudflare Email Routing 与路由规则都已经生效。
+export async function webEmailUnmatched(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  // 说明:这里刻意不限制为管理员 —— 收信诊断的核心用途就是排查「转发到底通没通」,
+  // 普通用户(往往就是唯一使用者)必须能自己看到。记录只含头字段,不含正文。
+  // 若部署在多人共用环境且不希望互相看到收件地址,可把下一行注释取消。
+  // if (!user.is_admin) return fail('仅管理员可查看收信诊断', 403);
+  void user;
+  const limit = Math.min(parseInt(String(ctx.body?.limit || '20'), 10) || 20, 100);
+  const list = await db.listUnmatchedEmails(ctx.env, limit);
+  return ok({ list, total: list.length });
+}
+
+// 管理员:批量修复历史数据中域名不正确的转发地址(改过 RECV_DOMAIN 后执行一次)
+export async function adminFixForwardAddresses(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  if (!user.is_admin) return fail('仅管理员可操作', 403);
+  const n = await db.regenerateInvalidForwardAddresses(ctx.env);
+  return ok({ fixed: n });
 }
 
 // 授权状态探测:校验 token 是否有效,前端列表「授权状态」列用
