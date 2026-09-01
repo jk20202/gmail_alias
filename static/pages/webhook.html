@@ -12,15 +12,12 @@
       <div class="form-group">
         <label class="form-label">监听范围 <span class="req">*</span></label>
         <select id="whScope" class="form-control" onchange="onWhScopeChange()">
-          <option value="alias">指定别名（只推送命中该别名的邮件）</option>
-          <option value="alias_all">全部别名（推送该邮箱下所有存活的别名邮件）</option>
-          <option value="account">整个邮箱（推送该主邮箱的直接收信）</option>
+          <option value="alias_all">全部存活别名（推送该邮箱下当前所有可用别名的邮件）</option>
+          <option value="account">整个邮箱（推送该主邮箱直接收信，不含别名）</option>
         </select>
+        <div class="form-hint">他人公开邮箱也支持此两种范围，不再区分「自己/他人」</div>
       </div>
-      <div class="form-group" id="whAliasWrap" style="display:none">
-        <label class="form-label">选择别名</label>
-        <select id="whAlias" class="form-control"><option value="">请先选择主邮箱</option></select>
-      </div>
+      <!-- 已删除「指定别名」功能: 不再有 whAliasWrap / whAlias -->
       <div class="form-group">
         <label class="form-label">回调 URL <span class="req">*</span></label>
         <input type="text" id="whUrl" class="form-control" placeholder="飞书机器人 https://open.feishu.cn/open-apis/bot/v2/hook/xxx">

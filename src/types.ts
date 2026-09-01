@@ -181,6 +181,10 @@ export interface Webhook {
   secret: string | null;
   events: string;              // 逗号分隔: new_mail,unread
   format: string;              // card | markdown | text | json
+  // scope: alias_all = 推送该邮箱下所有存活的别名邮件;
+  //        account  = 推送该主邮箱的直接收信(不含别名)
+  // 已废弃: alias(指定别名) —— 用户已明确不需要此功能,新建订阅时拒绝
+  scope: string;
   is_active: boolean;
   created_at: string;
 }

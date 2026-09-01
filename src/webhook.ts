@@ -11,7 +11,7 @@
 //   json     原始 JSON 载荷(含完整 body / html / 附件列表 / 签名头)
 import type { Env, Email, Webhook } from './types';
 import { hmacSha256, nowISO, htmlToText } from './utils';
-import { getWebhooksForAccount, logWebhookDelivery, getMailAccountById } from './db';
+import { getWebhooksForAccount, logWebhookDelivery, getMailAccountById, listActiveAliasesForAccount } from './db';
 import { fetchEmails } from './emailService';
 
 // 推送载荷标准格式
@@ -65,10 +65,26 @@ export async function pollAndPush(env: Env, accountId: string): Promise<{ pushed
     const events = wh.events.split(',').map(s => s.trim());
     if (!events.includes('new_mail') && !events.includes('unread')) continue;
 
-    // 按别名过滤
-    const filtered = wh.target_alias
-      ? emails.filter(e => e.to.toLowerCase().includes(wh.target_alias!.toLowerCase()))
-      : emails;
+    // 按 scope 实际行为过滤:
+    //   alias_all → 仅推送收件人是该邮箱下"当前存活别名"中之一的邮件
+    //   account  → 仅推送收件人就是该主邮箱本身的邮件(直发到主邮箱、不经过别名)
+    // alias(指定别名)scope 已废弃,新建订阅不再支持
+    const scope = wh.scope || 'alias_all';
+    const toLower = (s: string) => (s || '').toLowerCase();
+    let filtered: Email[];
+    if (scope === 'account') {
+      const accountEmail = toLower(account.email);
+      filtered = emails.filter(e => toLower(e.to) === accountEmail);
+    } else {
+      // alias_all
+      const aliases = await listActiveAliasesForAccount(env, accountId);
+      if (aliases.length === 0) {
+        // 没有存活别名 = 没有可匹配的别名邮件,跳过
+        continue;
+      }
+      const aliasSet = new Set(aliases);
+      filtered = emails.filter(e => aliasSet.has(toLower(e.to)));
+    }
 
     if (filtered.length === 0) continue;
 
@@ -92,7 +108,8 @@ export async function pollAndPush(env: Env, accountId: string): Promise<{ pushed
       delivered_at: nowISO(),
       mail_account_id: accountId,
       email: account.email,
-      to_alias: wh.target_alias || undefined,
+      // 命中目标说明: account = 主邮箱本身;alias_all = 其中一个存活别名
+      to_alias: scope === 'account' ? account.email : (filtered[0]?.to || undefined),
       count: newEmails.length,
       emails: newEmails,
     };

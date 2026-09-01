@@ -132,11 +132,12 @@ CREATE TABLE IF NOT EXISTS webhooks (
   id           TEXT PRIMARY KEY,
   user_id      TEXT NOT NULL,
   mail_account_id TEXT NOT NULL,
-  target_alias TEXT,                                -- 仅匹配此别名(空=全部)
+  target_alias TEXT,                                -- 已废弃字段:新建订阅不再使用
   url          TEXT NOT NULL,
   secret       TEXT,                                -- 签名密钥(HMAC-SHA256)
   events       TEXT NOT NULL,                       -- 逗号分隔: new_mail,unread
   format       TEXT NOT NULL DEFAULT 'card',        -- card | markdown | text | json
+  scope        TEXT NOT NULL DEFAULT 'alias_all',   -- alias_all(全部存活别名) | account(主邮箱直接收信)
   is_active    INTEGER NOT NULL DEFAULT 1,
   created_at   TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,

@@ -1067,47 +1067,28 @@ export async function webhookList(ctx: Ctx): Promise<Response> {
 
 export async function webhookCreate(ctx: Ctx): Promise<Response> {
   const user = await requireSession(ctx);
-  const { mail_account_id, scope, target_alias, url, secret, events, format } = ctx.body;
+  const { mail_account_id, scope, url, secret, events, format } = ctx.body;
   if (!mail_account_id) return fail('请选择监听的邮箱');
   if (!url) return fail('请填写回调 URL');
   if (!/^https?:\/\//.test(url)) return fail('URL 必须以 http(s):// 开头');
   if (!events) return fail('请选择订阅事件');
   const fmt = ['card', 'markdown', 'text', 'json'].indexOf(String(format || 'card')) >= 0
     ? String(format || 'card') : 'card';
-  // scope: alias(指定别名) | alias_all(全部别名) | account(整箱)
-  const validScope = ['alias', 'alias_all', 'account'].includes(String(scope || 'alias'));
-  if (!validScope) return fail('无效的监听范围');
+  // scope 校验: 只允许 alias_all / account,alias(指定别名)已废弃
+  const s = String(scope || 'alias_all');
+  const validScope = ['alias_all', 'account'].includes(s);
+  if (!validScope) return fail('无效的监听范围,仅支持「全部存活别名」或「整个邮箱」');
 
   // 权限: 邮箱必须存在且可见(自己的 或 公开的)
   const account = await db.getMailAccountRaw(ctx.env, user.id, mail_account_id);
   if (!account) return fail('无权操作该邮箱', 403);
-  const isOwn = account.user_id === user.id;
-
-  // 权限校验: 别人的公开邮箱 只能监听自己的别名
-  if (!isOwn) {
-    if (scope !== 'alias') return fail('监听他人公开邮箱只能选择「指定别名」');
-    // target_alias 必须是当前用户自己的活跃别名
-    if (!target_alias) return fail('请选择你要监听的别名');
-    const aliasRow = await ctx.env.DB.prepare(
-      "SELECT id FROM user_aliases WHERE full = ? AND user_id = ? AND status = 'active'"
-    ).bind(target_alias, user.id).first<{ id: string }>();
-    if (!aliasRow) return fail('该别名不是你存活的别名', 403);
-  } else {
-    // 自己的邮箱: alias/alias_all 时 target_alias 可选
-    if ((scope === 'alias' || scope === 'alias_all') && target_alias) {
-      const aliasRow = await ctx.env.DB.prepare(
-        "SELECT id FROM user_aliases WHERE full = ? AND mail_account_id = ? AND status = 'active'"
-      ).bind(target_alias, mail_account_id).first<{ id: string }>();
-      if (!aliasRow) return fail('该别名不存在或已过期', 403);
-    }
-  }
 
   // SSRF 防护:拒绝内网/元数据地址
   if (isPrivateOrUnsafeUrl(url)) return fail('不允许的回调地址');
   // 单 webhook 约束:每用户仅保留一个订阅,创建前清除旧的
   await db.deleteWebhooksByUser(ctx.env, user.id);
-  const id = await db.createWebhook(ctx.env, user.id, mail_account_id, target_alias || null, url, secret || null, events, fmt);
-  await db.addLog(ctx.env, user.id, user.username, '', 'create_webhook', `创建了 Webhook ${url}`);
+  const id = await db.createWebhook(ctx.env, user.id, mail_account_id, url, secret || null, events, s, fmt);
+  await db.addLog(ctx.env, user.id, user.username, '', 'create_webhook', `创建了 Webhook ${url} (scope=${s})`);
   return ok({ id });
 }
 

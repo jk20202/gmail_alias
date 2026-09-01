@@ -57,6 +57,11 @@ export async function ensureSchema(env: Env): Promise<void> {
     await env.DB.prepare(`ALTER TABLE webhooks ADD COLUMN format TEXT NOT NULL DEFAULT 'card'`).run();
   } catch { /* 列已存在 */ }
 
+  // webhooks 增加 scope 字段(旧库无此列,默认 alias_all)
+  try {
+    await env.DB.prepare(`ALTER TABLE webhooks ADD COLUMN scope TEXT NOT NULL DEFAULT 'alias_all'`).run();
+  } catch { /* 列已存在 */ }
+
   // mail_accounts 增加 IMAP(应用密码)绑定字段(旧库无此列,失败即说明已存在)
   // 全部可空: OAuth 账号不受影响; IMAP 账号用前四项, access_token 等留空字符串
   for (const col of [
@@ -193,6 +198,7 @@ interface WebhookRow {
   id: string; user_id: string; mail_account_id: string; target_alias: string | null;
   url: string; secret: string | null; events: string; is_active: number; created_at: string;
   format?: string | null;
+  scope?: string | null;
 }
 interface UserAliasRow {
   id: string; user_id: string; mail_account_id: string; label: string; full: string;
@@ -1012,22 +1018,33 @@ export async function statsSummary(env: Env): Promise<{ total_calls: number; by_
 }
 
 // ============ Webhook ============
+// scope: alias_all = 推送该邮箱下所有存活的别名邮件
+//        account  = 推送该主邮箱的直接收信(不含别名,仅 e.to === account.email)
+// 已废弃: alias(指定别名) —— 不再支持,前端 UI 也不再提供
 export async function createWebhook(
-  env: Env, userId: string, mailAccountId: string, targetAlias: string | null,
-  url: string, secret: string | null, events: string, format = 'card'
+  env: Env, userId: string, mailAccountId: string,
+  url: string, secret: string | null, events: string,
+  scope: string, format = 'card'
 ): Promise<string> {
   const id = 'w' + randomHex(4);
-  // 兼容未执行 ALTER 的旧库:先尝试带 format 插入,失败则退回旧列
+  // 兼容未执行 ALTER 的旧库:先尝试带 format + scope 插入,逐步退回旧列
   try {
     await env.DB.prepare(
-      `INSERT INTO webhooks(id, user_id, mail_account_id, target_alias, url, secret, events, format, is_active)
+      `INSERT INTO webhooks(id, user_id, mail_account_id, url, secret, events, format, scope, is_active)
        VALUES(?,?,?,?,?,?,?,?,1)`
-    ).bind(id, userId, mailAccountId, targetAlias, url, secret, events, format).run();
+    ).bind(id, userId, mailAccountId, url, secret, events, format, scope).run();
   } catch {
-    await env.DB.prepare(
-      `INSERT INTO webhooks(id, user_id, mail_account_id, target_alias, url, secret, events, is_active)
-       VALUES(?,?,?,?,?,?,?,1)`
-    ).bind(id, userId, mailAccountId, targetAlias, url, secret, events).run();
+    try {
+      await env.DB.prepare(
+        `INSERT INTO webhooks(id, user_id, mail_account_id, url, secret, events, format, is_active)
+         VALUES(?,?,?,?,?,?,?,1)`
+      ).bind(id, userId, mailAccountId, url, secret, events, format).run();
+    } catch {
+      await env.DB.prepare(
+        `INSERT INTO webhooks(id, user_id, mail_account_id, url, secret, events, is_active)
+         VALUES(?,?,?,?,?,?,1)`
+      ).bind(id, userId, mailAccountId, url, secret, events).run();
+    }
   }
   return id;
 }
@@ -1039,7 +1056,9 @@ export async function listWebhooks(env: Env, userId: string): Promise<Webhook[]>
   return (results || []).map(r => ({
     id: r.id, user_id: r.user_id, mail_account_id: r.mail_account_id,
     target_alias: r.target_alias, url: r.url, secret: r.secret,
-    events: r.events, format: r.format || 'card', is_active: r.is_active === 1, created_at: r.created_at,
+    events: r.events, format: r.format || 'card',
+    scope: r.scope || 'alias_all',
+    is_active: r.is_active === 1, created_at: r.created_at,
   }));
 }
 
@@ -1063,8 +1082,19 @@ export async function getWebhooksForAccount(env: Env, mailAccountId: string): Pr
   return (results || []).map(r => ({
     id: r.id, user_id: r.user_id, mail_account_id: r.mail_account_id,
     target_alias: r.target_alias, url: r.url, secret: r.secret,
-    events: r.events, format: r.format || 'card', is_active: r.is_active === 1, created_at: r.created_at,
+    events: r.events, format: r.format || 'card',
+    scope: r.scope || 'alias_all',
+    is_active: r.is_active === 1, created_at: r.created_at,
   }));
+}
+
+// 查某邮箱账号下当前所有存活的别名 (用于 webhook scope=alias_all 时过滤收信)
+// 返回的 full 字段已 lower-case,便于大小写不敏感匹配 e.to
+export async function listActiveAliasesForAccount(env: Env, mailAccountId: string): Promise<string[]> {
+  const { results } = await env.DB.prepare(
+    "SELECT full FROM user_aliases WHERE mail_account_id = ? AND status = 'active'"
+  ).bind(mailAccountId).all<{ full: string }>();
+  return (results || []).map(r => r.full.toLowerCase());
 }
 
 export async function toggleWebhook(env: Env, id: string, userId: string, active: boolean): Promise<boolean> {
