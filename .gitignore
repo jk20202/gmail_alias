@@ -1,9 +1,12 @@
 # Cloudflare / Node
 node_modules/
 .wrangler/
-.dev.vars
+.dev.vars/
 .mfstate/
 dist/
+.dryrun/
+tmp/
+nul
 
 # 项目工作数据(记忆/日志, 不入库)
 .workbuddy/

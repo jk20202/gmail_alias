@@ -10,10 +10,10 @@
     "db:remote:init": "wrangler d1 execute mail_alias --remote --file=./schema.sql",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {},
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240329.0",
     "typescript": "^5.4.0",
-    "wrangler": "^3.48.0"
-  }
+    "wrangler": "^4.127.1"
+  },
+  "dependencies": {}
 }
