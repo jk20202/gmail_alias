@@ -183,6 +183,23 @@ async function sendOnce(
     status = resp.status;
     responseText = await resp.text();
     success = resp.ok;
+    // 平台级成功判定:飞书 / 钉钉等业务失败时依然返回 HTTP 200,
+    // 只靠 resp.ok 会把「卡片标签写错导致整条消息被拒」误报成「推送成功」。
+    // 这里解析常见业务码(code / StatusCode / errcode),非 0 一律判失败。
+    if (success) {
+      try {
+        const j = JSON.parse(responseText) as Record<string, unknown>;
+        const raw = j.code ?? j.StatusCode ?? j.errcode ?? j.errCode;
+        const bizCode = typeof raw === 'number'
+          ? raw
+          : (typeof raw === 'string' && raw.trim() !== '' && Number.isFinite(Number(raw)) ? Number(raw) : null);
+        if (bizCode !== null && bizCode !== 0) {
+          success = false;
+          const bizMsg = String(j.msg ?? j.StatusMessage ?? j.errmsg ?? j.error ?? '');
+          responseText = `[平台返回失败] code=${bizCode} ${bizMsg} | 原始响应: ${responseText}`;
+        }
+      } catch { /* 非 JSON 响应,维持按 HTTP 状态码判定 */ }
+    }
   } catch (e) {
     responseText = (e as Error).message;
   } finally {
@@ -252,7 +269,7 @@ function buildFeishuMessages(format: 'card' | 'markdown' | 'text', p: WebhookPay
   // 无邮件(测试/汇总)时也发一张卡片
   if (!p.emails || p.emails.length === 0) {
     return [feishuCard('🔧 测试推送', 'blue', [
-      { tag: 'div', text: { tag: 'lstr', content: `Webhook 配置正常,已收到测试事件。\n**主邮箱**: ${p.email || '(未指定)'}\n**时间**: ${p.delivered_at}` } },
+      { tag: 'div', text: { tag: 'lark_md', content: `Webhook 配置正常,已收到测试事件。\n**主邮箱**: ${p.email || '(未指定)'}\n**时间**: ${p.delivered_at}` } },
     ])];
   }
   const list = p.emails.slice(0, MAX_PUSH_EMAILS);
@@ -271,7 +288,7 @@ function buildFeishuMessages(format: 'card' | 'markdown' | 'text', p: WebhookPay
     if (format === 'markdown') {
       // Markdown 版:单块 Markdown 的简洁卡片
       return feishuCard(subjectOf(m), 'turquoise', [
-        { tag: 'div', text: { tag: 'lstr', content } },
+        { tag: 'div', text: { tag: 'lark_md', content } },
       ]);
     }
     // 完整卡片:标题 + 结构化字段 + 正文
@@ -279,14 +296,14 @@ function buildFeishuMessages(format: 'card' | 'markdown' | 'text', p: WebhookPay
       {
         tag: 'div',
         fields: [
-          { is_short: true, text: { tag: 'lstr', content: `**发件人**\n${m.from || '-'}` } },
-          { is_short: true, text: { tag: 'lstr', content: `**收件时间**\n${m.date || '-'}` } },
-          { is_short: true, text: { tag: 'lstr', content: `**收件人(别名)**\n${m.to || '-'}` } },
-          { is_short: true, text: { tag: 'lstr', content: `**附件**\n${attachmentLine(m)}` } },
+          { is_short: true, text: { tag: 'lark_md', content: `**发件人**\n${m.from || '-'}` } },
+          { is_short: true, text: { tag: 'lark_md', content: `**收件时间**\n${m.date || '-'}` } },
+          { is_short: true, text: { tag: 'lark_md', content: `**收件人(别名)**\n${m.to || '-'}` } },
+          { is_short: true, text: { tag: 'lark_md', content: `**附件**\n${attachmentLine(m)}` } },
         ],
       },
       { tag: 'hr' },
-      { tag: 'div', text: { tag: 'lstr', content: bodyOf(m) } },
+      { tag: 'div', text: { tag: 'lark_md', content: bodyOf(m) } },
       { tag: 'note', elements: [{ tag: 'plain_text', content: `主邮箱 ${p.email || '-'}${p.to_alias ? ' · 别名 ' + p.to_alias : ''}` }] },
     ]);
   });
