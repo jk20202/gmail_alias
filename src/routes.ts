@@ -1243,7 +1243,22 @@ export async function webhookTest(ctx: Ctx): Promise<Response> {
   const wh = await db.getWebhookById(ctx.env, id, user.id);
   if (!wh) return fail('Webhook 不存在', 404);
   const ok2 = await sendTestEvent(ctx.env, wh);
-  return ok({ success: ok2, hint: '若 success=true 但平台仍无消息,请查看「投递记录」核对 HTTP 状态码' });
+  // 把最近一条投递记录(HTTP 状态码 + 平台原始返回)直接带回前端:
+  // 飞书/钉钉业务失败时仍是 HTTP 200,只看 success 无法定位,必须把响应体暴露出来。
+  let status: number | null = null;
+  let response = '';
+  try {
+    const list = await db.listWebhookDeliveries(ctx.env, user.id, id, 1);
+    if (list[0]) { status = list[0].status; response = list[0].response || ''; }
+  } catch { /* 投递记录表不可用时忽略 */ }
+  return ok({
+    success: ok2,
+    status,
+    response,
+    hint: ok2
+      ? '目标平台已确认接收。若群里仍无消息,请检查机器人是否还在该群。'
+      : '推送失败,原因见 response(平台返回的业务错误)。',
+  });
 }
 
 // 触发轮询推送 (需要 API Key)

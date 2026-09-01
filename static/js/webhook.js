@@ -216,10 +216,25 @@ async function createWebhook() {
 async function testWebhook(id) {
   try {
     const data = await api('/api/webhooks/' + id + '/test', { method: 'POST' });
+    // 后端已做平台级判定:飞书/钉钉「HTTP 200 但业务码非 0」也算失败,
+    // 此时 response 里带的是平台真实错误(如 unsupported tag),直接展示便于定位。
+    const detail = data.response ? ` — ${String(data.response).slice(0, 220)}` : '';
     if (data.success) {
-      toast('测试推送已发送 (后端 OK) — 请到本卡片「查看投递记录」核对飞书实际 HTTP 状态码', 'success', 3600);
+      toast(`测试推送成功${data.status ? ' (HTTP ' + data.status + ')' : ''}:${data.hint || ''}`, 'success', 4200);
     } else {
-      toast('后端返回 success=false — 查看投递记录核对原因', 'error', 3600);
+      toast(`推送失败${data.status ? ' (HTTP ' + data.status + ')' : ''}:${detail || (data.hint || '')}`, 'error', 6500);
+      // 失败时自动展开投递记录,便于看到完整原始响应
+      const card = document.querySelector(`.mail-item[data-webhook-id="${id}"]`);
+      const wrap = card && card.querySelector('.webhook-deliveries-wrap');
+      if (wrap) {
+        try {
+          const d = await api('/api/webhooks/' + id + '/deliveries?limit=5');
+          renderDeliveries(wrap, d.deliveries || []);
+          wrap.dataset.loaded = '1';
+          const btn = card.querySelector('button[onclick^="toggleDeliveries"]');
+          if (btn) btn.textContent = '收起投递记录';
+        } catch { /* 忽略 */ }
+      }
     }
   } catch (err) { toast(err.message, 'error', 3600); }
 }
