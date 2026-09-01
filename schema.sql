@@ -131,20 +131,30 @@ CREATE INDEX IF NOT EXISTS idx_logs_created ON usage_logs(created_at);
 CREATE TABLE IF NOT EXISTS webhooks (
   id           TEXT PRIMARY KEY,
   user_id      TEXT NOT NULL,
-  mail_account_id TEXT NOT NULL,
-  target_alias TEXT,                                -- 已废弃字段:新建订阅不再使用
   url          TEXT NOT NULL,
   secret       TEXT,                                -- 签名密钥(HMAC-SHA256)
   events       TEXT NOT NULL,                       -- 逗号分隔: new_mail,unread
   format       TEXT NOT NULL DEFAULT 'card',        -- card | markdown | text | json
-  scope        TEXT NOT NULL DEFAULT 'alias_all',   -- alias_all(全部存活别名) | account(主邮箱直接收信)
   is_active    INTEGER NOT NULL DEFAULT 1,
   created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_webhooks_user ON webhooks(user_id);
+
+-- ============ Webhook 多邮箱关联(一个 webhook 可订阅多个主邮箱) ============
+-- 一订阅多邮箱: webhook 订阅一行 -> webhook_targets 多行,每行一个 mail_account + scope
+-- 这是新结构(2026-09 引入);旧 webhooks 表里的 mail_account_id / scope / target_alias
+-- 是历史遗留字段,代码里读「targets」时会自动兼容(旧行映射为单个 target)
+CREATE TABLE IF NOT EXISTS webhook_targets (
+  webhook_id      TEXT NOT NULL,                     -- 关联 webhooks.id
+  mail_account_id TEXT NOT NULL,                     -- 关联 mail_accounts.id
+  scope           TEXT NOT NULL DEFAULT 'alias_all', -- alias_all | account
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (webhook_id, mail_account_id),
+  FOREIGN KEY (webhook_id) REFERENCES webhooks(id) ON DELETE CASCADE,
   FOREIGN KEY (mail_account_id) REFERENCES mail_accounts(id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_webhooks_account ON webhooks(mail_account_id);
-CREATE INDEX IF NOT EXISTS idx_webhooks_user ON webhooks(user_id);
+CREATE INDEX IF NOT EXISTS idx_webhook_targets_account ON webhook_targets(mail_account_id);
 
 -- ============ Webhook 推送记录 ============
 CREATE TABLE IF NOT EXISTS webhook_deliveries (

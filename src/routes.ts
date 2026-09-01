@@ -1067,29 +1067,124 @@ export async function webhookList(ctx: Ctx): Promise<Response> {
 
 export async function webhookCreate(ctx: Ctx): Promise<Response> {
   const user = await requireSession(ctx);
-  const { mail_account_id, scope, url, secret, events, format } = ctx.body;
-  if (!mail_account_id) return fail('请选择监听的邮箱');
+  const body = ctx.body || {};
+  const { url, secret, events, format } = body;
+  // 一订阅多邮箱:targets 为 [{mail_account_id, scope}]
+  const rawTargets: any[] = Array.isArray(body.targets) ? body.targets : [];
+  if (!rawTargets.length) {
+    // 兼容旧调用:从前端迁移期仍可能传单 mail_account_id + scope
+    if (body.mail_account_id) {
+      rawTargets.push({ mail_account_id: body.mail_account_id, scope: body.scope || 'alias_all' });
+    } else {
+      return fail('请选择至少一个监听邮箱');
+    }
+  }
   if (!url) return fail('请填写回调 URL');
   if (!/^https?:\/\//.test(url)) return fail('URL 必须以 http(s):// 开头');
   if (!events) return fail('请选择订阅事件');
   const fmt = ['card', 'markdown', 'text', 'json'].indexOf(String(format || 'card')) >= 0
     ? String(format || 'card') : 'card';
-  // scope 校验: 只允许 alias_all / account,alias(指定别名)已废弃
-  const s = String(scope || 'alias_all');
-  const validScope = ['alias_all', 'account'].includes(s);
-  if (!validScope) return fail('无效的监听范围,仅支持「全部存活别名」或「整个邮箱」');
-
-  // 权限: 邮箱必须存在且可见(自己的 或 公开的)
-  const account = await db.getMailAccountRaw(ctx.env, user.id, mail_account_id);
-  if (!account) return fail('无权操作该邮箱', 403);
+  // 校验每个 target
+  const validTargets: { mail_account_id: string; scope: 'alias_all' | 'account' }[] = [];
+  const seen = new Set<string>();
+  for (const t of rawTargets) {
+    if (!t || typeof t !== 'object') return fail('监听列表格式错误');
+    const mailAccountId = String(t.mail_account_id || '');
+    const scope = String(t.scope || 'alias_all');
+    if (!mailAccountId) return fail('监听列表缺邮箱 ID');
+    if (seen.has(mailAccountId + '|' + scope)) continue;        // 去重
+    seen.add(mailAccountId + '|' + scope);
+    if (!['alias_all', 'account'].includes(scope)) {
+      return fail('无效的监听范围,仅支持「全部存活别名」或「整个邮箱」');
+    }
+    // 邮箱必须存在且对当前用户可见
+    const account = await db.getMailAccountRaw(ctx.env, user.id, mailAccountId);
+    if (!account) return fail('无权操作该邮箱', 403);
+    // 权限分离: 他人公开邮箱的直收信不在你名下,不允许监听「整个邮箱」
+    // 「全部存活别名」=监听你在该主邮箱下生成的别名邮箱,不受此约束。
+    if (scope === 'account' && account.user_id !== user.id) {
+      return fail(`邮箱「${account.email}」不是你自己绑定的,无法监听该主邮箱的直接收信(只能监听你在该邮箱下生成的存活别名)`);
+    }
+    validTargets.push({ mail_account_id: mailAccountId, scope: scope as 'alias_all' | 'account' });
+  }
+  if (!validTargets.length) return fail('请至少选择一个有效的监听邮箱');
 
   // SSRF 防护:拒绝内网/元数据地址
   if (isPrivateOrUnsafeUrl(url)) return fail('不允许的回调地址');
-  // 单 webhook 约束:每用户仅保留一个订阅,创建前清除旧的
-  await db.deleteWebhooksByUser(ctx.env, user.id);
-  const id = await db.createWebhook(ctx.env, user.id, mail_account_id, url, secret || null, events, s, fmt);
-  await db.addLog(ctx.env, user.id, user.username, '', 'create_webhook', `创建了 Webhook ${url} (scope=${s})`);
+
+  const id = await db.createWebhookWithTargets(ctx.env, user.id, {
+    url, secret: secret || null, events, format: fmt,
+    targets: validTargets,
+  });
+  await db.addLog(ctx.env, user.id, user.username, '', 'create_webhook',
+    `创建 Webhook ${url} (${validTargets.length} 个 target)`);
   return ok({ id });
+}
+
+// 全量修改一个 webhook:url / secret / events / format / is_active / 监听邮箱列表
+export async function webhookUpdate(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const id = ctx.url.pathname.split('/').slice(-2, -1)[0];
+  const body = ctx.body || {};
+  const opts: {
+    url?: string;
+    secret?: string | null;
+    events?: string;
+    format?: string;
+    isActive?: boolean;
+    targets?: { mail_account_id: string; scope: 'alias_all' | 'account' }[];
+  } = {};
+  if (typeof body.url === 'string') {
+    if (!/^https?:\/\//.test(body.url)) return fail('URL 必须以 http(s):// 开头');
+    if (isPrivateOrUnsafeUrl(body.url)) return fail('不允许的回调地址');
+    opts.url = body.url;
+  }
+  if (typeof body.secret === 'string') opts.secret = body.secret || null;
+  if (typeof body.events === 'string') opts.events = body.events;
+  if (typeof body.format === 'string') {
+    if (!['card','markdown','text','json'].includes(body.format)) return fail('不支持的推送格式');
+    opts.format = body.format;
+  }
+  if (typeof body.is_active === 'boolean') opts.isActive = body.is_active;
+
+  // 替换监听邮箱列表
+  if (Array.isArray(body.targets)) {
+    const validTargets: { mail_account_id: string; scope: 'alias_all' | 'account' }[] = [];
+    const seen = new Set<string>();
+    for (const t of body.targets) {
+      if (!t || typeof t !== 'object') return fail('监听列表格式错误');
+      const mailAccountId = String(t.mail_account_id || '');
+      const scope = String(t.scope || 'alias_all');
+      if (!mailAccountId) return fail('监听列表缺邮箱 ID');
+      if (seen.has(mailAccountId + '|' + scope)) continue;
+      seen.add(mailAccountId + '|' + scope);
+      if (!['alias_all','account'].includes(scope)) {
+        return fail('无效的监听范围,仅支持「全部存活别名」或「整个邮箱」');
+      }
+      const account = await db.getMailAccountRaw(ctx.env, user.id, mailAccountId);
+      if (!account) return fail('无权操作该邮箱', 403);
+      if (scope === 'account' && account.user_id !== user.id) {
+        return fail(`邮箱「${account.email}」不是你自己绑定的,无法监听该主邮箱的直接收信`);
+      }
+      validTargets.push({ mail_account_id: mailAccountId, scope: scope as 'alias_all' | 'account' });
+    }
+    if (!validTargets.length) return fail('请至少选择一个有效的监听邮箱');
+    opts.targets = validTargets;
+  }
+  if (Object.keys(opts).length === 0) return fail('没有需要更新的字段');
+  const ok2 = await db.updateWebhookFull(ctx.env, id, user.id, opts);
+  if (!ok2) return fail('Webhook 不存在', 404);
+  return ok(null);
+}
+
+// 投递记录 — 用于排查「测试显示成功但飞书没收到」之类的真实问题。
+// 路径: GET /api/webhooks/:id/deliveries
+export async function webhookDeliveries(ctx: Ctx): Promise<Response> {
+  const user = await requireSession(ctx);
+  const id = ctx.url.pathname.split('/').slice(-2, -1)[0];
+  const limit = Math.min(parseInt(String(ctx.url.searchParams.get('limit') || '30'), 10) || 30, 100);
+  const list = await db.listWebhookDeliveries(ctx.env, user.id, id, limit);
+  return ok({ deliveries: list });
 }
 
 // SSRF 防护:拦截内网 IP 和云元数据地址
@@ -1145,11 +1240,10 @@ export async function webhookTest(ctx: Ctx): Promise<Response> {
   const user = await requireSession(ctx);
   // 路径 /api/webhooks/:id/test, id 为倒数第二段(不能 pop,会拿到 'test')
   const id = ctx.url.pathname.split('/').slice(-2, -1)[0];
-  const list = await db.listWebhooks(ctx.env, user.id);
-  const wh = list.find(w => w.id === id);
+  const wh = await db.getWebhookById(ctx.env, id, user.id);
   if (!wh) return fail('Webhook 不存在', 404);
   const ok2 = await sendTestEvent(ctx.env, wh);
-  return ok({ success: ok2 });
+  return ok({ success: ok2, hint: '若 success=true 但平台仍无消息,请查看「投递记录」核对 HTTP 状态码' });
 }
 
 // 触发轮询推送 (需要 API Key)

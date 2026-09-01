@@ -65,25 +65,41 @@ export async function pollAndPush(env: Env, accountId: string): Promise<{ pushed
     const events = wh.events.split(',').map(s => s.trim());
     if (!events.includes('new_mail') && !events.includes('unread')) continue;
 
-    // 按 scope 实际行为过滤:
-    //   alias_all → 仅推送收件人是该邮箱下"当前存活别名"中之一的邮件
-    //   account  → 仅推送收件人就是该主邮箱本身的邮件(直发到主邮箱、不经过别名)
-    // alias(指定别名)scope 已废弃,新建订阅不再支持
-    const scope = wh.scope || 'alias_all';
+    // 一订阅多邮箱: 只处理当前 accountId 对应的 target。其余邮箱的 target 等其他轮询时再处理。
+    const myTargets = (wh.targets || []).filter(t => t.mail_account_id === accountId);
+    if (!myTargets.length) continue;
+
+    // 按 target 的 scope 决定过滤逻辑(可能同时存在 alias_all 和 account,取并集)
+    //   alias_all → 收件人是该邮箱下当前所有「存活别名」中之一
+    //   account   → 收件人就是该主邮箱本身(直发)
+    // 已废弃: alias(指定别名) —— 历史遗留 target.scope 字段若是 'alias' 视为 alias_all
+    const wantsAccount  = myTargets.some(t => t.scope === 'account');
+    const wantsAliasAll = myTargets.some(t => t.scope !== 'account');
     const toLower = (s: string) => (s || '').toLowerCase();
+    const accountEmailLower = toLower(account.email);
+
     let filtered: Email[];
-    if (scope === 'account') {
-      const accountEmail = toLower(account.email);
-      filtered = emails.filter(e => toLower(e.to) === accountEmail);
-    } else {
-      // alias_all
+    let pickedAliasAll = false;
+    let pickedAccount = false;
+    if (wantsAliasAll && !wantsAccount) {
       const aliases = await listActiveAliasesForAccount(env, accountId);
-      if (aliases.length === 0) {
-        // 没有存活别名 = 没有可匹配的别名邮件,跳过
-        continue;
-      }
-      const aliasSet = new Set(aliases);
-      filtered = emails.filter(e => aliasSet.has(toLower(e.to)));
+      if (!aliases.length) continue;                // 没有存活别名 = 无可推送
+      const set = new Set(aliases);
+      filtered = emails.filter(e => set.has(toLower(e.to)));
+      pickedAliasAll = filtered.length > 0;
+    } else if (wantsAccount && !wantsAliasAll) {
+      filtered = emails.filter(e => toLower(e.to) === accountEmailLower);
+      pickedAccount = filtered.length > 0;
+    } else {
+      // 两种 scope 同时存在:合并别名集 + 主邮箱,任一命中即推送
+      const aliases = await listActiveAliasesForAccount(env, accountId);
+      const set = new Set(aliases);
+      filtered = emails.filter(e => {
+        const t = toLower(e.to);
+        return t === accountEmailLower || set.has(t);
+      });
+      pickedAliasAll = filtered.length > 0;
+      pickedAccount  = filtered.length > 0;
     }
 
     if (filtered.length === 0) continue;
@@ -102,14 +118,14 @@ export async function pollAndPush(env: Env, accountId: string): Promise<{ pushed
 
     if (newEmails.length === 0) continue;
 
-    // 聚合推送一次
+    // 聚合推送一次。
+    // to_alias 仅用作「命中说明」——非账号直接收信时,采用第一封的实际收件人地址。
     const payload: WebhookPayload = {
       event: 'new_mail',
       delivered_at: nowISO(),
       mail_account_id: accountId,
       email: account.email,
-      // 命中目标说明: account = 主邮箱本身;alias_all = 其中一个存活别名
-      to_alias: scope === 'account' ? account.email : (filtered[0]?.to || undefined),
+      to_alias: pickedAccount ? account.email : (newEmails[0]?.to || undefined),
       count: newEmails.length,
       emails: newEmails,
     };
@@ -393,12 +409,22 @@ function clip(s: string, n: number): string {
 }
 
 // ============ 发送测试推送 ============
+// 取该 webhook 上第一个 target 的 mail_account_id 作为示例,展示订阅走通。
+// 没有 target 的 webhook 也允许发送(空主题, 只展示 webhook 本身)。
 export async function sendTestEvent(env: Env, webhook: Webhook): Promise<boolean> {
+  const sampleAccountId = webhook.targets?.[0]?.mail_account_id || webhook.user_id;
+  let sampleEmail = '';
+  if (sampleAccountId) {
+    try {
+      const acc = await getMailAccountById(env, sampleAccountId);
+      sampleEmail = acc?.email || '';
+    } catch {}
+  }
   const payload: WebhookPayload = {
     event: 'test',
     delivered_at: nowISO(),
-    mail_account_id: webhook.mail_account_id,
-    email: '',
+    mail_account_id: sampleAccountId,
+    email: sampleEmail,
     count: 0,
     emails: [],
   };

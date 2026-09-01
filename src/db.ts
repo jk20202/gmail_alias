@@ -1,5 +1,5 @@
 // D1 数据访问层 - 封装所有 SQL 操作
-import type { Env, SafeUser, SafeMailAccount, MailAccountRaw, Alias, AliasStatus, Webhook, UserAlias, EmailRow } from './types';
+import type { Env, SafeUser, SafeMailAccount, MailAccountRaw, Alias, AliasStatus, Webhook, WebhookTarget, WebhookDelivery, UserAlias, EmailRow } from './types';
 import { sha256, randomHex, maskToken, nowISO, buildAliasFull, decrypt, encrypt, splitEmail, isAliasUnsupportedDomain } from './utils';
 
 const SESSION_TTL_DAYS = 7;
@@ -17,7 +17,7 @@ export const ALIAS_HISTORY_PAGE_SIZE = 10;
 // 因此这里做运行时的一次性迁移(用 KV 记录版本号,避免每次请求都跑 DDL)
 // 注意: 每次新增列 / 表,必须 +1 本版本号,否则 ensureSchema 会因 KV 已记录旧版本而直接返回,
 // 导致新迁移(如 users.google_client_id)在生产环境永远不执行。
-const SCHEMA_VERSION = '5';
+const SCHEMA_VERSION = '7';
 
 export async function ensureSchema(env: Env): Promise<void> {
   try {
@@ -57,10 +57,54 @@ export async function ensureSchema(env: Env): Promise<void> {
     await env.DB.prepare(`ALTER TABLE webhooks ADD COLUMN format TEXT NOT NULL DEFAULT 'card'`).run();
   } catch { /* 列已存在 */ }
 
-  // webhooks 增加 scope 字段(旧库无此列,默认 alias_all)
+  // ===== v2 (2026-09) 一订阅多邮箱: webhook_targets 多对多表 =====
+  // 历史结构用单 webhooks.mail_account_id + scope,这里改成多对多关联表,
+  // 旧 webhooks 表里的 mail_account_id/scope/target_alias 三列保留为兼容字段,
+  // 旧数据未迁时由 listWebhooks() 做 fallback 单元素 targets。
+  //
+  // 旧列清理放在最后(见下方「回填 -> 清理」顺序),这里不提前 DROP。
+  const webhookTargetsDdl: string[] = [
+    `CREATE TABLE IF NOT EXISTS webhook_targets (
+      webhook_id      TEXT NOT NULL,
+      mail_account_id TEXT NOT NULL,
+      scope           TEXT NOT NULL DEFAULT 'alias_all',
+      created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (webhook_id, mail_account_id),
+      FOREIGN KEY (webhook_id) REFERENCES webhooks(id) ON DELETE CASCADE,
+      FOREIGN KEY (mail_account_id) REFERENCES mail_accounts(id) ON DELETE CASCADE
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_webhook_targets_account ON webhook_targets(mail_account_id)`,
+  ];
+  for (const sql of webhookTargetsDdl) {
+    try { await env.DB.prepare(sql).run(); } catch { /* 已存在 */ }
+  }
+
+  // 旧订阅数据回填:老库每条 webhook 只有一个 mail_account_id + scope,
+  // 迁成 webhook_targets 一行。必须在 DROP COLUMN 之前做,否则老数据丢失。
+  // 幂等(INSERT OR IGNORE),重复执行无副作用。
   try {
-    await env.DB.prepare(`ALTER TABLE webhooks ADD COLUMN scope TEXT NOT NULL DEFAULT 'alias_all'`).run();
-  } catch { /* 列已存在 */ }
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO webhook_targets(webhook_id, mail_account_id, scope)
+       SELECT id, mail_account_id, COALESCE(NULLIF(scope,''), 'alias_all')
+         FROM webhooks
+        WHERE mail_account_id IS NOT NULL AND mail_account_id != ''`
+    ).run();
+  } catch { /* 旧列已不存在或表已清理,忽略 */ }
+
+  // 老订阅若落到了已被删除的邮箱上(外键失效行),回填后 targets 仍为空,
+  // 前端会显示为「未选择邮箱」。这里不做额外处理,交给用户在界面上重新勾选。
+
+  // 回填完成后再尝试清理老列:它们带 NOT NULL + FOREIGN KEY,会阻止新结构 INSERT。
+  // SQLite 3.35+ 支持 DROP COLUMN;D1 若不支持就忽略 —— createWebhookWithTargets()
+  // 已能兼容老结构(写入真实存在的 mail_account_id),不影响功能。
+  for (const dropSql of [
+    'DROP COLUMN mail_account_id',
+    'DROP COLUMN scope',
+    'DROP COLUMN target_alias',
+  ]) {
+    try { await env.DB.prepare(`ALTER TABLE webhooks ${dropSql}`).run(); }
+    catch { /* 老 D1 不支持 DROP COLUMN 或列不存在,忽略 */ }
+  }
 
   // mail_accounts 增加 IMAP(应用密码)绑定字段(旧库无此列,失败即说明已存在)
   // 全部可空: OAuth 账号不受影响; IMAP 账号用前四项, access_token 等留空字符串
@@ -195,10 +239,27 @@ interface LogRow {
   action: string; detail: string; created_at: string;
 }
 interface WebhookRow {
-  id: string; user_id: string; mail_account_id: string; target_alias: string | null;
+  id: string; user_id: string;
   url: string; secret: string | null; events: string; is_active: number; created_at: string;
   format?: string | null;
-  scope?: string | null;
+}
+// webhook_targets 关联行(内部用)
+interface WebhookTargetJoinRow {
+  webhook_id: string;
+  mail_account_id: string;
+  scope: string;
+  // JOIN mail_accounts + users 带回展示信息
+  mail_account_email: string;
+  mail_account_provider: string;
+  owner_id: string;
+  owner_username: string;
+}
+// 历史兼容:webhooks 表里旧列 mail_account_id / scope(/ target_alias) —
+// 仅当 webhook_targets 表里查不到该 webhook_id 时做 fallback 读取。
+interface WebhookLegacyRow {
+  mail_account_id: string | null;
+  scope: string | null;
+  target_alias: string | null;
 }
 interface UserAliasRow {
   id: string; user_id: string; mail_account_id: string; label: string; full: string;
@@ -1018,97 +1079,165 @@ export async function statsSummary(env: Env): Promise<{ total_calls: number; by_
 }
 
 // ============ Webhook ============
-// scope: alias_all = 推送该邮箱下所有存活的别名邮件
-//        account  = 推送该主邮箱的直接收信(不含别名,仅 e.to === account.email)
-// 已废弃: alias(指定别名) —— 不再支持,前端 UI 也不再提供
-export async function createWebhook(
-  env: Env, userId: string, mailAccountId: string,
-  url: string, secret: string | null, events: string,
-  scope: string, format = 'card'
+// 2026-09 改造: 一订阅多邮箱( webhook_targets 多对多 )。
+// 旧 webhooks.mail_account_id / scope / target_alias 三列保留为历史兼容列,
+// 列表读取时若 webhook_targets 为空则 try/catch 读旧列 fallback,避免破坏旧数据。
+//
+// WebhookTarget / Webhook 接口在 types.ts 定义。
+// helper: 把 webhooks 行的 targets JOIN 出来,并对旧数据做 fallback
+async function webhookWithTargets(env: Env, row: WebhookRow, viewerUserId: string | null): Promise<Webhook> {
+  // 主路径: webhook_targets JOIN mail_accounts + users(为前端展示邮箱地址与归属)
+  const { results } = await env.DB.prepare(
+    `SELECT wt.mail_account_id, wt.scope,
+            ma.email AS mail_account_email, ma.user_id AS owner_id, u.username AS owner_username
+       FROM webhook_targets wt
+       JOIN mail_accounts ma ON ma.id = wt.mail_account_id
+       JOIN users u ON u.id = ma.user_id
+      WHERE wt.webhook_id = ?`
+  ).bind(row.id).all<{
+    mail_account_id: string;
+    scope: string;
+    mail_account_email: string;
+    owner_id: string;
+    owner_username: string;
+  }>();
+  let targets: WebhookTarget[] = (results || []).map(r => ({
+    mail_account_id: r.mail_account_id,
+    scope: r.scope === 'account' ? 'account' : 'alias_all',
+    mail_account_email: r.mail_account_email,
+    is_own: viewerUserId ? r.owner_id === viewerUserId : undefined,
+  }));
+
+  // 兜底:旧库 webhooks.mail_account_id / scope(/ target_alias) 三列还没迁过来时,
+  // 读这一行做单元素 targets。新部署 schema.sql 不写这两列,该 SELECT 会抛错,忽略即可。
+  if (!targets.length) {
+    try {
+      const leg = await env.DB.prepare(
+        'SELECT mail_account_id, scope FROM webhooks WHERE id = ?'
+      ).bind(row.id).first<{ mail_account_id: string | null; scope: string | null }>();
+      if (leg && leg.mail_account_id) {
+        const ma = await env.DB.prepare(
+          `SELECT ma.email, ma.user_id
+             FROM mail_accounts ma WHERE ma.id = ?`
+        ).bind(leg.mail_account_id).first<{ email: string; user_id: string }>();
+        if (ma) {
+          targets = [{
+            mail_account_id: leg.mail_account_id,
+            scope: leg.scope === 'account' ? 'account' : 'alias_all',
+            mail_account_email: ma.email,
+            is_own: viewerUserId ? ma.user_id === viewerUserId : undefined,
+          }];
+        }
+      }
+    } catch { /* 旧列不存在,直接空 targets */ }
+  }
+
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    url: row.url,
+    secret: row.secret,
+    events: row.events,
+    format: row.format || 'card',
+    is_active: row.is_active === 1,
+    created_at: row.created_at,
+    targets,
+  };
+}
+
+// 创建 webhook 订阅(同时写入 targets)
+export async function createWebhookWithTargets(
+  env: Env, userId: string, opts: {
+    url: string;
+    secret: string | null;
+    events: string;
+    format: string;
+    targets: { mail_account_id: string; scope: 'alias_all' | 'account' }[];
+  },
 ): Promise<string> {
   const id = 'w' + randomHex(4);
-  // 兼容未执行 ALTER 的旧库:先尝试带 format + scope 插入,逐步退回旧列
+  // 兼容旧 webhooks.mail_account_id NOT NULL + FOREIGN KEY 列:
+  // 已部署的 D1 里该列仍在(NOT NULL 且 REFERENCES mail_accounts(id)),老结构 INSERT
+  // 不带它会失败;而写空串又会触发 FOREIGN KEY 约束失败。因此回退时必须写入一个
+  // **真实存在**的主邮箱 ID —— 取第一个 target(语义上该订阅确实监听了这个邮箱)。
+  let inserted = false;
   try {
     await env.DB.prepare(
-      `INSERT INTO webhooks(id, user_id, mail_account_id, url, secret, events, format, scope, is_active)
-       VALUES(?,?,?,?,?,?,?,?,1)`
-    ).bind(id, userId, mailAccountId, url, secret, events, format, scope).run();
-  } catch {
-    try {
-      await env.DB.prepare(
-        `INSERT INTO webhooks(id, user_id, mail_account_id, url, secret, events, format, is_active)
-         VALUES(?,?,?,?,?,?,?,1)`
-      ).bind(id, userId, mailAccountId, url, secret, events, format).run();
-    } catch {
-      await env.DB.prepare(
-        `INSERT INTO webhooks(id, user_id, mail_account_id, url, secret, events, is_active)
-         VALUES(?,?,?,?,?,?,1)`
-      ).bind(id, userId, mailAccountId, url, secret, events).run();
+      `INSERT INTO webhooks(id, user_id, url, secret, events, format, is_active)
+       VALUES(?,?,?,?,?,?,1)`
+    ).bind(id, userId, opts.url, opts.secret, opts.events, opts.format).run();
+    inserted = true;
+  } catch { /* 老 schema:mail_account_id NOT NULL,退回再试 */ }
+  if (!inserted) {
+    let legacyAccountId = opts.targets[0]?.mail_account_id || '';
+    if (!legacyAccountId) {
+      // 理论上路由层已校验 targets 非空,这里只是兜底:挑一个自己的邮箱
+      const anyAcct = await env.DB.prepare(
+        'SELECT id FROM mail_accounts WHERE user_id = ? LIMIT 1'
+      ).bind(userId).first<{ id: string }>();
+      legacyAccountId = anyAcct?.id || '';
     }
+    await env.DB.prepare(
+      `INSERT INTO webhooks(id, user_id, mail_account_id, url, secret, events, format, is_active)
+       VALUES(?,?,?,?,?,?,?,1)`
+    ).bind(id, userId, legacyAccountId, opts.url, opts.secret, opts.events, opts.format).run();
+  }
+  for (const t of opts.targets) {
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO webhook_targets(webhook_id, mail_account_id, scope)
+       VALUES(?,?,?)`
+    ).bind(id, t.mail_account_id, t.scope).run();
   }
   return id;
 }
 
-export async function listWebhooks(env: Env, userId: string): Promise<Webhook[]> {
-  const { results } = await env.DB.prepare(
-    'SELECT * FROM webhooks WHERE user_id = ? ORDER BY created_at DESC'
-  ).bind(userId).all<WebhookRow>();
-  return (results || []).map(r => ({
-    id: r.id, user_id: r.user_id, mail_account_id: r.mail_account_id,
-    target_alias: r.target_alias, url: r.url, secret: r.secret,
-    events: r.events, format: r.format || 'card',
-    scope: r.scope || 'alias_all',
-    is_active: r.is_active === 1, created_at: r.created_at,
-  }));
+// 全量更新一个 webhook(url/secret/events/format/is_active + targets 全替换)
+export async function updateWebhookFull(
+  env: Env, id: string, userId: string, opts: {
+    url?: string;
+    secret?: string | null;
+    events?: string;
+    format?: string;
+    isActive?: boolean;
+    targets?: { mail_account_id: string; scope: 'alias_all' | 'account' }[];
+  },
+): Promise<boolean> {
+  const sets: string[] = [];
+  const binds: any[] = [];
+  if (opts.url !== undefined) { sets.push('url = ?'); binds.push(opts.url); }
+  if (opts.secret !== undefined) { sets.push('secret = ?'); binds.push(opts.secret); }
+  if (opts.events !== undefined) { sets.push('events = ?'); binds.push(opts.events); }
+  if (opts.format !== undefined) { sets.push('format = ?'); binds.push(opts.format); }
+  if (opts.isActive !== undefined) { sets.push('is_active = ?'); binds.push(opts.isActive ? 1 : 0); }
+
+  let ok = true;
+  if (sets.length) {
+    binds.push(id, userId);
+    const r = await env.DB.prepare(
+      `UPDATE webhooks SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`
+    ).bind(...binds).run();
+    ok = (r.meta?.changes || 0) > 0;
+  }
+
+  if (opts.targets !== undefined) {
+    // 全替换: 先删后加
+    await env.DB.prepare('DELETE FROM webhook_targets WHERE webhook_id = ?').bind(id).run();
+    for (const t of opts.targets) {
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO webhook_targets(webhook_id, mail_account_id, scope)
+         VALUES(?,?,?)`
+      ).bind(id, t.mail_account_id, t.scope).run();
+    }
+  }
+  return ok;
 }
 
-export async function deleteWebhook(env: Env, id: string, userId: string): Promise<boolean> {
-  const r = await env.DB.prepare('DELETE FROM webhooks WHERE id = ? AND user_id = ?')
-    .bind(id, userId).run();
-  return r.meta.changes > 0;
-}
-
-// 删除某用户的全部 webhook (用于"每用户仅一个 webhook"约束 + 换别名时清理)
-export async function deleteWebhooksByUser(env: Env, userId: string): Promise<number> {
-  const r = await env.DB.prepare('DELETE FROM webhooks WHERE user_id = ?').bind(userId).run();
-  return r.meta.changes || 0;
-}
-
-// 按邮箱账号查所有活跃订阅(系统推送时用)
-export async function getWebhooksForAccount(env: Env, mailAccountId: string): Promise<Webhook[]> {
-  const { results } = await env.DB.prepare(
-    'SELECT * FROM webhooks WHERE mail_account_id = ? AND is_active = 1'
-  ).bind(mailAccountId).all<WebhookRow>();
-  return (results || []).map(r => ({
-    id: r.id, user_id: r.user_id, mail_account_id: r.mail_account_id,
-    target_alias: r.target_alias, url: r.url, secret: r.secret,
-    events: r.events, format: r.format || 'card',
-    scope: r.scope || 'alias_all',
-    is_active: r.is_active === 1, created_at: r.created_at,
-  }));
-}
-
-// 查某邮箱账号下当前所有存活的别名 (用于 webhook scope=alias_all 时过滤收信)
-// 返回的 full 字段已 lower-case,便于大小写不敏感匹配 e.to
-export async function listActiveAliasesForAccount(env: Env, mailAccountId: string): Promise<string[]> {
-  const { results } = await env.DB.prepare(
-    "SELECT full FROM user_aliases WHERE mail_account_id = ? AND status = 'active'"
-  ).bind(mailAccountId).all<{ full: string }>();
-  return (results || []).map(r => r.full.toLowerCase());
-}
-
+// 仅修改激活状态(保留兼容)
+/* eslint-disable @typescript-eslint/no-unused-vars */
 export async function toggleWebhook(env: Env, id: string, userId: string, active: boolean): Promise<boolean> {
   const r = await env.DB.prepare('UPDATE webhooks SET is_active = ? WHERE id = ? AND user_id = ?')
     .bind(active ? 1 : 0, id, userId).run();
   return r.meta.changes > 0;
-}
-
-// 获取所有有活跃 webhook 的邮箱账号ID (用于定时轮询)
-export async function getActiveWebhookAccountIds(env: Env): Promise<string[]> {
-  const { results } = await env.DB.prepare(
-    'SELECT DISTINCT mail_account_id FROM webhooks WHERE is_active = 1'
-  ).all<{ mail_account_id: string }>();
-  return (results || []).map(r => r.mail_account_id);
 }
 
 export async function updateWebhookFormat(env: Env, id: string, userId: string, format: string): Promise<boolean> {
@@ -1121,10 +1250,109 @@ export async function updateWebhookFormat(env: Env, id: string, userId: string, 
   }
 }
 
+// 列出该用户全部 webhook(JOIN targets)
+export async function listWebhooks(env: Env, userId: string): Promise<Webhook[]> {
+  const { results } = await env.DB.prepare(
+    'SELECT * FROM webhooks WHERE user_id = ? ORDER BY created_at DESC'
+  ).bind(userId).all<WebhookRow>();
+  return Promise.all((results || []).map(r => webhookWithTargets(env, r, userId)));
+}
+
+// 单条 webhook 详情(含 targets)。读不到或不属于该用户返回 null。
+export async function getWebhookById(env: Env, id: string, userId: string): Promise<Webhook | null> {
+  const row = await env.DB.prepare(
+    'SELECT * FROM webhooks WHERE id = ? AND user_id = ?'
+  ).bind(id, userId).first<WebhookRow>();
+  return row ? webhookWithTargets(env, row, userId) : null;
+}
+
+export async function deleteWebhook(env: Env, id: string, userId: string): Promise<boolean> {
+  // webhook_targets 上已设 ON DELETE CASCADE,自动级联清;webhook_deliveries 同样级联
+  const r = await env.DB.prepare('DELETE FROM webhooks WHERE id = ? AND user_id = ?')
+    .bind(id, userId).run();
+  return r.meta.changes > 0;
+}
+
+// 给定账号 ID,找出所有活跃 webhook(含其 targets)。推送轮询用。
+// 主路径: webhook_targets JOIN; 兼容: 旧 webhooks.mail_account_id 列直接匹配。
+export async function getWebhooksForAccount(env: Env, accountId: string): Promise<Webhook[]> {
+  // 主路径
+  const { results } = await env.DB.prepare(
+    `SELECT w.* FROM webhooks w
+       JOIN webhook_targets wt ON wt.webhook_id = w.id
+      WHERE wt.mail_account_id = ? AND w.is_active = 1`
+  ).bind(accountId).all<WebhookRow>();
+  let list: Webhook[] = await Promise.all((results || []).map(r => webhookWithTargets(env, r, null)));
+  // 兼容旧 webhooks.mail_account_id 列直接匹配
+  // 注意: 老库该列仍存在时,新订阅会同时命中两条路径(webhook_targets + 旧列),
+  // 必须按 id 去重,否则同一封邮件会被重复推送两次。
+  const seen = new Set(list.map(w => w.id));
+  try {
+    const { results: leg } = await env.DB.prepare(
+      `SELECT * FROM webhooks WHERE mail_account_id = ? AND is_active = 1`
+    ).bind(accountId).all<WebhookRow>();
+    for (const r of leg || []) {
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
+      list.push(await webhookWithTargets(env, r, null));
+    }
+  } catch { /* 旧列不存在 */ }
+  return list;
+}
+
+// 查某邮箱账号下当前所有存活的别名 (用于 webhook scope=alias_all 时过滤收信)
+// 返回的 full 字段已 lower-case,便于大小写不敏感匹配 e.to
+export async function listActiveAliasesForAccount(env: Env, mailAccountId: string): Promise<string[]> {
+  const { results } = await env.DB.prepare(
+    "SELECT full FROM user_aliases WHERE mail_account_id = ? AND status = 'active'"
+  ).bind(mailAccountId).all<{ full: string }>();
+  return (results || []).map(r => r.full.toLowerCase());
+}
+
+// 获取所有有活跃 webhook 的邮箱账号ID (用于定时轮询)
+// 同时包含 webhook_targets 与旧 webhooks.mail_account_id 行。
+export async function getActiveWebhookAccountIds(env: Env): Promise<string[]> {
+  const set = new Set<string>();
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT DISTINCT wt.mail_account_id AS id FROM webhook_targets wt
+         JOIN webhooks w ON w.id = wt.webhook_id
+        WHERE w.is_active = 1`
+    ).all<{ id: string }>();
+    for (const r of results || []) set.add(r.id);
+  } catch {}
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT DISTINCT mail_account_id AS id FROM webhooks WHERE is_active = 1 AND mail_account_id IS NOT NULL AND mail_account_id != ''`
+    ).all<{ id: string }>();
+    for (const r of results || []) set.add(r.id);
+  } catch {}
+  return Array.from(set);
+}
+
 export async function logWebhookDelivery(env: Env, webhookId: string, payload: string, status: number, response: string, success: boolean): Promise<void> {
   await env.DB.prepare(
     'INSERT INTO webhook_deliveries(webhook_id, payload, status, response, success) VALUES(?,?,?,?,?)'
-  ).bind(webhookId, payload, status, response.slice(0, 500), success ? 1 : 0).run();
+  ).bind(webhookId, payload, status, response.slice(0, 1000), success ? 1 : 0).run();
+}
+
+// 投递记录(给前端排查「测试显示成功但飞书没收到」之类问题)。
+export async function listWebhookDeliveries(env: Env, userId: string, webhookId: string, limit = 30): Promise<WebhookDelivery[]> {
+  // 越权防护:webhook 必须归属于当前用户
+  const own = await env.DB.prepare(
+    'SELECT id FROM webhooks WHERE id = ? AND user_id = ?'
+  ).bind(webhookId, userId).first<{ id: string }>();
+  if (!own) return [];
+  const { results } = await env.DB.prepare(
+    'SELECT * FROM webhook_deliveries WHERE webhook_id = ? ORDER BY id DESC LIMIT ?'
+  ).bind(webhookId, limit).all<WebhookDelivery>();
+  return (results || []) as WebhookDelivery[];
+}
+
+// 兼容旧 API: 删除某用户的全部 webhook(当前路由不再自动清理, 仅供外部调用)
+export async function deleteWebhooksByUser(env: Env, userId: string): Promise<number> {
+  const r = await env.DB.prepare('DELETE FROM webhooks WHERE user_id = ?').bind(userId).run();
+  return r.meta.changes || 0;
 }
 
 // ============ 设置 ============

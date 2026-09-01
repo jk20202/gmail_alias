@@ -113,6 +113,8 @@ const ROUTE_TABLE: RouteEntry[] = [
   // Webhook
   buildRoute('GET',  '/api/webhooks',            routes.webhookList),
   buildRoute('POST', '/api/webhooks',            routes.webhookCreate),
+  buildRoute('PATCH', '/api/webhooks/:id',       routes.webhookUpdate),
+  buildRoute('GET',  '/api/webhooks/:id/deliveries', routes.webhookDeliveries),
   buildRoute('DELETE', '/api/webhooks/:id',      routes.webhookDelete),
   buildRoute('POST', '/api/webhooks/:id/test',   routes.webhookTest),
   buildRoute('POST', '/api/webhooks/:id/format', routes.webhookSetFormat),

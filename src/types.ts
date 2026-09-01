@@ -171,21 +171,42 @@ export interface FetchParams {
   all_aliases?: boolean;       // 聚合查询当前用户全部生效别名
 }
 
+// Webhook 订阅目标: 一订阅多邮箱 (2026-09 改造)
+// scope: alias_all = 推送该邮箱下所有存活的别名邮件;
+//        account  = 推送该主邮箱的直接收信(不含别名)
+// 已废弃: alias(指定别名) —— 用户已明确不需要此功能
+export interface WebhookTarget {
+  mail_account_id: string;
+  // 兼容列表展示用:含邮箱地址和归属(自己/他人),不返回他人 token 等敏感字段
+  mail_account_email?: string;
+  is_own?: boolean;
+  scope: 'alias_all' | 'account';
+}
+
 // Webhook 订阅
+// 一条 webhook 订阅 = 一个回调 URL + 一组监听的邮箱(targets)
+// targets 取代旧版的单 mail_account_id / scope 字段;读取时旧 webhooks 表行做
+// fallback 兼容(老数据自动生成单元素 targets)。
 export interface Webhook {
   id: string;
   user_id: string;
-  mail_account_id: string;
-  target_alias: string | null;
   url: string;
   secret: string | null;
   events: string;              // 逗号分隔: new_mail,unread
   format: string;              // card | markdown | text | json
-  // scope: alias_all = 推送该邮箱下所有存活的别名邮件;
-  //        account  = 推送该主邮箱的直接收信(不含别名)
-  // 已废弃: alias(指定别名) —— 用户已明确不需要此功能,新建订阅时拒绝
-  scope: string;
   is_active: boolean;
+  created_at: string;
+  targets: WebhookTarget[];    // 监听的邮箱列表(可多个)
+}
+
+// Webhook 投递记录(用于前端排查「测试/推送显示成功但飞书没收到」之类的问题)
+export interface WebhookDelivery {
+  id: number;
+  webhook_id: string;
+  payload: string;
+  status: number;              // HTTP 状态码(0 表示网络异常)
+  response: string;            // 平台原始响应截断
+  success: boolean;            // HTTP 2xx 视为成功
   created_at: string;
 }
 
