@@ -412,7 +412,9 @@ async function switchTab(key, opts = {}) {
     State.token = token;
     try {
       State.user = JSON.parse(userJson);
-    } catch { clearSession(); }
+    } catch (e) {
+      clearSession();
+    }
   }
 
   if (State.token && State.user) {
@@ -423,11 +425,19 @@ async function switchTab(key, opts = {}) {
       .then(me => {
         State.user = me;
         localStorage.setItem(LS_USER, JSON.stringify(me));
-        fillAccountInfo();
+        try { fillAccountInfo(); } catch (e) { /* 元素可能未加载,SPA 懒加载,容错 */ }
       })
-      .catch(() => {
-        clearSession();
-        showLoginView();
+      .catch(err => {
+        // 只有明确的 401/会话错误才清 session; 其他异常(网络/JSON/UI 渲染)
+        // 不应该误清 token 把用户踢回登录页。
+        const msg = (err && err.message) || '';
+        const isAuthError = msg.includes('会话已过期') || msg.includes('请重新登录') || msg.includes('Unauthorized');
+        if (isAuthError) {
+          clearSession();
+          showLoginView();
+        }
+        // 非鉴权错误:静默忽略,保留 token,让用户继续停留在应用页
+        // (后台静默校验失败不影响已经能用本地缓存数据呈现的页面)
       });
   } else {
     showLoginView();

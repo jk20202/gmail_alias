@@ -42,12 +42,16 @@ function onOAuthMessage(e) {
 function fillAccountInfo() {
   const u = State.user;
   if (!u) return;
-  document.getElementById('accUsername').textContent = u.username;
-  document.getElementById('accRole').innerHTML = u.is_admin
+  // 这些元素只存在于「我的账户」页面 (SPA 懒加载)；
+  // init() 阶段调用本函数时可能尚未加载,逐项容错避免抛错。
+  const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  const setHTML = (id, v) => { const el = document.getElementById(id); if (el) el.innerHTML = v; };
+  setText('accUsername', u.username);
+  setHTML('accRole', u.is_admin
     ? '<span class="badge badge-primary">管理员</span>'
-    : '<span class="badge badge-gray">普通用户</span>';
-  document.getElementById('accCreatedAt').textContent = fmtTime(u.created_at);
-  document.getElementById('apiKeyText').textContent = u.api_key;
+    : '<span class="badge badge-gray">普通用户</span>');
+  setText('accCreatedAt', fmtTime(u.created_at));
+  setText('apiKeyText', u.api_key);
   const copyBtn = document.getElementById('btnCopyApiKey');
   if (copyBtn) copyBtn.onclick = () => copyText(u.api_key);
 }
