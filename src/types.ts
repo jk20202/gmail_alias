@@ -44,6 +44,7 @@ export interface SafeUser {
   alias: Alias | null;        // 兼容字段:当前主别名(取第一个活跃别名)
   active_alias_count: number; // 当前生效中的别名数量
   created_at: string;
+  last_login: string | null;  // 上次登录时间(ISO),从未登录为 null
 }
 
 // 邮箱账号(对外脱敏)
@@ -129,6 +130,8 @@ export interface EmailRow {
   size: number;                   // raw 字节数
   raw_key: string | null;         // R2 对象 key
   has_attachments: number;        // 0/1(仅头部推断,精确列表由前端解析 raw 得出)
+  body_text: string | null;       // v9: 解析后的 text/plain 正文(限 ~4KB),webhook push 直接读这字段
+  body_status: number;            // v9: 0=未解析/跳过 1=成功 -1=失败
   read: number;                   // 0 未读 / 1 已读
   created_at: string;
 }

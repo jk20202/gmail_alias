@@ -3,44 +3,42 @@
 
 <div class="card-stack">
   <!--
-    基本信息板块 (2026-09 v3):
-      - 2x2 紧凑网格,每格 label + value 上下排,避免水平挤压看不清
-      - 角色用 badge 突出,不再用 12px 灰字 (字号统一为 body)
-      - 修改密码放右上角操作区,与账号信息在视觉上分离
-      - API Key 单独一块,内含说明 + 行内操作(复制/重新生成),不与基本信息混在一起
+    基本信息板块 (2026-09 v4):
+      - 单列布局(label 在左,值在右),贴合用户「空白不大」要求
+      - 顺序: 用户名 / 角色 / 创建时间 / 上次登录时间 / 修改密码(按钮行)
+      - 不再把「修改密码」分散到 card-header 和 API 操作格两处
+      - API Key 独立一块,不再与基本信息混在一起
   -->
   <div class="card account-card">
-    <div class="card-header">
-      <h3>基本信息</h3>
-      <button class="btn btn-secondary btn-sm" onclick="openChangePasswordModal()">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        修改密码
-      </button>
-    </div>
+    <div class="card-header"><h3>基本信息</h3></div>
     <div class="card-body" id="accountInfoBody">
-      <div class="basic-info-grid">
-        <div class="big-cell">
-          <div class="cell-label">用户名</div>
-          <div class="cell-value" id="accUsername">—</div>
-        </div>
-        <div class="big-cell">
-          <div class="cell-label">角色</div>
-          <div class="cell-value" id="accRole">—</div>
-        </div>
-        <div class="big-cell">
-          <div class="cell-label">创建时间</div>
-          <div class="cell-value mono" id="accCreatedAt">—</div>
-        </div>
-        <div class="big-cell">
-          <div class="cell-label">API 操作</div>
-          <div class="cell-value cell-actions">
+      <ul class="info-list">
+        <li class="info-row">
+          <span class="info-label">用户名</span>
+          <span class="info-value" id="accUsername">—</span>
+        </li>
+        <li class="info-row">
+          <span class="info-label">角色</span>
+          <span class="info-value" id="accRole">—</span>
+        </li>
+        <li class="info-row">
+          <span class="info-label">创建时间</span>
+          <span class="info-value mono" id="accCreatedAt">—</span>
+        </li>
+        <li class="info-row">
+          <span class="info-label">上次登录时间</span>
+          <span class="info-value mono" id="accLastLogin">—</span>
+        </li>
+        <li class="info-row info-row-action">
+          <span class="info-label">修改密码</span>
+          <span class="info-value">
             <button class="btn btn-secondary btn-sm" onclick="openChangePasswordModal()">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
               修改密码
             </button>
-          </div>
-        </div>
-      </div>
+          </span>
+        </li>
+      </ul>
 
       <div class="apikey-block">
         <div class="apikey-head">

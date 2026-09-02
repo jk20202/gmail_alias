@@ -16,7 +16,9 @@
 //   参考开源项目 Alle 的候选头优先级(duck-original-to / x-original-to / ... / x-forwarded-to)。
 
 import type { Env, EmailRow } from './types';
-import { insertEmail } from './db';
+import { insertEmail, getMailAccountById } from './db';
+import { extractPlainText } from './emailParse';
+import { pollAndPush } from './webhook';
 
 // 候选收件人所在头,按优先级从高到低。
 // 注意: 信封收件人 message.to 不在这里 —— 它等于我们的专属转发地址,
@@ -223,8 +225,9 @@ export async function emailHandler(
     // 实测直接 put(stream,...) 会在生产环境失败(raw_key=null,详情页 404)。
     // 改为先读成 ArrayBuffer 再写入;10ms CPU 限额内处理常见邮件(<25MiB)无压力。
     let storedKey: string | null = null;
+    let rawBuf: ArrayBuffer | null = null;
     try {
-      const rawBuf = await new Response(message.raw).arrayBuffer();
+      rawBuf = await new Response(message.raw).arrayBuffer();
       await env.EMAIL_RAW.put(rawKey, rawBuf, {
         httpMetadata: { contentType: 'message/rfc822' },
       });
@@ -236,6 +239,29 @@ export async function emailHandler(
     const fromRaw = headerValue(message.headers, 'from');
     const { name: fromName, address: fromAddr } = parseFrom(fromRaw);
     const ct = (headerValue(message.headers, 'content-type') || '').toLowerCase();
+
+    // v9: 同步解析 text/plain 到 body_text,webhook 推送时直接读这字段
+    // 这样:
+    //   - 推送延迟从「等 cron 触发 + pull 时解析」降到「入库即解析完成, push 时零解析」
+    //   - 卡片里直接显示真实正文,不再「(无正文)」
+    // 失败/超大/非 text/plain 都标 status=-1,前端可显示「请在系统内查看」
+    let bodyText: string | null = null;
+    let bodyStatus = 0;
+    if (rawBuf && rawBuf.byteLength > 0 && rawBuf.byteLength <= 200_000) {
+      const r = extractPlainText(rawBuf, 4000);
+      if (r.status === 1 && r.body) {
+        bodyText = r.body;
+        bodyStatus = 1;
+      } else {
+        bodyStatus = -1;
+      }
+    } else if (rawBuf && rawBuf.byteLength > 200_000) {
+      // 太大不解析(占 D1 体积 + CPU),前端仍可从 raw_url 拉取解析
+      bodyStatus = -1;
+    } else {
+      bodyStatus = -1;
+    }
+
     const row: EmailRow = {
       id,
       account_id: owner.accountId,
@@ -251,6 +277,8 @@ export async function emailHandler(
       size: message.rawSize,
       raw_key: storedKey,
       has_attachments: /multipart\/(mixed|related)/.test(ct) ? 1 : 0,
+      body_text: bodyText,
+      body_status: bodyStatus,
       read: 0,
       created_at: new Date().toISOString(),
     };
@@ -259,5 +287,30 @@ export async function emailHandler(
   } catch (e) {
     console.error('emailHandler error:', e);
     try { message.setReject('Failed to process inbound email'); } catch { /* ignore */ }
+  }
+}
+
+// v9: Email Worker 入库完成后,异步触发 webhook 推送
+//  设计原则:
+//    - 必须 waitUntil 异步执行,不阻塞 Email Routing 响应
+//    - 这里**不**做推送成功/失败判定,只是 fire-and-forget 触发 pollAndPush
+//    - 该函数异常一律吞掉(已被 waitUntil 包裹,失败不会影响 emailHandler 主体结果)
+//
+//  一个新邮件 → 一次 push 触发。push 内部仍走完整的去重 + 过滤 + 平台投递流程,
+//  所以同一封邮件不会重复推送(因为 pollAndPush 会通过 KV 去重 key `wh:pushed:<aid>:<mid>`)。
+export async function schedulePush(message: ForwardableEmailMessage, env: Env): Promise<void> {
+  try {
+    // 从 message.to(信封收件人 = 我们的统一转发地址)反推 account_id
+    // 简化逻辑:直接查 mail_accounts WHERE forward_address = message.to
+    // 该账号就是本次新邮件的归属邮箱(transfer / alias / 主邮箱都汇聚到这里)
+    const envelopeTo = (message.to || '').trim().toLowerCase();
+    if (!envelopeTo) return;
+    const acc = await env.DB.prepare(
+      'SELECT id FROM mail_accounts WHERE lower(forward_address) = ? LIMIT 1'
+    ).bind(envelopeTo).first<{ id: string }>();
+    if (!acc) return;
+    await pollAndPush(env, acc.id);
+  } catch (e) {
+    console.error('schedulePush failed:', e);
   }
 }

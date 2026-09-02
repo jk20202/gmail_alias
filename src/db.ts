@@ -22,7 +22,12 @@ export const ALIAS_HISTORY_PAGE_SIZE = 10;
 //   account   → "别名邮箱" (只推订阅者自己生成的、还活着的别名)
 //   旧 alias_all 行为是「只别名」,新 alias_all 是「别名+主邮箱直收」 —— 超集语义可平滑兼容;
 //   旧 account 行为是「只主邮箱直收」,新 account 是「只自己存活别名」 —— 语义改变,前端展示需提示。
-const SCHEMA_VERSION = '8';
+// v9 (2026-09-02): webhook 推送实时化 + 邮件正文入库 + 账户上次登录
+//   users.last_login: 每次登录写入时间戳,前端「基本信息」板块展示
+//   emails.body_text: email.ts 入库时 minimal 解析 text/plain 存到这里(限 4KB)
+//                     webhook push 直接读这字段做推送卡片,延迟从分钟级降到秒级
+//                     同时修复了原 m.body/m.html 留空导致推送卡片永远显示「(无正文)」的问题
+const SCHEMA_VERSION = '9';
 
 export async function ensureSchema(env: Env): Promise<void> {
   try {
@@ -198,6 +203,20 @@ export async function ensureSchema(env: Env): Promise<void> {
     try { await env.DB.prepare(sql).run(); } catch { /* 已存在则忽略 */ }
   }
 
+  // ===== v9: 实时推送 + 正文入库 + 上次登录 =====
+  // users.last_login: 登录时间戳(ISO),前端基本信息板块展示;login 后写
+  try {
+    await env.DB.prepare('ALTER TABLE users ADD COLUMN last_login TEXT').run();
+  } catch { /* 列已存在 */ }
+  // emails.body_text: text/plain 解析后的正文(限 ~4KB);webhook push 直接读
+  // emails.body_status: 0=未解析/跳过 1=成功 -1=解析失败(raw 拉取或 MIME 不识别)
+  for (const col of [
+    'ALTER TABLE emails ADD COLUMN body_text TEXT',
+    'ALTER TABLE emails ADD COLUMN body_status INTEGER NOT NULL DEFAULT 0',
+  ]) {
+    try { await env.DB.prepare(col).run(); } catch { /* 列已存在 */ }
+  }
+
   // 迁移旧版单别名数据 -> user_aliases(给 1 小时有效期,避免一升级就全部过期)
   // 注意:时间统一用 JS 生成的 ISO 字符串,不能用 SQLite 的 datetime('now')(格式不同会导致比较失效)
   try {
@@ -221,6 +240,7 @@ export async function ensureSchema(env: Env): Promise<void> {
 interface UserRow {
   id: string; username: string; password: string; api_key: string;
   is_admin: number; disabled: number; created_at: string;
+  last_login?: string | null;
 }
 interface MailAccountRow {
   id: string; user_id: string; provider: string; email: string;
@@ -345,6 +365,7 @@ async function toSafeUser(env: Env, row: UserRow): Promise<SafeUser> {
     alias,
     active_alias_count: cntRow?.cnt || 0,
     created_at: row.created_at,
+    last_login: row.last_login || null,
   };
 }
 
@@ -378,6 +399,7 @@ export interface BasicUser {
   is_admin: boolean;
   disabled: boolean;
   created_at: string;
+  last_login?: string | null;
 }
 
 const userCache = new Map<string, { user: BasicUser; ts: number }>();
@@ -387,8 +409,8 @@ export async function getUserBasic(env: Env, userId: string): Promise<BasicUser 
   const hit = userCache.get(userId);
   if (hit && Date.now() - hit.ts < USER_CACHE_TTL) return hit.user;
   const row = await env.DB.prepare(
-    'SELECT id, username, is_admin, disabled, created_at FROM users WHERE id = ?'
-  ).bind(userId).first<{ id: string; username: string; is_admin: number; disabled: number; created_at: string }>();
+    'SELECT id, username, is_admin, disabled, created_at, last_login FROM users WHERE id = ?'
+  ).bind(userId).first<{ id: string; username: string; is_admin: number; disabled: number; created_at: string; last_login?: string | null }>();
   if (!row) return null;
   const user: BasicUser = {
     id: row.id,
@@ -396,6 +418,7 @@ export async function getUserBasic(env: Env, userId: string): Promise<BasicUser 
     is_admin: row.is_admin === 1,
     disabled: row.disabled === 1,
     created_at: row.created_at,
+    last_login: row.last_login || null,
   };
   userCache.set(userId, { user, ts: Date.now() });
   return user;
@@ -474,6 +497,14 @@ export async function regenerateApiKey(env: Env, userId: string): Promise<SafeUs
   await env.DB.prepare('UPDATE users SET api_key = ? WHERE id = ?')
     .bind(apiKey, userId).run();
   return getUserById(env, userId);
+}
+
+// 更新用户最后登录时间(每次 authLogin 成功后调用)
+export async function touchLastLogin(env: Env, userId: string): Promise<void> {
+  try {
+    await env.DB.prepare('UPDATE users SET last_login = ? WHERE id = ?')
+      .bind(new Date().toISOString(), userId).run();
+  } catch { /* 旧部署无 last_login 列时失败一次,不影响登录主流程 */ }
 }
 
 // ============ Session ============
@@ -1631,12 +1662,15 @@ export async function insertEmail(env: Env, row: EmailRow): Promise<void> {
   await env.DB.prepare(
     `INSERT OR IGNORE INTO emails
        (id, account_id, alias_id, message_id, subject, from_name, from_address,
-        delivered_to, recipient, cc, sent_at, size, raw_key, has_attachments, read, created_at)
-     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)`
+        delivered_to, recipient, cc, sent_at, size, raw_key, has_attachments, read, created_at,
+        body_text, body_status)
+     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)`
   ).bind(
     row.id, row.account_id, row.alias_id, row.message_id, row.subject,
     row.from_name, row.from_address, row.delivered_to, row.recipient, row.cc,
-    row.sent_at, row.size, row.raw_key, row.has_attachments, row.created_at
+    row.sent_at, row.size, row.raw_key, row.has_attachments, row.created_at,
+    row.body_text ?? null,
+    row.body_status ?? 0,
   ).run();
 }
 

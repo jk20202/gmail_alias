@@ -9,7 +9,7 @@ import * as routes from './routes';
 import { HTTPError, type Ctx } from './routes';
 import { getActiveWebhookAccountIds } from './db';
 import { pollAndPush } from './webhook';
-import { emailHandler } from './email';
+import { emailHandler, schedulePush } from './email';
 
 // CORS 头
 const CORS_HEADERS: Record<string, string> = {
@@ -227,8 +227,12 @@ export default {
   //
   // 实现刻意保持极轻:只提取头字段 + 原始邮件流式存 R2 + 元数据入库,
   // 不做 MIME 解析(免费套餐 Email Worker 同样只有 10ms CPU 限额)。
+  //
+  // v9 实时推送:emailHandler 完成后用 ctx.waitUntil() 异步触发 push,
+  // 不阻塞 Email Routing 响应,延迟从「等下一次 cron」(最坏 60s)降到「入库即推」(秒级)。
   async email(message: ForwardableEmailMessage, env: Env, ctx: ExecutionContext): Promise<void> {
-    return emailHandler(message, env, ctx);
+    await emailHandler(message, env, ctx);
+    ctx.waitUntil(schedulePush(message, env));
   },
 };
 

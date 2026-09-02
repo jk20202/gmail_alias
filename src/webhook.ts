@@ -260,11 +260,15 @@ function buildMessages(
   return buildDingtalkMessages(format, p);
 }
 
-// 取邮件正文(优先纯文本,缺失时从 HTML 转文本)
+// 取邮件正文:从 m.body_text 读取(入库时已解析,限 4KB)
+// 完全为空时给出明确引导,而不是含糊的「(无正文)」让用户摸不着头脑
 function bodyOf(m: Email): string {
   let text = (m.body || '').trim();
   if (!text && m.html) text = htmlToText(m.html).trim();
-  if (!text) return '(无正文)';
+  if (!text) {
+    // 可能是 html-only / multipart 嵌套深 / 超大被跳过 —— 都引导去系统查看
+    return '(未能自动解析正文,可能是 HTML 格式或含复杂附件,请登录邮件系统查看完整内容)';
+  }
   if (text.length > MAX_BODY_CHARS) {
     return text.slice(0, MAX_BODY_CHARS) + `\n\n… (正文过长已截断,共 ${text.length} 字,完整内容请登录系统查看)`;
   }
@@ -278,6 +282,24 @@ function subjectOf(m: Email): string {
 function attachmentLine(m: Email): string {
   const atts = (m.attachments || []).filter(Boolean);
   return atts.length ? atts.join('、') : '无';
+}
+
+// 飞书 lark_md 把 `<xxx>` 当作 HTML 标签解析,导致 `jkf6886 <jkf6886@proton.me>`
+// 中的地址部分被静默丢弃(用户反馈:推送卡片里只剩 `jkf6886` 前缀)。
+// 这里把 `<>` 转成 `「」`,既保留姓名与地址的可读性,又不会被 lark_md 当标签删掉。
+// 钉钉 markdown / plain_text 也一并用此格式,保持一致。
+function fromLine(m: Email): string {
+  const name = (m.from || '').trim();
+  if (!name) return '-';
+  // 已经是 "Name <addr@x>" 的,换成「addr@x」形式保留完整地址
+  const angleMatch = name.match(/^\s*"?([^"<]*)"?\s*<([^>]+)>\s*$/);
+  if (angleMatch) {
+    const [, dispName, addr] = angleMatch;
+    if (dispName.trim()) return `${dispName.trim()} 「${addr.trim()}」`;
+    return `「${addr.trim()}」`;
+  }
+  // 已经是单地址,直接返回
+  return name;
 }
 
 // ============ 飞书 ============
@@ -294,7 +316,7 @@ function buildFeishuMessages(format: 'card' | 'markdown' | 'text', p: WebhookPay
   const list = p.emails.slice(0, MAX_PUSH_EMAILS);
   const msgs: OutMessage[] = list.map(m => {
     const content = [
-      `**发件人**: ${m.from || '-'}`,
+      `**发件人**: ${fromLine(m)}`,
       `**收件人**: ${m.to || '-'}`,
       `**时间**: ${m.date || '-'}`,
       `**附件**: ${attachmentLine(m)}`,
@@ -315,7 +337,7 @@ function buildFeishuMessages(format: 'card' | 'markdown' | 'text', p: WebhookPay
       {
         tag: 'div',
         fields: [
-          { is_short: true, text: { tag: 'lark_md', content: `**发件人**\n${m.from || '-'}` } },
+          { is_short: true, text: { tag: 'lark_md', content: `**发件人**\n${fromLine(m)}` } },
           { is_short: true, text: { tag: 'lark_md', content: `**收件时间**\n${m.date || '-'}` } },
           { is_short: true, text: { tag: 'lark_md', content: `**收件人(别名)**\n${m.to || '-'}` } },
           { is_short: true, text: { tag: 'lark_md', content: `**附件**\n${attachmentLine(m)}` } },
@@ -375,7 +397,7 @@ function buildDingtalkMessages(format: 'card' | 'markdown' | 'text', p: WebhookP
     const text = [
       `### ${subjectOf(m)}`,
       '',
-      `- **发件人**: ${m.from || '-'}`,
+      `- **发件人**: ${fromLine(m)}`,
       `- **收件人**: ${m.to || '-'}`,
       `- **时间**: ${m.date || '-'}`,
       `- **附件**: ${attachmentLine(m)}`,
@@ -427,7 +449,7 @@ function buildPlainText(p: WebhookPayload): string {
   for (const m of p.emails.slice(0, MAX_PUSH_EMAILS)) {
     lines.push('────────────────');
     lines.push(`【${subjectOf(m)}】`);
-    lines.push(`发件人: ${m.from || '-'}`);
+    lines.push(`发件人: ${fromLine(m)}`);
     lines.push(`收件人: ${m.to || '-'}`);
     lines.push(`时间: ${m.date || '-'}`);
     lines.push(`附件: ${attachmentLine(m)}`);

@@ -723,6 +723,59 @@ pre.code .num { color: #fcd34d; }
 }
 .cell-actions .btn { padding: 4px 10px; font-size: 12px; }
 
+/* ============ 账户基本信息 v4: 单列列表布局 ============ */
+/*
+ * 用户反馈「2×2 网格太丑、不要那么复杂,单列就好」——
+ * 改用 label/value 一行的列表形式,贴合「空白不大」的观感。
+ *  - li 之间用 1px 分隔线,行间距 0,条目感强
+ *  - label 固定左对齐宽度(桌面端),移动端 100% 换行
+ *  - 修改密码按钮行也用同一布局,与其他条目视觉一致
+ */
+.info-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.info-list .info-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.info-list .info-row:last-child { border-bottom: none; }
+.info-list .info-label {
+  flex: 0 0 auto;
+  width: 120px;
+  font-size: 13px;
+  color: var(--text-light);
+}
+.info-list .info-value {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-1);
+  word-break: break-all;
+}
+.info-list .info-value.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  letter-spacing: 0.2px;
+}
+.info-list .info-row-action .info-value {
+  display: flex; justify-content: flex-start;
+}
+@media (max-width: 600px) {
+  .info-list .info-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 10px 0;
+  }
+  .info-list .info-label { width: auto; }
+}
+
 .apikey-block {
   margin-top: 22px;
   padding-top: 18px;

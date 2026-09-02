@@ -23,8 +23,8 @@ export function toEmail(row: EmailRow): Email {
     subject: row.subject || '(无主题)',
     date: formatShanghaiTime(dateIso),
     date_iso: dateIso,
-    // 正文不在库里:由前端按 raw_url 下载后解析;这里留空避免误导
-    body: '',
+    // v9: 正文已入库(text/plain 解析结果,限 4KB)—— webhook push 直接从这里读
+    body: row.body_text || '',
     html: '',
     unread: row.read !== 1,
     attachments: row.has_attachments === 1 ? ['(含附件)'] : [],

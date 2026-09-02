@@ -41,6 +41,7 @@ async function requireSession(ctx: Ctx): Promise<SafeUser> {
     alias: null,
     active_alias_count: 0,
     created_at: basic.created_at,
+    last_login: basic.last_login || null,
   };
 }
 
@@ -137,6 +138,8 @@ export async function authLogin(ctx: Ctx): Promise<Response> {
   // 禁用用户禁止登录 (同样返回统一提示,不暴露账户存在性)
   if (raw.disabled === 1) return fail('账户不存在,或是密码不匹配', 401);
   const token = await db.createSession(ctx.env, raw.id);
+  // v9: 登录成功后写入 last_login,前端「基本信息」板块展示
+  await db.touchLastLogin(ctx.env, raw.id);
   const user = await db.getUserById(ctx.env, raw.id);
   return ok({ session_token: token, user });
 }

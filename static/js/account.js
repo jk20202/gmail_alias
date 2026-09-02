@@ -51,6 +51,8 @@ function fillAccountInfo() {
     ? '<span class="badge badge-primary">管理员</span>'
     : '<span class="badge badge-gray">普通用户</span>');
   setText('accCreatedAt', fmtTime(u.created_at));
+  // 上次登录时间(ISO 字符串,可能为 null —— 新账号 / 历史没记录时显示「从未登录」)
+  setText('accLastLogin', u.last_login ? fmtTime(u.last_login) : '从未登录');
   setText('apiKeyText', u.api_key);
   const copyBtn = document.getElementById('btnCopyApiKey');
   if (copyBtn) copyBtn.onclick = () => copyText(u.api_key);
