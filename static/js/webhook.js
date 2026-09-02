@@ -196,14 +196,23 @@ async function createWebhook() {
   if (!tgt.length) { toast('请至少勾选一个监听邮箱', 'warning'); return; }
   const scopeSel = document.getElementById('whScope');
   let scope = (scopeSel && scopeSel.value) || 'alias_all';
-  // 全部他人邮箱时强制 alias_all(并对齐后端校验)
+  const hasMixed = tgt.some(t => t.is_own) && tgt.some(t => !t.is_own);
+  // per-target scope 降级,避免后端硬校验 403:
+  //  - 全部他人邮箱 → 全部 alias_all
+  //  - 混合勾选 + 全局 account → 他人邮箱降级为 alias_all,自己邮箱仍 account
+  //  - 单一自己的邮箱 + account → 保持
+  const finalizeScope = (t) => {
+    if (scope !== 'account') return scope;
+    if (t.is_own) return 'account';
+    return 'alias_all';
+  };
   if (tgt.every(t => !t.is_own)) scope = 'alias_all';
   const events = [];
   if (document.getElementById('whEvNew').checked) events.push('new_mail');
   if (document.getElementById('whEvUnread').checked) events.push('unread');
   if (!events.length) { toast('请至少选择一个事件', 'warning'); return; }
   const body = {
-    targets: tgt.map(t => ({ mail_account_id: t.mail_account_id, scope })),
+    targets: tgt.map(t => ({ mail_account_id: t.mail_account_id, scope: finalizeScope(t) })),
     url: document.getElementById('whUrl').value.trim(),
     format: document.getElementById('whFormat').value,
     events: events.join(','),
