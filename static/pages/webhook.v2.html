@@ -1,0 +1,88 @@
+<div class="page-title">Webhook 订阅</div>
+<div class="page-desc">新邮件主动推送到飞书 / 钉钉 / 自定义地址，支持卡片、Markdown、纯文本与原始 JSON，正文完整不截断</div>
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header"><h3>创建订阅</h3></div>
+    <div class="card-body">
+      <!--
+        一订阅多邮箱 (2026-09 改造):
+          - 多个监听邮箱共享同一回调 URL
+          - 同一订阅内所有 target 共用同一 scope(alias_all / account)
+          - scope=account 仅对自己绑定的邮箱可勾选;他人公开邮箱强制 alias_all
+      -->
+      <div class="form-group">
+        <label class="form-label">监听主邮箱 <span class="req">*</span></label>
+        <div id="whAccountList" class="checkbox-list">
+          <div class="loading"><span class="spinner"></span> 加载中...</div>
+        </div>
+        <div class="form-hint">支持选择自己绑定的邮箱或他人公开的邮箱（可多选，统一 scope）</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">监听范围 <span class="req">*</span></label>
+        <select id="whScope" class="form-control">
+          <option value="alias_all">全部存活别名（推送该邮箱下当前所有可用别名的邮件）</option>
+          <option value="account" id="whScopeAccountOption">整个邮箱（推送该主邮箱直接收信，不含别名）</option>
+        </select>
+        <div class="form-hint" id="whScopeHint">勾选的邮箱全应用同一监听范围。他人公开邮箱只支持「全部存活别名」。</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">回调 URL <span class="req">*</span></label>
+        <input type="text" id="whUrl" class="form-control" placeholder="飞书机器人 https://open.feishu.cn/open-apis/bot/v2/hook/xxx">
+        <div class="form-hint">支持飞书、钉钉、企业微信及任意自定义 HTTP 地址</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">推送格式 <span class="req">*</span></label>
+        <select id="whFormat" class="form-control">
+          <option value="card">卡片消息（推荐，完整正文，飞书/钉钉自动转卡片）</option>
+          <option value="markdown">Markdown 富文本</option>
+          <option value="text">纯文本（完整正文）</option>
+          <option value="json">原始 JSON（含正文 + HTML + 附件列表）</option>
+        </select>
+        <div class="form-hint">卡片模式下每封邮件单独一条消息，正文完整推送，不再截断到 150 字</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">订阅事件 <span class="req">*</span></label>
+        <div style="display:flex; gap:16px; padding-top:6px">
+          <label class="switch"><input type="checkbox" id="whEvNew" checked><span class="track"></span><span>new_mail 新邮件</span></label>
+          <label class="switch"><input type="checkbox" id="whEvUnread"><span class="track"></span><span>unread 未读</span></label>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">签名密钥 Secret (可选)</label>
+        <input type="text" id="whSecret" class="form-control" placeholder="填写后推送将携带 X-Webhook-Signature 签名（JSON 格式）">
+      </div>
+      <button class="btn" onclick="createWebhook()">创建订阅</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h3>已订阅列表</h3><span class="sub">支持多个订阅,不同事件 / 不同平台可分开</span></div>
+    <div class="card-body">
+      <div id="whList"><div class="loading"><span class="spinner"></span> 加载中...</div></div>
+    </div>
+  </div>
+</div>
+
+<style>
+  /* webhook 多选邮箱列表 */
+  .checkbox-list { display: block; max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; background: var(--bg-2, transparent); }
+  .checkbox-list .group { margin: 4px 0 8px; }
+  .checkbox-list .group-label { font-size: 12px; color: var(--text-muted, #888); padding: 2px 0; user-select: none; }
+  .checkbox-list label.item { display: flex; align-items: center; gap: 8px; padding: 4px 4px; cursor: pointer; border-radius: 4px; }
+  .checkbox-list label.item:hover { background: rgba(127,127,127,.08); }
+  .checkbox-list label.item input[type=checkbox] { margin: 0; }
+  .checkbox-list label.item input[type=checkbox][disabled] + span { color: var(--text-muted, #888); text-decoration: line-through; }
+  .checkbox-list .empty { color: var(--text-muted, #888); padding: 8px; }
+
+  /* scope option 不可用时(全选他人邮箱)整项灰掉 */
+  #whScope option:disabled { color: var(--text-muted, #888); }
+  /* 已订阅列表的目标邮箱 */
+  .webhook-targets { display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; }
+  .webhook-targets .chip { padding: 3px 8px; border-radius: 10px; background: rgba(99,102,241,.10); color: var(--text-1, inherit); font-size: 12px; }
+  .webhook-targets .chip.own { background: rgba(16,185,129,.12); }
+  .webhook-targets .chip.other { background: rgba(245,158,11,.14); }
+  .webhook-deliveries { margin-top: 10px; padding: 8px 10px; border-radius: 6px; background: rgba(127,127,127,.06); }
+  .webhook-deliveries summary { cursor: pointer; font-size: 13px; padding: 2px 0; user-select: none; }
+  .webhook-deliveries pre { margin: 6px 0 0; padding: 8px; background: rgba(0,0,0,.04); border-radius: 4px; font-size: 11.5px; line-height: 1.45; max-height: 200px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+  .webhook-deliveries .row { display:flex; gap:8px; align-items: baseline; padding: 4px 0; font-size: 12px; border-bottom: 1px dashed rgba(127,127,127,.2); }
+  .webhook-deliveries .row:last-child { border-bottom: 0; }
+</style>

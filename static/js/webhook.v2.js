@@ -88,38 +88,37 @@ function getSelectedTargets() {
 }
 
 // 选择变化时:动态启用/禁用「整个邮箱」scope,并给出可读提示
-// 规则:
-//   - 没有任何 own checkbox 被勾选时,直接把"整个邮箱"option 从 DOM 移掉,
-//     避免出现"灰色文字但能点"的歧义;相应提示永远写在 hint 上。
-//   - 至少一个 own 被勾选时,把它加回来并 enabled。
 function onWhSelectionChange() {
   const tgts = getSelectedTargets();
-  const hasOwnSel = tgts.some(t => t.is_own);
-  const hasOtherSel = tgts.some(t => !t.is_own);
+  const hasOwn = tgts.some(t => t.is_own);
+  const hasOther = tgts.some(t => !t.is_own);
   const scopeSel = document.getElementById('whScope');
+  const accountOpt = document.getElementById('whScopeAccountOption');
   const hint = document.getElementById('whScopeHint');
   if (!scopeSel || !hint) return;
-  const rebuildScopeOptions = () => {
-    // 先移除可能存在的 account option,再按需加入
-    const old = document.getElementById('whScopeAccountOption');
-    if (old) old.remove();
-    if (!hasOwnSel) return; // 没有 own 不加
-    const opt = document.createElement('option');
-    opt.value = 'account';
-    opt.id = 'whScopeAccountOption';
-    opt.textContent = '整个邮箱（推送该主邮箱直接收信，不含别名）';
-    scopeSel.appendChild(opt);
-    if (scopeSel.value !== 'account') scopeSel.value = 'alias_all';
-  };
-  rebuildScopeOptions();
+
   if (!tgts.length) {
-    hint.textContent = '请先在「监听主邮箱」至少勾选一个;若勾选了他人公开邮箱,则只支持「全部存活别名」。';
-  } else if (!hasOwnSel) {
-    hint.innerHTML = '<span style="color:#d97706">⚠ 所选全部为他人公开邮箱,只能监听「全部存活别名」,「整个邮箱」已被移除,你无法选择。</span>';
-  } else if (hasOtherSel) {
-    hint.innerHTML = '提示: 勾选了他人公开邮箱。「整个邮箱」只对你自己的邮箱生效,他人邮箱始终按「全部存活别名」收件。';
+    // 一个自己的邮箱都没有时,「整个邮箱」从一开始就不该可选 —— 避免出现
+    // 「先选了整个邮箱、勾上他人邮箱后又被强制改回」的困惑。
+    const noOwnAtAll = !(State.availableAccounts || []).some(a => a.is_own);
+    if (accountOpt) accountOpt.disabled = noOwnAtAll;
+    if (noOwnAtAll && scopeSel.value === 'account') scopeSel.value = 'alias_all';
+    hint.textContent = noOwnAtAll
+      ? '你当前没有绑定自己的邮箱,只能监听他人公开邮箱的「全部存活别名」。'
+      : '勾选的邮箱全应用同一监听范围。他人公开邮箱只支持「全部存活别名」。';
+    return;
+  }
+  if (!hasOwn) {
+    // 全是他人邮箱: 强制 alias_all
+    if (accountOpt) accountOpt.disabled = true;
+    if (scopeSel.value === 'account') scopeSel.value = 'alias_all';
+    hint.innerHTML = '<span style="color:#d97706">⚠ 所选全部为他人公开邮箱,只能监听「全部存活别名」,已自动锁定。</span>';
+  } else if (hasOther) {
+    if (accountOpt) accountOpt.disabled = false;
+    hint.innerHTML = '提示: 你选择了自己邮箱与他人公开邮箱混合,整个邮箱选项只对自己邮箱生效,他人在此订阅内只按别名收件。';
   } else {
-    hint.textContent = '已勾选自己绑定的邮箱,可按需选择「整个邮箱」或「全部存活别名」。';
+    if (accountOpt) accountOpt.disabled = false;
+    hint.textContent = '勾选的邮箱全应用同一监听范围。';
   }
 }
 
