@@ -189,20 +189,24 @@ async function recordUnmatched(env: Env, message: ForwardableEmailMessage): Prom
  * Email Worker 入口。
  * 在 wrangler 里无需额外配置;需在 Cloudflare 后台
  * 「Email → Email Routing → Routing rules」把收信规则指向本 Worker。
+ *
+ * 返回值: 本次邮件实际入库的 mail_account_id;未归属 / 处理失败时为 null。
+ * 调用方 (index.ts) 用它触发 webhook 实时推送 —— 必须与入库账户完全一致,
+ * 否则会出现「邮件进了 A 邮箱, 却把通知推给 B 邮箱的订阅」。
  */
 export async function emailHandler(
   message: ForwardableEmailMessage,
   env: Env,
   _ctx: ExecutionContext,
-): Promise<void> {
+): Promise<string | null> {
   try {
     if (!message || message.rawSize <= 0) {
       message.setReject('Empty message');
-      return;
+      return null;
     }
     if (message.rawSize > 25 * 1024 * 1024) {
       message.setReject('Message too large (max 25 MiB)');
-      return;
+      return null;
     }
 
     const candidates = collectCandidates(message.headers);
@@ -214,7 +218,7 @@ export async function emailHandler(
       // 问题只在于该收件地址没有登记到任何邮箱上。
       await recordUnmatched(env, message);
       message.setReject('No matching mailbox or alias for this message');
-      return;
+      return null;
     }
 
     const id = crypto.randomUUID();
@@ -284,32 +288,31 @@ export async function emailHandler(
     };
 
     await insertEmail(env, row);
+    return owner.accountId;
   } catch (e) {
     console.error('emailHandler error:', e);
     try { message.setReject('Failed to process inbound email'); } catch { /* ignore */ }
+    return null;
   }
 }
 
 // v9: Email Worker 入库完成后,异步触发 webhook 推送
 //  设计原则:
 //    - 必须 waitUntil 异步执行,不阻塞 Email Routing 响应
+//    - accountId 由 emailHandler 返回(即邮件实际入库的那个账户),
+//      **不要**在这里用 message.to / forward_address 重新反推:
+//      所有邮箱共享同一个 catch-all 转发地址,LIMIT 1 会随机命中一个账户,
+//      把 A 邮箱的邮件通知推给 B 邮箱的订阅;而且走 CATCHALL_ACCOUNT_ID 兜底
+//      入库的邮件根本没有 forward_address 匹配,会整封漏推。
 //    - 这里**不**做推送成功/失败判定,只是 fire-and-forget 触发 pollAndPush
 //    - 该函数异常一律吞掉(已被 waitUntil 包裹,失败不会影响 emailHandler 主体结果)
 //
 //  一个新邮件 → 一次 push 触发。push 内部仍走完整的去重 + 过滤 + 平台投递流程,
 //  所以同一封邮件不会重复推送(因为 pollAndPush 会通过 KV 去重 key `wh:pushed:<aid>:<mid>`)。
-export async function schedulePush(message: ForwardableEmailMessage, env: Env): Promise<void> {
+export async function schedulePush(env: Env, accountId: string): Promise<void> {
   try {
-    // 从 message.to(信封收件人 = 我们的统一转发地址)反推 account_id
-    // 简化逻辑:直接查 mail_accounts WHERE forward_address = message.to
-    // 该账号就是本次新邮件的归属邮箱(transfer / alias / 主邮箱都汇聚到这里)
-    const envelopeTo = (message.to || '').trim().toLowerCase();
-    if (!envelopeTo) return;
-    const acc = await env.DB.prepare(
-      'SELECT id FROM mail_accounts WHERE lower(forward_address) = ? LIMIT 1'
-    ).bind(envelopeTo).first<{ id: string }>();
-    if (!acc) return;
-    await pollAndPush(env, acc.id);
+    if (!accountId) return;
+    await pollAndPush(env, accountId);
   } catch (e) {
     console.error('schedulePush failed:', e);
   }

@@ -231,8 +231,10 @@ export default {
   // v9 实时推送:emailHandler 完成后用 ctx.waitUntil() 异步触发 push,
   // 不阻塞 Email Routing 响应,延迟从「等下一次 cron」(最坏 60s)降到「入库即推」(秒级)。
   async email(message: ForwardableEmailMessage, env: Env, ctx: ExecutionContext): Promise<void> {
-    await emailHandler(message, env, ctx);
-    ctx.waitUntil(schedulePush(message, env));
+    // 返回值是邮件实际入库的账户 id —— 推送必须用同一个 id,
+    // 否则「邮件进 A 邮箱、通知推给 B 邮箱的订阅」(所有邮箱共享 catch-all 转发地址时必现)
+    const accountId = await emailHandler(message, env, ctx);
+    if (accountId) ctx.waitUntil(schedulePush(env, accountId));
   },
 };
 

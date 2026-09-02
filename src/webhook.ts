@@ -54,10 +54,12 @@ export async function pollAndPush(env: Env, accountId: string): Promise<{ pushed
 
   if (emails.length === 0) return { pushed, errors };
 
-  const account = await getMailAccountById(env, accountId);
+  // 账号信息与订阅列表互不依赖,并发取(原来串行两次 D1 往返)
+  const [account, webhooks] = await Promise.all([
+    getMailAccountById(env, accountId),
+    getWebhooksForAccount(env, accountId),
+  ]);
   if (!account) return { pushed: 0, errors: ['账号不存在'] };
-
-  const webhooks = await getWebhooksForAccount(env, accountId);
   if (webhooks.length === 0) return { pushed: 0, errors };
 
   for (const wh of webhooks) {
@@ -123,16 +125,19 @@ export async function pollAndPush(env: Env, accountId: string): Promise<{ pushed
 
     if (filtered.length === 0) continue;
 
-    // KV 去重:只推送未推送过的邮件
+    // KV 去重:只推送未推送过的邮件。
+    // 原本是「每封串行 get + put」,一个窗口内 50 封就是 100 次串行 KV 往返 ——
+    // 这是推送延迟的主要来源之一(用户实测超过 3 秒)。改成并发批量读写后只剩 1 次往返耗时。
+    const dedupKeys = filtered.map(e => `wh:pushed:${accountId}:${e.id}`);
+    const marks = await Promise.all(dedupKeys.map(k => env.KV.get(k).catch(() => null)));
     const newEmails: Email[] = [];
-    for (const e of filtered) {
-      const dedupKey = `wh:pushed:${accountId}:${e.id}`;
-      const already = await env.KV.get(dedupKey);
-      if (!already) {
-        newEmails.push(e);
-        // 标记已推送,TTL 1小时
-        await env.KV.put(dedupKey, '1', { expirationTtl: 3600 });
-      }
+    const newKeys: string[] = [];
+    for (let i = 0; i < filtered.length; i++) {
+      if (!marks[i]) { newEmails.push(filtered[i]); newKeys.push(dedupKeys[i]); }
+    }
+    if (newKeys.length) {
+      // 标记已推送,TTL 1小时(失败不重试,由 cron 下次轮询补推)
+      await Promise.all(newKeys.map(k => env.KV.put(k, '1', { expirationTtl: 3600 }).catch(() => undefined)));
     }
 
     if (newEmails.length === 0) continue;
@@ -247,7 +252,7 @@ function detectPlatform(url: string): 'feishu' | 'dingtalk' | 'generic' {
 // ============ 消息体构建 ============
 interface OutMessage { body: string; contentType: string; }
 
-function buildMessages(
+export function buildMessages(
   platform: 'feishu' | 'dingtalk' | 'generic',
   format: 'card' | 'markdown' | 'text' | 'json',
   p: WebhookPayload
@@ -262,7 +267,7 @@ function buildMessages(
 
 // 取邮件正文:从 m.body_text 读取(入库时已解析,限 4KB)
 // 完全为空时给出明确引导,而不是含糊的「(无正文)」让用户摸不着头脑
-function bodyOf(m: Email): string {
+export function bodyOf(m: Email): string {
   let text = (m.body || '').trim();
   if (!text && m.html) text = htmlToText(m.html).trim();
   if (!text) {
@@ -288,7 +293,7 @@ function attachmentLine(m: Email): string {
 // 中的地址部分被静默丢弃(用户反馈:推送卡片里只剩 `jkf6886` 前缀)。
 // 这里把 `<>` 转成 `「」`,既保留姓名与地址的可读性,又不会被 lark_md 当标签删掉。
 // 钉钉 markdown / plain_text 也一并用此格式,保持一致。
-function fromLine(m: Email): string {
+export function fromLine(m: Email): string {
   const name = (m.from || '').trim();
   if (!name) return '-';
   // 已经是 "Name <addr@x>" 的,换成「addr@x」形式保留完整地址
