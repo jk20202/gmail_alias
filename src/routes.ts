@@ -1094,16 +1094,16 @@ export async function webhookCreate(ctx: Ctx): Promise<Response> {
     if (!mailAccountId) return fail('监听列表缺邮箱 ID');
     if (seen.has(mailAccountId + '|' + scope)) continue;        // 去重
     seen.add(mailAccountId + '|' + scope);
-    if (!['alias_all', 'account'].includes(scope)) {
-      return fail('无效的监听范围,仅支持「全部存活别名」或「整个邮箱」');
+    if (!['alias_all','account'].includes(scope)) {
+      return fail('无效的监听范围,仅支持「整个邮箱」或「别名邮箱」');
     }
     // 邮箱必须存在且对当前用户可见
     const account = await db.getMailAccountRaw(ctx.env, user.id, mailAccountId);
     if (!account) return fail('无权操作该邮箱', 403);
-    // 权限分离: 他人公开邮箱的直收信不在你名下,不允许监听「整个邮箱」
-    // 「全部存活别名」=监听你在该主邮箱下生成的别名邮箱,不受此约束。
-    if (scope === 'account' && account.user_id !== user.id) {
-      return fail(`邮箱「${account.email}」不是你自己绑定的,无法监听该主邮箱的直接收信(只能监听你在该邮箱下生成的存活别名)`);
+    // 权限分离: 他人公开邮箱你没有「整个邮箱」监听权 (alias_all 包含主邮箱直收)
+    // 「别名邮箱」(account) = 订阅者自己生成的、还活着的别名 —— 与邮箱主无关,允许
+    if (scope === 'alias_all' && account.user_id !== user.id) {
+      return fail(`邮箱「${account.email}」不是你自己绑定的,无法监听「整个邮箱」(仅可监听「别名邮箱」)`);
     }
     validTargets.push({ mail_account_id: mailAccountId, scope: scope as 'alias_all' | 'account' });
   }
@@ -1160,12 +1160,13 @@ export async function webhookUpdate(ctx: Ctx): Promise<Response> {
       if (seen.has(mailAccountId + '|' + scope)) continue;
       seen.add(mailAccountId + '|' + scope);
       if (!['alias_all','account'].includes(scope)) {
-        return fail('无效的监听范围,仅支持「全部存活别名」或「整个邮箱」');
+        return fail('无效的监听范围,仅支持「整个邮箱」或「别名邮箱」');
       }
       const account = await db.getMailAccountRaw(ctx.env, user.id, mailAccountId);
       if (!account) return fail('无权操作该邮箱', 403);
-      if (scope === 'account' && account.user_id !== user.id) {
-        return fail(`邮箱「${account.email}」不是你自己绑定的,无法监听该主邮箱的直接收信`);
+      // 权限分离: 他人公开邮箱不允许「整个邮箱」(alias_all 包含主邮箱直收)
+      if (scope === 'alias_all' && account.user_id !== user.id) {
+        return fail(`邮箱「${account.email}」不是你自己绑定的,无法监听「整个邮箱」(仅可监听「别名邮箱」)`);
       }
       validTargets.push({ mail_account_id: mailAccountId, scope: scope as 'alias_all' | 'account' });
     }

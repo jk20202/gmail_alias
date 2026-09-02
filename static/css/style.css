@@ -687,3 +687,72 @@ pre.code .num { color: #fcd34d; }
   .login-card { padding: 28px 22px; }
   .mail-head .from { max-width: 120px; }
 }
+
+/* ============ 账户页 v3: 基本信息 2x2 网格 + 紧凑 API Key ============
+ * 设计目标:
+ *  - 2x2 网格让 用户名 / 角色 / 创建时间 / 操作 紧凑对齐,不再 1 行 + 中间空块
+ *  - 角色用 badge 突出,创建时间用正常字号,不再 12px 灰字看不清
+ *  - API Key 独立一块: 说明 + key + 操作,行内 user-select: all 便于复制
+ *  - 颜色 / 间距 / 字号统一用 var(--*) 引用 design token
+ */
+.basic-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px 28px;
+}
+.big-cell { padding: 2px 0; min-width: 0; }
+.cell-label {
+  font-size: 12px;
+  color: var(--text-light);
+  margin-bottom: 6px;
+  letter-spacing: 0.2px;
+}
+.cell-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-1, inherit);
+  word-break: break-all;
+}
+.cell-value.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+}
+.cell-actions {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+}
+.cell-actions .btn { padding: 4px 10px; font-size: 12px; }
+
+.apikey-block {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.apikey-head {
+  display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;
+}
+.apikey-head .cell-label { margin-bottom: 0; }
+.apikey-hint { font-size: 12px; color: var(--text-light); }
+
+.apikey-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px;
+  background: var(--bg-2, #f8fafc);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+}
+.apikey-text {
+  flex: 1; min-width: 0; word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px; color: var(--text-1);
+  user-select: all;
+}
+.apikey-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.apikey-actions .btn { padding: 4px 10px; font-size: 12px; }
+
+@media (max-width: 600px) {
+  .basic-info-grid { grid-template-columns: 1fr; gap: 12px 0; }
+  .apikey-row { flex-direction: column; align-items: stretch; }
+  .apikey-actions { justify-content: flex-end; }
+  .apikey-actions .btn { flex: 1; }
+}

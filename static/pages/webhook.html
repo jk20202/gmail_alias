@@ -2,28 +2,31 @@
 <div class="page-desc">新邮件主动推送到飞书 / 钉钉 / 自定义地址，支持卡片、Markdown、纯文本与原始 JSON，正文完整不截断</div>
 <div class="grid-2">
   <div class="card">
-    <div class="card-header"><h3>创建订阅</h3></div>
+    <div class="card-header">
+      <h3>创建订阅</h3>
+      <span class="sub">一订阅可监听多个主邮箱,每个邮箱独立选择监听方式</span>
+    </div>
     <div class="card-body">
       <!--
-        一订阅多邮箱 (2026-09 改造):
-          - 多个监听邮箱共享同一回调 URL
-          - 同一订阅内所有 target 共用同一 scope(alias_all / account)
-          - scope=account 仅对自己绑定的邮箱可勾选;他人公开邮箱强制 alias_all
+        2026-09 v3 UI 重构:
+          - 删掉全局「监听范围」下拉框
+          - 每个邮箱独立一行: 复选框 + 邮箱 + 该邮箱专属 select
+          - 自己绑定的: 可选「别名邮箱」(只自己存活别名) / 「整个邮箱」(推所有收信)
+          - 他人公开的: select 物理只显示「别名邮箱」(权限分离硬约束)
+          - 加「一键监听」按钮: 「一键别名」 / 「一键整个邮箱」 两个预设
       -->
       <div class="form-group">
-        <label class="form-label">监听主邮箱 <span class="req">*</span></label>
+        <div class="wh-list-head">
+          <label class="form-label">监听主邮箱 <span class="req">*</span></label>
+          <button type="button" class="btn btn-outline btn-sm" onclick="openQuickListenModal()">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            一键监听
+          </button>
+        </div>
         <div id="whAccountList" class="checkbox-list">
           <div class="loading"><span class="spinner"></span> 加载中...</div>
         </div>
-        <div class="form-hint">支持选择自己绑定的邮箱或他人公开的邮箱（可多选，统一 scope）</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">监听范围 <span class="req">*</span></label>
-        <select id="whScope" class="form-control">
-          <option value="alias_all">全部存活别名（推送该邮箱下当前所有可用别名的邮件）</option>
-          <option value="account" id="whScopeAccountOption">整个邮箱（推送该主邮箱直接收信，不含别名）</option>
-        </select>
-        <div class="form-hint" id="whScopeHint">勾选的邮箱全应用同一监听范围。他人公开邮箱只支持「全部存活别名」。</div>
+        <div class="form-hint" id="whAccountHint">勾选要监听的邮箱,每个邮箱右侧选择监听方式:「别名邮箱」= 仅自己生成的、还活着的别名收信;「整个邮箱」= 该邮箱下所有收信(主邮箱直收 + 所有别名)。他人公开邮箱只能选「别名邮箱」。</div>
       </div>
       <div class="form-group">
         <label class="form-label">回调 URL <span class="req">*</span></label>
@@ -42,7 +45,7 @@
       </div>
       <div class="form-group">
         <label class="form-label">订阅事件 <span class="req">*</span></label>
-        <div style="display:flex; gap:16px; padding-top:6px">
+        <div class="wh-event-row">
           <label class="switch"><input type="checkbox" id="whEvNew" checked><span class="track"></span><span>new_mail 新邮件</span></label>
           <label class="switch"><input type="checkbox" id="whEvUnread"><span class="track"></span><span>unread 未读</span></label>
         </div>
@@ -64,25 +67,50 @@
 
 <style>
   /* webhook 多选邮箱列表 */
-  .checkbox-list { display: block; max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; background: var(--bg-2, transparent); }
-  .checkbox-list .group { margin: 4px 0 8px; }
-  .checkbox-list .group-label { font-size: 12px; color: var(--text-muted, #888); padding: 2px 0; user-select: none; }
-  .checkbox-list label.item { display: flex; align-items: center; gap: 8px; padding: 4px 4px; cursor: pointer; border-radius: 4px; }
+  .checkbox-list { display: block; max-height: 320px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; background: var(--bg-2, transparent); }
+  .checkbox-list .group { margin: 4px 0 6px; }
+  .checkbox-list .group-label { font-size: 12px; color: var(--text-muted, #888); padding: 4px 4px 2px; user-select: none; font-weight: 500; }
+  .checkbox-list .group-label .count { font-weight: 400; opacity: .7; margin-left: 4px; }
+  .checkbox-list label.item { display: flex; align-items: center; gap: 8px; padding: 5px 6px; cursor: pointer; border-radius: 4px; }
   .checkbox-list label.item:hover { background: rgba(127,127,127,.08); }
-  .checkbox-list label.item input[type=checkbox] { margin: 0; }
-  .checkbox-list label.item input[type=checkbox][disabled] + span { color: var(--text-muted, #888); text-decoration: line-through; }
-  .checkbox-list .empty { color: var(--text-muted, #888); padding: 8px; }
+  .checkbox-list label.item input[type=checkbox] { margin: 0; flex-shrink: 0; }
+  .checkbox-list label.item .item-email { flex: 1; min-width: 0; word-break: break-all; }
+  .checkbox-list label.item .item-email small { opacity: .6; margin-left: 4px; font-size: 11px; }
+  .checkbox-list label.item .item-scope { width: 110px; flex-shrink: 0; padding: 3px 6px; font-size: 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-1, #fff); color: inherit; }
+  .checkbox-list label.item .item-scope:disabled { background: var(--bg-2, #f5f5f5); cursor: not-allowed; opacity: .8; }
+  .checkbox-list .empty { color: var(--text-muted, #888); padding: 8px; font-size: 12px; }
 
-  /* scope option 不可用时(全选他人邮箱)整项灰掉 */
-  #whScope option:disabled { color: var(--text-muted, #888); }
+  .wh-list-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+  .wh-list-head .form-label { margin-bottom: 0; }
+  .wh-list-head .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+  .wh-event-row { display: flex; gap: 16px; padding-top: 6px; flex-wrap: wrap; }
+
+  /* 一键监听弹窗 */
+  .quick-listen-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .quick-card {
+    border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); padding: 14px;
+    cursor: pointer; transition: border-color .15s, background .15s, transform .15s;
+    background: var(--bg-2, #fafafa);
+  }
+  .quick-card:hover { border-color: var(--primary, #6366f1); background: var(--bg-1, #fff); transform: translateY(-1px); }
+  .quick-card .qc-title { font-weight: 600; font-size: 14px; margin-bottom: 6px; color: var(--text-1, inherit); }
+  .quick-card .qc-desc { font-size: 12.5px; color: var(--text-light, #555); line-height: 1.55; margin-bottom: 8px; }
+  .quick-card .qc-stat { font-size: 11.5px; color: var(--text-muted, #888); font-family: monospace; }
+  @media (max-width: 520px) {
+    .quick-listen-grid { grid-template-columns: 1fr; }
+    .checkbox-list label.item .item-scope { width: 90px; font-size: 11px; }
+  }
+
   /* 已订阅列表的目标邮箱 */
-  .webhook-targets { display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; }
+  .webhook-targets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
   .webhook-targets .chip { padding: 3px 8px; border-radius: 10px; background: rgba(99,102,241,.10); color: var(--text-1, inherit); font-size: 12px; }
   .webhook-targets .chip.own { background: rgba(16,185,129,.12); }
   .webhook-targets .chip.other { background: rgba(245,158,11,.14); }
+  .webhook-targets .chip .chip-scope { opacity: .75; margin-left: 4px; font-size: 11px; }
   .webhook-deliveries { margin-top: 10px; padding: 8px 10px; border-radius: 6px; background: rgba(127,127,127,.06); }
   .webhook-deliveries summary { cursor: pointer; font-size: 13px; padding: 2px 0; user-select: none; }
   .webhook-deliveries pre { margin: 6px 0 0; padding: 8px; background: rgba(0,0,0,.04); border-radius: 4px; font-size: 11.5px; line-height: 1.45; max-height: 200px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
-  .webhook-deliveries .row { display:flex; gap:8px; align-items: baseline; padding: 4px 0; font-size: 12px; border-bottom: 1px dashed rgba(127,127,127,.2); }
+  .webhook-deliveries .row { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; font-size: 12px; border-bottom: 1px dashed rgba(127,127,127,.2); }
   .webhook-deliveries .row:last-child { border-bottom: 0; }
 </style>

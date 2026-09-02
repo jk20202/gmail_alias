@@ -69,10 +69,17 @@ export async function pollAndPush(env: Env, accountId: string): Promise<{ pushed
     const myTargets = (wh.targets || []).filter(t => t.mail_account_id === accountId);
     if (!myTargets.length) continue;
 
-    // 按 target 的 scope 决定过滤逻辑(可能同时存在 alias_all 和 account,取并集)
-    //   alias_all → 收件人是该邮箱下当前所有「存活别名」中之一
-    //   account   → 收件人就是该主邮箱本身(直发)
-    // 已废弃: alias(指定别名) —— 历史遗留 target.scope 字段若是 'alias' 视为 alias_all
+    // 按 target 的 scope 决定过滤逻辑(可能同一邮箱的多个 target scope 不同,取并集)
+    //   alias_all (用户语义: 整个邮箱)
+    //     → 推送该主邮箱下所有收信: 主邮箱直接收 + 任意用户生成的活跃别名收信
+    //     → 不区分别名归属,只要该主邮箱下收件人就推 (用 e.to 作为推送时的收件人身份)
+    //
+    //   account (用户语义: 别名邮箱)
+    //     → 只推订阅者 (wh.user_id) 自己生成的、status=active 的别名收信
+    //     → 不推主邮箱直接收的、不推别人公开邮箱下别人生成的别名
+    //
+    // 历史兼容: 旧的 alias_all 行为是「只别名不含主邮箱直收」(真子集),
+    //          旧 account 行为是「只主邮箱直收」(已被废除) —— 升级到 v8 后按新语义重新解释。
     const wantsAccount  = myTargets.some(t => t.scope === 'account');
     const wantsAliasAll = myTargets.some(t => t.scope !== 'account');
     const toLower = (s: string) => (s || '').toLowerCase();
@@ -82,18 +89,30 @@ export async function pollAndPush(env: Env, accountId: string): Promise<{ pushed
     let pickedAliasAll = false;
     let pickedAccount = false;
     if (wantsAliasAll && !wantsAccount) {
+      // 「整个邮箱」: 主邮箱直接收 + 该邮箱下所有用户的活跃别名收信
       const aliases = await listActiveAliasesForAccount(env, accountId);
-      if (!aliases.length) continue;                // 没有存活别名 = 无可推送
       const set = new Set(aliases);
-      filtered = emails.filter(e => set.has(toLower(e.to)));
+      filtered = emails.filter(e => {
+        const t = toLower(e.to);
+        return t === accountEmailLower || set.has(t);
+      });
       pickedAliasAll = filtered.length > 0;
     } else if (wantsAccount && !wantsAliasAll) {
-      filtered = emails.filter(e => toLower(e.to) === accountEmailLower);
+      // 「别名邮箱」: 仅订阅者 (wh.user_id) 自己生成的、活跃别名收信
+      const aliases = await listActiveAliasesForAccount(env, accountId, wh.user_id);
+      if (!aliases.length) continue;          // 没有任何自己生成的活跃别名 = 无可推送
+      const set = new Set(aliases);
+      filtered = emails.filter(e => set.has(toLower(e.to)));
       pickedAccount = filtered.length > 0;
     } else {
-      // 两种 scope 同时存在:合并别名集 + 主邮箱,任一命中即推送
-      const aliases = await listActiveAliasesForAccount(env, accountId);
-      const set = new Set(aliases);
+      // 两种 scope 同时存在(per-target 混合): 合并别名集 + 主邮箱,任一命中即推送
+      //   alias_all 取「所有用户活跃别名 + 主邮箱」
+      //   account 取「wh.user_id 自己生成的活跃别名」 —— 已是子集,合并不丢东西
+      const [allAliases, ownAliases] = await Promise.all([
+        listActiveAliasesForAccount(env, accountId),
+        listActiveAliasesForAccount(env, accountId, wh.user_id),
+      ]);
+      const set = new Set([...allAliases, ...ownAliases]);
       filtered = emails.filter(e => {
         const t = toLower(e.to);
         return t === accountEmailLower || set.has(t);

@@ -1,9 +1,11 @@
 /* ============================================================
- * webhook.js — Webhook 订阅页 (2026-09 重构)
+ * webhook.js — Webhook 订阅页 (2026-09 v3 重构)
  * ============================================================
- * - 一订阅多邮箱 (targets[])
- * - 同一订阅内所有 target 共用同一 scope (alias_all / account)
- * - 权限分离: 他人公开邮箱强制 alias_all, 后端再做最终校验
+ * - 一订阅多邮箱 (targets[]) + per-target scope (互不影响)
+ * - 每个邮箱独立一行: 复选框 + 邮箱 + 该邮箱专属 select
+ *   · 自己绑定的: 「别名邮箱」 / 「整个邮箱」 两者皆可选
+ *   · 他人公开的: select 物理只显示「别名邮箱」(权限分离硬约束)
+ * - 「一键监听」按钮: 「一键别名邮箱」 / 「一键整个邮箱」 两个预设
  * - 删除"每用户仅一个 webhook"约束,支持多个订阅
  * - 加 webhook_deliveries 投递记录,排查"前端显示 success 但飞书没收到"
  * ============================================================ */
@@ -14,12 +16,17 @@ const WH_FORMAT_LABEL = {
   text: '纯文本',
   json: '原始 JSON',
 };
+// 数据库 scope 值 → UI 文案
 const WH_SCOPE_LABEL = {
-  alias_all: '全部存活别名',
-  account: '整个邮箱',
+  alias_all: '整个邮箱',
+  account: '别名邮箱',
+};
+// 数据库 scope 值 → UI 详细说明 (用于 option 文本)
+const WH_SCOPE_HINT = {
+  alias_all: '整个邮箱 (推该邮箱下所有收信)',
+  account: '别名邮箱 (仅自己生成的、还活着的别名)',
 };
 
-// ============ 本地缓存 ============
 const WH_CACHE_KEY = 'mail_alias_webhooks_v1';
 function getCachedWebhooks() {
   try { return JSON.parse(localStorage.getItem(WH_CACHE_KEY) || 'null'); } catch { return null; }
@@ -34,13 +41,16 @@ async function initWebhookPage() {
     catch { State.availableAccounts = []; }
   }
   renderWhAccountCheckboxes(State.availableAccounts || []);
-  onWhSelectionChange();
+  updateWhHint();
   const cached = getCachedWebhooks();
   if (cached) renderWebhooks(cached);
   loadWebhooks(true);
 }
 
-// 多选邮箱列表(自己 / 他人分组),绑定 change → onWhSelectionChange
+// 多选邮箱列表(自己 / 他人分组)
+// 每行: 复选框 + 邮箱地址 + owner + 该邮箱专属 select (只两个选项)
+//   自己绑定的: 「整个邮箱」 / 「别名邮箱」 都可选
+//   他人公开的: select 物理只一个 option 「别名邮箱」(disabled)
 function renderWhAccountCheckboxes(list) {
   const box = document.getElementById('whAccountList');
   if (!box) return;
@@ -50,33 +60,65 @@ function renderWhAccountCheckboxes(list) {
   }
   const own = list.filter(a => a.is_own);
   const other = list.filter(a => !a.is_own);
+
+  const renderRow = (a, groupLabel) => {
+    const isOwn = !!a.is_own;
+    // 自己绑定的两个 option;他人公开的物理只一个
+    const scopeOptions = isOwn
+      ? `<option value="alias_all">${WH_SCOPE_HINT.alias_all}</option>
+         <option value="account">${WH_SCOPE_HINT.account}</option>`
+      : `<option value="account">${WH_SCOPE_HINT.account}</option>`;
+    // 默认值:自己绑定的默认「整个邮箱」(更常用),他人的默认「别名邮箱」(唯一可选)
+    const defaultScope = isOwn ? 'alias_all' : 'account';
+    const ownerTag = isOwn ? '' : ` <small style="opacity:.6">· [${esc(a.owner)}]</small>`;
+    return `<label class="item" data-is-own="${isOwn ? '1' : '0'}" title="${esc(a.email)}">
+      <input type="checkbox" value="${esc(a.id)}" data-is-own="${isOwn ? '1' : '0'}" data-email="${esc(a.email)}" data-scope="${defaultScope}">
+      <span class="item-email">${esc(a.email)}${ownerTag} <small style="opacity:.6">(${esc(a.provider)})</small></span>
+      <select class="item-scope" data-for="${esc(a.id)}" ${isOwn ? '' : 'disabled'} onchange="onItemScopeChange('${esc(a.id)}', this.value)">
+        ${scopeOptions}
+      </select>
+    </label>`;
+  };
+
   const html = [];
   html.push(`<div class="group">
-    <div class="group-label">我自己的 (${own.length})</div>`);
+    <div class="group-label">我自己的 <span class="count">(${own.length})</span></div>`);
   if (!own.length) html.push('<div class="empty">你还没有绑定邮箱</div>');
-  for (const a of own) {
-    html.push(`<label class="item" title="${esc(a.email)}">
-      <input type="checkbox" value="${esc(a.id)}" data-is-own="1" data-email="${esc(a.email)}">
-      <span>${esc(a.email)} <small style="opacity:.6">(${esc(a.provider)})</small></span>
-    </label>`);
-  }
+  for (const a of own) html.push(renderRow(a, 'own'));
   html.push('</div>');
   html.push(`<div class="group">
-    <div class="group-label">他人公开 (${other.length})</div>`);
+    <div class="group-label">他人公开 <span class="count">(${other.length})</span></div>`);
   if (!other.length) html.push('<div class="empty">暂无可用的他人公开邮箱</div>');
-  for (const a of other) {
-    html.push(`<label class="item" title="${esc(a.email)}">
-      <input type="checkbox" value="${esc(a.id)}" data-is-own="0" data-email="${esc(a.email)}" data-owner="${esc(a.owner)}">
-      <span>[${esc(a.owner)}] ${esc(a.email)} <small style="opacity:.6">(${esc(a.provider)})</small></span>
-    </label>`);
-  }
+  for (const a of other) html.push(renderRow(a, 'other'));
   html.push('</div>');
   box.innerHTML = html.join('');
-  // change 事件: 选择变化 → 触发 onWhSelectionChange
-  box.onchange = onWhSelectionChange;
+
+  // change 事件: 选择变化 → 同步 data-scope + 更新 hint
+  box.onchange = (e) => {
+    const t = e.target;
+    if (t && t.tagName === 'INPUT' && t.type === 'checkbox') {
+      t.setAttribute('data-scope', t.checked ? (t.parentElement.querySelector('.item-scope')?.value || 'alias_all') : t.getAttribute('data-scope'));
+      updateWhHint();
+    }
+  };
 }
 
-// 已勾选的目标列表
+// 单个邮箱的 select 改变时, 同步对应 checkbox 的 data-scope
+function onItemScopeChange(mailAccountId, scope) {
+  const box = document.getElementById('whAccountList');
+  if (!box) return;
+  const cb = box.querySelector(`input[type=checkbox][value="${cssEscape(mailAccountId)}"]`);
+  if (cb) cb.setAttribute('data-scope', scope);
+  updateWhHint();
+}
+
+// cssEscape polyfill (避免 ID 含特殊字符时 querySelector 抛错)
+function cssEscape(s) {
+  if (window.CSS && CSS.escape) return CSS.escape(String(s));
+  return String(s).replace(/[^a-zA-Z0-9_\-]/g, c => '\\' + c);
+}
+
+// 已勾选的目标(含 per-target scope)
 function getSelectedTargets() {
   const box = document.getElementById('whAccountList');
   if (!box) return [];
@@ -84,45 +126,97 @@ function getSelectedTargets() {
     mail_account_id: c.value,
     is_own: c.getAttribute('data-is-own') === '1',
     email: c.getAttribute('data-email'),
+    scope: c.getAttribute('data-scope') || (c.getAttribute('data-is-own') === '1' ? 'alias_all' : 'account'),
   }));
 }
 
-// 选择变化时:动态启用/禁用「整个邮箱」scope,并给出可读提示
-// 规则:
-//   - 没有任何 own checkbox 被勾选时,直接把"整个邮箱"option 从 DOM 移掉,
-//     避免出现"灰色文字但能点"的歧义;相应提示永远写在 hint 上。
-//   - 至少一个 own 被勾选时,把它加回来并 enabled。
-function onWhSelectionChange() {
+// 根据勾选情况, 更新底部 hint 文案
+function updateWhHint() {
+  const hint = document.getElementById('whAccountHint');
+  if (!hint) return;
   const tgts = getSelectedTargets();
-  const hasOwnSel = tgts.some(t => t.is_own);
-  const hasOtherSel = tgts.some(t => !t.is_own);
-  const scopeSel = document.getElementById('whScope');
-  const hint = document.getElementById('whScopeHint');
-  if (!scopeSel || !hint) return;
-  const rebuildScopeOptions = () => {
-    // 先移除可能存在的 account option,再按需加入
-    const old = document.getElementById('whScopeAccountOption');
-    if (old) old.remove();
-    if (!hasOwnSel) return; // 没有 own 不加
-    const opt = document.createElement('option');
-    opt.value = 'account';
-    opt.id = 'whScopeAccountOption';
-    opt.textContent = '整个邮箱（推送该主邮箱直接收信，不含别名）';
-    scopeSel.appendChild(opt);
-    if (scopeSel.value !== 'account') scopeSel.value = 'alias_all';
-  };
-  rebuildScopeOptions();
   if (!tgts.length) {
-    hint.textContent = '请先在「监听主邮箱」至少勾选一个;若勾选了他人公开邮箱,则只支持「全部存活别名」。';
-  } else if (!hasOwnSel) {
-    hint.innerHTML = '<span style="color:#d97706">⚠ 所选全部为他人公开邮箱,只能监听「全部存活别名」,「整个邮箱」已被移除,你无法选择。</span>';
-  } else if (hasOtherSel) {
-    hint.innerHTML = '提示: 勾选了他人公开邮箱。「整个邮箱」只对你自己的邮箱生效,他人邮箱始终按「全部存活别名」收件。';
-  } else {
-    hint.textContent = '已勾选自己绑定的邮箱,可按需选择「整个邮箱」或「全部存活别名」。';
+    hint.innerHTML = '勾选要监听的邮箱,每个邮箱右侧选择监听方式:「别名邮箱」= 仅自己生成的、还活着的别名收信;「整个邮箱」= 该邮箱下所有收信(主邮箱直收 + 所有别名)。他人公开邮箱只能选「别名邮箱」。';
+    return;
   }
+  const hasOwn = tgts.some(t => t.is_own);
+  const hasOther = tgts.some(t => !t.is_own);
+  const ownWhole = tgts.filter(t => t.is_own && t.scope === 'alias_all').length;
+  const ownAlias = tgts.filter(t => t.is_own && t.scope === 'account').length;
+  const otherCount = tgts.filter(t => !t.is_own).length;
+  const parts = [];
+  if (ownWhole) parts.push(`<b>${ownWhole}</b> 个自己邮箱: 整个邮箱`);
+  if (ownAlias) parts.push(`<b>${ownAlias}</b> 个自己邮箱: 别名邮箱`);
+  if (otherCount) parts.push(`<b>${otherCount}</b> 个他人公开邮箱: 别名邮箱(强制)`);
+  hint.innerHTML = `已选 — ${parts.join(' · ')}`;
 }
 
+// ============ 一键监听弹窗 ============
+// 提供两个预设:
+//   「一键别名邮箱」: 所有可用邮箱(自己的 + 他人公开的)默认勾选,scope 全部 account (别名邮箱)
+//   「一键整个邮箱」: 自己绑定的默认勾选 scope=alias_all(整个邮箱),他人公开默认勾选 scope=account
+function openQuickListenModal() {
+  if (!State.availableAccounts || !State.availableAccounts.length) {
+    toast('邮箱列表为空', 'warning');
+    return;
+  }
+  const own = State.availableAccounts.filter(a => a.is_own);
+  const other = State.availableAccounts.filter(a => !a.is_own);
+  const body = `
+    <p class="form-hint" style="margin-bottom:14px">
+      选择预设后,会自动勾选所有可用邮箱,并为每个邮箱设置对应的监听方式。<br>
+      你可在勾选后再手动调整任一邮箱的选择,创建前完全可改。
+    </p>
+    <div class="quick-listen-grid">
+      <div class="quick-card" data-preset="alias_all">
+        <div class="qc-title">一键别名邮箱</div>
+        <div class="qc-desc">所有邮箱(自己 + 他人)全部按「别名邮箱」监听 — 仅推自己生成的、还活着的别名收信。</div>
+        <div class="qc-stat">自己 ${own.length} 个 · 他人 ${other.length} 个</div>
+      </div>
+      <div class="quick-card" data-preset="mixed">
+        <div class="qc-title">一键整个邮箱</div>
+        <div class="qc-desc">自己绑定的全部按「整个邮箱」监听,他人公开的按「别名邮箱」监听 — 自己的全部收信不漏,他人只收别名。</div>
+        <div class="qc-stat">自己 ${own.length} 个 (整个邮箱) · 他人 ${other.length} 个 (别名邮箱)</div>
+      </div>
+    </div>
+  `;
+  showModal('一键监听', body, '');
+  // 事件: 点击 quick-card 应用预设
+  document.querySelectorAll('.quick-card').forEach(card => {
+    card.onclick = () => {
+      const preset = card.getAttribute('data-preset');
+      applyQuickListenPreset(preset);
+      closeModal();
+      toast('已应用预设,请检查邮箱列表', 'success');
+    };
+  });
+}
+
+function applyQuickListenPreset(preset) {
+  const box = document.getElementById('whAccountList');
+  if (!box) return;
+  const items = box.querySelectorAll('label.item');
+  items.forEach(item => {
+    const cb = item.querySelector('input[type=checkbox]');
+    const sel = item.querySelector('.item-scope');
+    if (!cb || !sel) return;
+    const isOwn = cb.getAttribute('data-is-own') === '1';
+    let scope;
+    if (preset === 'alias_all') {
+      // 一键别名邮箱: 全部 account
+      scope = 'account';
+    } else {
+      // 一键整个邮箱 (mixed): 自己 = alias_all, 他人 = account
+      scope = isOwn ? 'alias_all' : 'account';
+    }
+    cb.checked = true;
+    sel.value = scope;
+    cb.setAttribute('data-scope', scope);
+  });
+  updateWhHint();
+}
+
+// ============ 列表加载 / 渲染 ============
 async function loadWebhooks(silent) {
   const box = document.getElementById('whList');
   if (!box) return;
@@ -152,11 +246,12 @@ function renderWebhooks(list) {
       ? targets.map(t => {
           const cls = t.is_own ? 'own' : 'other';
           const scopeText = WH_SCOPE_LABEL[t.scope] || t.scope;
-          return `<span class="chip ${cls}" title="${esc(scopeText)}">${esc(t.mail_account_email || t.mail_account_id)} · ${esc(scopeText)}</span>`;
+          return `<span class="chip ${cls}" title="${esc(scopeText)}">${esc(t.mail_account_email || t.mail_account_id)}<span class="chip-scope">· ${esc(scopeText)}</span></span>`;
         }).join('')
       : '<span class="chip" style="opacity:.6">（未配置 target,旧数据兼容中）</span>';
     const hasOther = targets.some(t => !t.is_own);
-    const accountCount = targets.filter(t => t.scope === 'account').length;
+    const wholeCount = targets.filter(t => t.scope === 'alias_all').length;
+    const aliasOnlyCount = targets.filter(t => t.scope === 'account').length;
     return `
       <div class="mail-item" style="margin-bottom:10px" data-webhook-id="${esc(w.id)}">
         <div class="mail-head" style="cursor:default; flex-wrap:wrap">
@@ -164,7 +259,8 @@ function renderWebhooks(list) {
           <span class="badge badge-primary">${WH_FORMAT_LABEL[fmt] || fmt}</span>
           <span class="mono" style="font-size:12px; flex:1; min-width:0; word-break:break-all">${esc(w.url)}</span>
           ${hasOther ? '<span class="badge badge-warning" title="此订阅包含他人公开邮箱">含他人</span>' : ''}
-          ${accountCount > 0 ? `<span class="badge badge-info">${accountCount} 个整箱</span>` : ''}
+          ${wholeCount > 0 ? `<span class="badge badge-info">${wholeCount} 个整个邮箱</span>` : ''}
+          ${aliasOnlyCount > 0 ? `<span class="badge" style="background:var(--bg-2, #f1f5f9);color:var(--text-light)">${aliasOnlyCount} 个别名邮箱</span>` : ''}
         </div>
         <div class="mail-body" style="display:block; border-top:1px solid var(--border)">
           <div class="meta-row">
@@ -194,25 +290,13 @@ function renderWebhooks(list) {
 async function createWebhook() {
   const tgt = getSelectedTargets();
   if (!tgt.length) { toast('请至少勾选一个监听邮箱', 'warning'); return; }
-  const scopeSel = document.getElementById('whScope');
-  let scope = (scopeSel && scopeSel.value) || 'alias_all';
-  const hasMixed = tgt.some(t => t.is_own) && tgt.some(t => !t.is_own);
-  // per-target scope 降级,避免后端硬校验 403:
-  //  - 全部他人邮箱 → 全部 alias_all
-  //  - 混合勾选 + 全局 account → 他人邮箱降级为 alias_all,自己邮箱仍 account
-  //  - 单一自己的邮箱 + account → 保持
-  const finalizeScope = (t) => {
-    if (scope !== 'account') return scope;
-    if (t.is_own) return 'account';
-    return 'alias_all';
-  };
-  if (tgt.every(t => !t.is_own)) scope = 'alias_all';
+  // 每个邮箱的 scope 直接来自 data-scope, 不再 per-target 降级 (前端已禁止他人公开选 alias_all)
   const events = [];
   if (document.getElementById('whEvNew').checked) events.push('new_mail');
   if (document.getElementById('whEvUnread').checked) events.push('unread');
   if (!events.length) { toast('请至少选择一个事件', 'warning'); return; }
   const body = {
-    targets: tgt.map(t => ({ mail_account_id: t.mail_account_id, scope: finalizeScope(t) })),
+    targets: tgt.map(t => ({ mail_account_id: t.mail_account_id, scope: t.scope })),
     url: document.getElementById('whUrl').value.trim(),
     format: document.getElementById('whFormat').value,
     events: events.join(','),
@@ -224,7 +308,7 @@ async function createWebhook() {
     toast('订阅创建成功', 'success');
     ['whUrl', 'whSecret'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     // 保留勾选,只清 URL/Secret
-    onWhSelectionChange();
+    updateWhHint();
     loadWebhooks();
   } catch (err) { toast(err.message, 'error', 4200); }
 }
@@ -232,14 +316,11 @@ async function createWebhook() {
 async function testWebhook(id) {
   try {
     const data = await api('/api/webhooks/' + id + '/test', { method: 'POST' });
-    // 后端已做平台级判定:飞书/钉钉「HTTP 200 但业务码非 0」也算失败,
-    // 此时 response 里带的是平台真实错误(如 unsupported tag),直接展示便于定位。
     const detail = data.response ? ` — ${String(data.response).slice(0, 220)}` : '';
     if (data.success) {
       toast(`测试推送成功${data.status ? ' (HTTP ' + data.status + ')' : ''}:${data.hint || ''}`, 'success', 4200);
     } else {
       toast(`推送失败${data.status ? ' (HTTP ' + data.status + ')' : ''}:${detail || (data.hint || '')}`, 'error', 6500);
-      // 失败时自动展开投递记录,便于看到完整原始响应
       const card = document.querySelector(`.mail-item[data-webhook-id="${id}"]`);
       const wrap = card && card.querySelector('.webhook-deliveries-wrap');
       if (wrap) {

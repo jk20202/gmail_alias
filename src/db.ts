@@ -17,7 +17,12 @@ export const ALIAS_HISTORY_PAGE_SIZE = 10;
 // 因此这里做运行时的一次性迁移(用 KV 记录版本号,避免每次请求都跑 DDL)
 // 注意: 每次新增列 / 表,必须 +1 本版本号,否则 ensureSchema 会因 KV 已记录旧版本而直接返回,
 // 导致新迁移(如 users.google_client_id)在生产环境永远不执行。
-const SCHEMA_VERSION = '7';
+// v8 (2026-09-02): webhook scope 语义重定义
+//   alias_all → "整个邮箱" (推该邮箱下所有收信)
+//   account   → "别名邮箱" (只推订阅者自己生成的、还活着的别名)
+//   旧 alias_all 行为是「只别名」,新 alias_all 是「别名+主邮箱直收」 —— 超集语义可平滑兼容;
+//   旧 account 行为是「只主邮箱直收」,新 account 是「只自己存活别名」 —— 语义改变,前端展示需提示。
+const SCHEMA_VERSION = '8';
 
 export async function ensureSchema(env: Env): Promise<void> {
   try {
@@ -1300,12 +1305,20 @@ export async function getWebhooksForAccount(env: Env, accountId: string): Promis
   return list;
 }
 
-// 查某邮箱账号下当前所有存活的别名 (用于 webhook scope=alias_all 时过滤收信)
+// 查某邮箱账号下当前所有存活的别名 (用于 webhook scope=alias_all / account 时过滤收信)
 // 返回的 full 字段已 lower-case,便于大小写不敏感匹配 e.to
-export async function listActiveAliasesForAccount(env: Env, mailAccountId: string): Promise<string[]> {
+//
+// userId 提供时: 仅返回该 user_id 在该主邮箱下生成的、且 status=active 的别名。
+//   用于新的 "account" scope(别名邮箱),即"只推订阅者自己生成的、还活着的别名"。
+// userId 不提供: 返回该邮箱下所有用户的活跃别名 (向后兼容旧的 alias_all scope 取别名集)。
+export async function listActiveAliasesForAccount(
+  env: Env, mailAccountId: string, userId?: string
+): Promise<string[]> {
   const { results } = await env.DB.prepare(
-    "SELECT full FROM user_aliases WHERE mail_account_id = ? AND status = 'active'"
-  ).bind(mailAccountId).all<{ full: string }>();
+    userId
+      ? `SELECT full FROM user_aliases WHERE mail_account_id = ? AND user_id = ? AND status = 'active'`
+      : `SELECT full FROM user_aliases WHERE mail_account_id = ? AND status = 'active'`
+  ).bind(...(userId ? [mailAccountId, userId] : [mailAccountId])).all<{ full: string }>();
   return (results || []).map(r => r.full.toLowerCase());
 }
 

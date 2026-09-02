@@ -171,15 +171,28 @@ export interface FetchParams {
   all_aliases?: boolean;       // 聚合查询当前用户全部生效别名
 }
 
-// Webhook 订阅目标: 一订阅多邮箱 (2026-09 改造)
-// scope: alias_all = 推送该邮箱下所有存活的别名邮件;
-//        account  = 推送该主邮箱的直接收信(不含别名)
+// Webhook 订阅目标: 一订阅多邮箱 (2026-09 改造,v3 重定义语义 2026-09-02)
+//
+//   scope = 'alias_all' → "整个邮箱" (推送该主邮箱下所有收信)
+//       - 别名收的: 用别名地址身份推过来(用户能看到是哪个别名收到)
+//       - 主邮箱直接收的: 用主邮箱地址身份推过来
+//       - 不管别名是别人公开的、是否还存活 —— 只要收信,就推
+//       - 他人公开邮箱**不允许**选此项 (你不是邮箱主,无权监听主邮箱直收)
+//
+//   scope = 'account' → "别名邮箱" (只推自己生成的、还活着的别名收信)
+//       - 仅匹配: 收件地址 ∈ (webhook 订阅者的 user_id 在该主邮箱下生成的、状态=active 的别名集合)
+//       - 不推主邮箱直接收的
+//       - 他人公开邮箱**只能**选此项 (权限分离硬约束)
+//
 // 已废弃: alias(指定别名) —— 用户已明确不需要此功能
 export interface WebhookTarget {
   mail_account_id: string;
   // 兼容列表展示用:含邮箱地址和归属(自己/他人),不返回他人 token 等敏感字段
   mail_account_email?: string;
   is_own?: boolean;
+  // 注意:这是数据库里的枚举值;前端 UI 应展示为「整个邮箱 / 别名邮箱」对应别名
+  //   alias_all → "整个邮箱"
+  //   account   → "别名邮箱"
   scope: 'alias_all' | 'account';
 }
 
