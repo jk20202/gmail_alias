@@ -1124,7 +1124,8 @@ export async function webhookCreate(ctx: Ctx): Promise<Response> {
 // 全量修改一个 webhook:url / secret / events / format / is_active / 监听邮箱列表
 export async function webhookUpdate(ctx: Ctx): Promise<Response> {
   const user = await requireSession(ctx);
-  const id = ctx.url.pathname.split('/').slice(-2, -1)[0];
+  // 路径 PATCH /api/webhooks/:id,id 就是最后一段(没有 /test /format 尾段)
+  const id = ctx.url.pathname.split('/').pop()!;
   const body = ctx.body || {};
   const opts: {
     url?: string;
