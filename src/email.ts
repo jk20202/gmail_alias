@@ -114,14 +114,22 @@ interface Resolved {
   aliasId: string | null;
 }
 
-// 归属判定:别名 > 主邮箱 > 专属转发地址
+// 归属判定:别名 > 主邮箱 > 专属转发地址 > CATCHALL
 // 全程只发 3 条 SQL(批量 IN 查询),避免逐候选查询拖长收信耗时。
-async function resolveOwner(env: Env, candidates: string[], envelopeTo: string): Promise<Resolved | null> {
+// 导出供离线测试(tmp/verify_resolve_owner.js)。
+export async function resolveOwner(env: Env, candidates: string[], envelopeTo: string): Promise<Resolved | null> {
   // 1) 批量匹配别名
+  //
+  // ⚠ 判据必须是 status <> 'archived',不能是 status = 'active'!
+  //   别名有 1 小时 TTL,过期由 expireStaleAliases **惰性**标记(用户打开别名页才刷)。
+  //   若这里要求 active,别名一过期,发给它的邮件就匹配不上 → 掉到第 3 步的
+  //   forward_address 兜底 → 被随机归到某个共享同一转发地址的邮箱(详见第 3 步注释),
+  //   用户会发现"邮件莫名其妙进了别人的邮箱 / 干脆找不到"。
+  //   'archived' 才是用户主动归档(明确停止收信),只有它该被排除。
   if (candidates.length) {
     const ph = candidates.map(() => '?').join(',');
     const { results } = await env.DB.prepare(
-      `SELECT id, mail_account_id, full FROM user_aliases WHERE full IN (${ph}) AND status = 'active'`
+      `SELECT id, mail_account_id, full FROM user_aliases WHERE full IN (${ph}) AND status <> 'archived'`
     ).bind(...candidates).all<{ id: string; mail_account_id: string; full: string }>();
     const rows = results || [];
     for (const cand of candidates) {          // 按优先级取第一个命中的
@@ -141,9 +149,17 @@ async function resolveOwner(env: Env, candidates: string[], envelopeTo: string):
       if (hit) return { accountId: hit.id, aliasId: null };
     }
   }
-  // 3) 兜底: 信封收件人 = 专属转发地址
+  // 3) 兜底: 信封收件人 = 该邮箱的**专属**转发地址
+  //
+  // ⚠ 必须先排除「统一转发地址」(UNIFIED_FORWARD_ADDRESS,如 alle@jkf.kdns.fr):
+  //   它被设计成**对所有邮箱一致**,本身不携带任何归属信息。拿它去查 mail_accounts
+  //   会命中**多行**,而 .first() 没有 ORDER BY —— 归到哪个邮箱完全随机。
+  //   线上实证(2026-09-03): 一封匹配不到别名的邮件被归到了 vy@fei.bgr,
+  //   而 CATCHALL_ACCOUNT_ID 明明配的是 jinkaifu2002@outlook.com(va6ae88e5)。
+  //   统一地址应直接跳过本步,交给第 4 步的 CATCHALL 兜底,结果才是确定的。
   const env3 = extractEmails(envelopeTo);
-  if (env3.length) {
+  const unified = (env.UNIFIED_FORWARD_ADDRESS || '').trim().toLowerCase();
+  if (env3.length && env3[0] !== unified) {
     const row = await env.DB.prepare('SELECT id FROM mail_accounts WHERE forward_address = ?')
       .bind(env3[0]).first<{ id: string }>();
     if (row) return { accountId: row.id, aliasId: null };
