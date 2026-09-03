@@ -38,7 +38,6 @@ async function initMailPage() {
   resetMailState();
   await loadAvailableAccounts();
   await loadAliases();
-  await loadCatchallConfigMail();
   await fetchUnreadCounts();
   bindSearchBox();
   bindInfiniteScroll();
@@ -51,12 +50,9 @@ async function initMailPage() {
 }
 
 // 邮件页加载统一转发地址(用于复制)
-async function loadCatchallConfigMail() {
-  try {
-    const data = await api('/api/config/catchall');
-    if (data && data.forward_address) unifiedForward = data.forward_address;
-  } catch (e) { /* ignore */ }
-}
+// 注: 已移除 —— 邮件页不再需要展示统一转发地址;该地址只在「我的账户」页展示与复制。
+//     这里原先在「直接收信的邮箱」行的复制按钮复制了统一地址,导致用户点击某邮箱旁的
+//     复制按钮却复制到 alle@jkf.kdns.fr,与用户预期(复制该邮箱地址)不符。
 
 // 获取各别名/邮箱的未读数,用于小板块红点
 async function fetchUnreadCounts() {
@@ -218,7 +214,7 @@ function renderActiveAliases() {
         <div class="ar-top">
           <div class="ar-addr">${esc(a.email)}${badge}</div>
           <div class="ar-actions-row" onclick="event.stopPropagation()">
-            <button class="icon-btn" title="复制统一转发地址" onclick="copyUnifiedForward(event)">
+            <button class="icon-btn" title="复制邮箱地址" onclick="copyText('${esc(a.email)}'); event.stopPropagation();">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
             </button>
           </div>
@@ -260,13 +256,6 @@ function renderActiveAliases() {
       ${unread ? `<span class="ar-unread-badge">${unread > 99 ? '99+' : unread}</span>` : ''}
     </div>`;
   }).join('');
-}
-
-// 复制统一转发地址（从 account 页加载的全局变量 unifiedForward）
-function copyUnifiedForward(e) {
-  e && e.stopPropagation();
-  if (typeof unifiedForward === 'string' && unifiedForward) copyText(unifiedForward);
-  else toast('统一转发地址尚未加载', 'error');
 }
 
 // 生效列表中的「删除」按钮已改为「停用」。真正删除请去「历史别名」。
