@@ -128,7 +128,13 @@ export async function pollAndPush(env: Env, accountId: string): Promise<{ pushed
     // KV 去重:只推送未推送过的邮件。
     // 原本是「每封串行 get + put」,一个窗口内 50 封就是 100 次串行 KV 往返 ——
     // 这是推送延迟的主要来源之一(用户实测超过 3 秒)。改成并发批量读写后只剩 1 次往返耗时。
-    const dedupKeys = filtered.map(e => `wh:pushed:${accountId}:${e.id}`);
+    //
+    // ⚠ key 必须带 wh.id!
+    //   这段去重在 `for (const wh of webhooks)` 循环**内部**,如果 key 里不带订阅 id,
+    //   第一个订阅推送成功后就会把 key 标记为已推送,后续所有订阅查到标记便全部跳过 ——
+    //   结果是「用户建了 N 个订阅,但同一封邮件只有第一个匹配的订阅收得到,其余全被吞」。
+    //   (线上实证: 5 个订阅里只有 we6806558 收到,另外 4 个投递记录为 0)
+    const dedupKeys = filtered.map(e => `wh:pushed:${wh.id}:${accountId}:${e.id}`);
     const marks = await Promise.all(dedupKeys.map(k => env.KV.get(k).catch(() => null)));
     const newEmails: Email[] = [];
     const newKeys: string[] = [];

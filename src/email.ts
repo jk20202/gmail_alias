@@ -308,7 +308,9 @@ export async function emailHandler(
 //    - 该函数异常一律吞掉(已被 waitUntil 包裹,失败不会影响 emailHandler 主体结果)
 //
 //  一个新邮件 → 一次 push 触发。push 内部仍走完整的去重 + 过滤 + 平台投递流程,
-//  所以同一封邮件不会重复推送(因为 pollAndPush 会通过 KV 去重 key `wh:pushed:<aid>:<mid>`)。
+//  所以同一封邮件对**同一个订阅**不会重复推送
+//  (pollAndPush 的 KV 去重 key 为 `wh:pushed:<whid>:<aid>:<mid>`,带订阅 id,
+//   这样 N 个订阅各自独立去重,互不吞并)。
 export async function schedulePush(env: Env, accountId: string): Promise<void> {
   try {
     if (!accountId) return;
