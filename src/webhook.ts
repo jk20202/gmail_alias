@@ -11,7 +11,7 @@
 //   json     原始 JSON 载荷(含完整 body / html / 附件列表 / 签名头)
 import type { Env, Email, Webhook } from './types';
 import { hmacSha256, nowISO, htmlToText } from './utils';
-import { getWebhooksForAccount, logWebhookDelivery, getMailAccountById, listActiveAliasesForAccount } from './db';
+import { getWebhooksForAccount, logWebhookDelivery, getMailAccountById, listAliasAddressesForPush } from './db';
 import { fetchEmails } from './emailService';
 
 // 推送载荷标准格式
@@ -73,54 +73,36 @@ export async function pollAndPush(env: Env, accountId: string): Promise<{ pushed
 
     // 按 target 的 scope 决定过滤逻辑(可能同一邮箱的多个 target scope 不同,取并集)
     //   alias_all (用户语义: 整个邮箱)
-    //     → 推送该主邮箱下所有收信: 主邮箱直接收 + 任意用户生成的活跃别名收信
-    //     → 不区分别名归属,只要该主邮箱下收件人就推 (用 e.to 作为推送时的收件人身份)
+    //     → 推送该主邮箱下**全部**收信: 主邮箱直收 + 任意别名(含已过期)收信
     //
     //   account (用户语义: 别名邮箱)
-    //     → 只推订阅者 (wh.user_id) 自己生成的、status=active 的别名收信
-    //     → 不推主邮箱直接收的、不推别人公开邮箱下别人生成的别名
+    //     → 只推订阅者 (wh.user_id) 自己名下的别名收信,**不区分别名是否已过期**
     //
-    // 历史兼容: 旧的 alias_all 行为是「只别名不含主邮箱直收」(真子集),
-    //          旧 account 行为是「只主邮箱直收」(已被废除) —— 升级到 v8 后按新语义重新解释。
+    // ⚠ 重要: 这里绝不能用「活跃别名(status='active')」做过滤!
+    //   别名自带 1 小时 TTL,而过期是**惰性**标记的(expireStaleAliases 只在用户打开
+    //   别名列表页时才把过期行刷成 expired)。用活跃别名过滤会造成荒谬的耦合:
+    //     - 用户不打开网页 → 早已过期的别名仍是 active → 一直推
+    //     - 用户打开网页看一眼(往往正是为了确认"有没有推送") → 全部刷成 expired
+    //       → 活跃别名归零 → 订阅 silent 停摆,之后再也收不到任何推送
+    //   「某封邮件发到了我的某个别名」是既成事实,不该因为别名后来过期就漏推。
+    //   (线上实证: admin 登录后 active_alias_count=0,4 个 scope=account 订阅投递记录为 0)
     const wantsAccount  = myTargets.some(t => t.scope === 'account');
     const wantsAliasAll = myTargets.some(t => t.scope !== 'account');
     const toLower = (s: string) => (s || '').toLowerCase();
-    const accountEmailLower = toLower(account.email);
 
     let filtered: Email[];
-    let pickedAliasAll = false;
-    let pickedAccount = false;
     if (wantsAliasAll && !wantsAccount) {
-      // 「整个邮箱」: 主邮箱直接收 + 该邮箱下所有用户的活跃别名收信
-      const aliases = await listActiveAliasesForAccount(env, accountId);
-      const set = new Set(aliases);
-      filtered = emails.filter(e => {
-        const t = toLower(e.to);
-        return t === accountEmailLower || set.has(t);
-      });
-      pickedAliasAll = filtered.length > 0;
+      // 「整个邮箱」: 该主邮箱下的全部收信,不做任何地址匹配
+      filtered = emails;
     } else if (wantsAccount && !wantsAliasAll) {
-      // 「别名邮箱」: 仅订阅者 (wh.user_id) 自己生成的、活跃别名收信
-      const aliases = await listActiveAliasesForAccount(env, accountId, wh.user_id);
-      if (!aliases.length) continue;          // 没有任何自己生成的活跃别名 = 无可推送
+      // 「别名邮箱」: 仅订阅者 (wh.user_id) 自己名下的别名收信
+      const aliases = await listAliasAddressesForPush(env, accountId, wh.user_id);
+      if (!aliases.length) continue;          // 自己名下没有任何别名 = 无可推送
       const set = new Set(aliases);
       filtered = emails.filter(e => set.has(toLower(e.to)));
-      pickedAccount = filtered.length > 0;
     } else {
-      // 两种 scope 同时存在(per-target 混合): 合并别名集 + 主邮箱,任一命中即推送
-      //   alias_all 取「所有用户活跃别名 + 主邮箱」
-      //   account 取「wh.user_id 自己生成的活跃别名」 —— 已是子集,合并不丢东西
-      const [allAliases, ownAliases] = await Promise.all([
-        listActiveAliasesForAccount(env, accountId),
-        listActiveAliasesForAccount(env, accountId, wh.user_id),
-      ]);
-      const set = new Set([...allAliases, ...ownAliases]);
-      filtered = emails.filter(e => {
-        const t = toLower(e.to);
-        return t === accountEmailLower || set.has(t);
-      });
-      pickedAliasAll = filtered.length > 0;
-      pickedAccount  = filtered.length > 0;
+      // 两种 scope 同时存在(per-target 混合): alias_all「整个邮箱」占优
+      filtered = emails;
     }
 
     if (filtered.length === 0) continue;
@@ -155,7 +137,11 @@ export async function pollAndPush(env: Env, accountId: string): Promise<{ pushed
       delivered_at: nowISO(),
       mail_account_id: accountId,
       email: account.email,
-      to_alias: pickedAccount ? account.email : (newEmails[0]?.to || undefined),
+      // 展示用: 取第一封邮件的实际收件人地址(命中说明)
+      // 原来是 `pickedAccount ? account.email : newEmails[0]?.to` —— account 作用域下
+      // 会把**主邮箱**当成别名显示(卡片上写「收件人(别名) jinkaifu2002@outlook.com」),
+      // 恰好丢掉用户最想看的别名地址。统一取实际收件人。
+      to_alias: newEmails[0]?.to || account.email,
       count: newEmails.length,
       emails: newEmails,
     };

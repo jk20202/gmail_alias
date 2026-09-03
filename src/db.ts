@@ -1353,6 +1353,25 @@ export async function listActiveAliasesForAccount(
   return (results || []).map(r => r.full.toLowerCase());
 }
 
+// v9.1: 推送侧专用 —— 列出某账号下的别名地址,**不按 status 过滤**(只排除已归档)。
+//
+// 为什么不能复用 listActiveAliasesForAccount(只要 status='active'):
+//   别名有 1 小时 TTL,而过期是惰性标记的 —— expireStaleAliases 只在用户打开别名
+//   列表页时才把过期行刷成 expired。若推送侧依赖 status='active',就会产生这种荒谬耦合:
+//     用户不打开网页  -> 早已过期的别名仍是 active -> 一直推
+//     用户打开网页查看 -> 全部刷成 expired,活跃别名归零 -> 订阅静默停摆,再也收不到
+//   「邮件发到了我的某个别名」是既成事实,不该因为别名后来过期就漏推。
+export async function listAliasAddressesForPush(
+  env: Env, mailAccountId: string, userId?: string
+): Promise<string[]> {
+  const { results } = await env.DB.prepare(
+    userId
+      ? `SELECT full FROM user_aliases WHERE mail_account_id = ? AND user_id = ? AND status <> 'archived'`
+      : `SELECT full FROM user_aliases WHERE mail_account_id = ? AND status <> 'archived'`
+  ).bind(...(userId ? [mailAccountId, userId] : [mailAccountId])).all<{ full: string }>();
+  return (results || []).map(r => r.full.toLowerCase());
+}
+
 // 获取所有有活跃 webhook 的邮箱账号ID (用于定时轮询)
 // 同时包含 webhook_targets 与旧 webhooks.mail_account_id 行。
 export async function getActiveWebhookAccountIds(env: Env): Promise<string[]> {
