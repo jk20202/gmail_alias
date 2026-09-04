@@ -27,14 +27,6 @@ const WH_SCOPE_HINT = {
   account: '别名邮箱 (仅自己生成的、还活着的别名)',
 };
 
-const WH_CACHE_KEY = 'mail_alias_webhooks_v1';
-function getCachedWebhooks() {
-  try { return JSON.parse(localStorage.getItem(WH_CACHE_KEY) || 'null'); } catch { return null; }
-}
-function setCachedWebhooks(list) {
-  try { localStorage.setItem(WH_CACHE_KEY, JSON.stringify(list || [])); } catch {}
-}
-
 async function initWebhookPage() {
   if (!State.availableAccounts || !State.availableAccounts.length) {
     try { State.availableAccounts = await api('/api/account/mail_accounts/available'); }
@@ -42,9 +34,9 @@ async function initWebhookPage() {
   }
   renderWhAccountCheckboxes(State.availableAccounts || []);
   updateWhHint();
-  const cached = getCachedWebhooks();
-  if (cached) renderWebhooks(cached);
-  loadWebhooks(true);
+  // 直接加载最新订阅列表。此前"先渲染 localStorage 缓存"会把旧缓存(可能只存了部分订阅)
+  // 显示出来,且 loadWebhooks(true) 失败时被静默吞掉,导致"列表显示不全"(看到 1 个、实际 5 个)。
+  await loadWebhooks(false);
 }
 
 // 多选邮箱列表(自己 / 他人分组)
@@ -223,10 +215,10 @@ async function loadWebhooks(silent) {
   if (!silent) box.innerHTML = '<div class="loading"><span class="spinner"></span> 加载中...</div>';
   try {
     const list = await api('/api/webhooks');
-    setCachedWebhooks(list);
     renderWebhooks(list);
   } catch (err) {
-    if (!silent) box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
+    // 失败时显示可见错误(不再静默吞掉),避免列表静默停在旧状态
+    box.innerHTML = `<div class="mail-empty">${esc(err.message)}</div>`;
   }
 }
 
