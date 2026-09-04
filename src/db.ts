@@ -1743,6 +1743,24 @@ export async function getEmailRow(env: Env, id: string): Promise<EmailRow | null
   return await env.DB.prepare('SELECT * FROM emails WHERE id = ?').bind(id).first<EmailRow>();
 }
 
+// 按 id 批量取邮件行(管理员删除邮件前,先拿 raw_key 以便清理 R2)
+export async function getEmailRowsByIds(env: Env, ids: string[]): Promise<EmailRow[]> {
+  if (!ids.length) return [];
+  const { results } = await env.DB.prepare(
+    `SELECT * FROM emails WHERE id IN (${ids.map(() => '?').join(',')})`
+  ).bind(...ids).all<EmailRow>();
+  return results || [];
+}
+
+// 管理员物理删除邮件(D1 行)。R2 原始对象由调用方按 raw_key 另行清理。
+export async function deleteEmails(env: Env, ids: string[]): Promise<number> {
+  if (!ids.length) return 0;
+  const r = await env.DB.prepare(
+    `DELETE FROM emails WHERE id IN (${ids.map(() => '?').join(',')})`
+  ).bind(...ids).run();
+  return r.meta?.changes || 0;
+}
+
 // 标记已读(按邮件 id)
 export async function markEmailRead(env: Env, ids: string[]): Promise<number> {
   if (!ids.length) return 0;

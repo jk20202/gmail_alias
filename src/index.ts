@@ -57,6 +57,7 @@ const ROUTE_TABLE: RouteEntry[] = [
   // Admin - 其他
   buildRoute('GET',  '/api/admin/stats',        routes.adminStats),
   buildRoute('GET',  '/api/admin/logs',         routes.adminLogs),
+  buildRoute('POST', '/api/admin/emails/delete', routes.adminDeleteEmails),
   buildRoute('GET',  '/api/admin/settings',     routes.adminGetSettings),
   buildRoute('PUT',  '/api/admin/settings',     routes.adminUpdateSettings),
   buildRoute('GET',  '/api/admin/mail_accounts',     routes.adminListAllAccounts),

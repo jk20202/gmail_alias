@@ -232,8 +232,7 @@ export async function adminSetUserAlias(ctx: Ctx): Promise<Response> {
 
 export async function adminDeleteUser(ctx: Ctx): Promise<Response> {
   const admin = await requireAdmin(ctx);
-  const userId = ctx.url.pathname.split('/')[4];
-  // 通过 is_admin 字段判断,而非硬编码 id='admin'(因为用户 id 是随机 hex)
+  const userId = ctx.url.pathname.split('/')[4];  // 通过 is_admin 字段判断,而非硬编码 id='admin'(因为用户 id 是随机 hex)
   const targetUser = await db.getUserById(ctx.env, userId);
   if (!targetUser) return fail('用户不存在', 404);
   if (targetUser.is_admin) return fail('不能删除管理员账户');
@@ -1032,6 +1031,24 @@ export async function webEmailRaw(ctx: Ctx): Promise<Response> {
     'Access-Control-Allow-Origin': '*',
   });
   return new Response(obj.body, { status: 200, headers });
+}
+
+// ============ 管理员删除邮件(物理删除 D1 行 + 清理 R2 原始对象) ============
+// 用于清理错投/垃圾/测试邮件等,仅管理员可用。按 id 显式指定,不做模糊匹配。
+export async function adminDeleteEmails(ctx: Ctx): Promise<Response> {
+  const admin = await requireAdmin(ctx);
+  const ids: string[] = Array.isArray(ctx.body?.ids)
+    ? ctx.body.ids.map((s: unknown) => String(s)).filter(Boolean)
+    : [];
+  if (!ids.length) return fail('缺少邮件 id');
+  // 先取 raw_key,删除行后再尽力清理 R2 原始对象
+  const rows = await db.getEmailRowsByIds(ctx.env, ids);
+  const deleted = await db.deleteEmails(ctx.env, ids);
+  for (const r of rows) {
+    if (r.raw_key) { try { await ctx.env.EMAIL_RAW.delete(r.raw_key); } catch { /* R2 清理失败不影响主流程 */ } }
+  }
+  await db.addLog(ctx.env, admin.id, admin.username, '', 'delete_emails', `删除了 ${deleted} 封邮件`);
+  return ok({ deleted });
 }
 
 // 统一转发地址配置:返回系统配置的唯一收信地址(来自 UNIFIED_FORWARD_ADDRESS 环境变量)。
