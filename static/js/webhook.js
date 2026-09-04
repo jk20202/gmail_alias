@@ -27,6 +27,11 @@ const WH_SCOPE_HINT = {
   account: '别名邮箱 (仅自己生成的、还活着的别名)',
 };
 
+// 编辑状态: 非空表示正在编辑某订阅(id),提交走 PATCH 而非 POST
+let editingWebhookId = null;
+// 最近一次渲染的订阅列表缓存(编辑回填用)
+let webhookListCache = [];
+
 async function initWebhookPage() {
   if (!State.availableAccounts || !State.availableAccounts.length) {
     try { State.availableAccounts = await api('/api/account/mail_accounts/available'); }
@@ -225,13 +230,14 @@ async function loadWebhooks(silent) {
 function renderWebhooks(list) {
   const box = document.getElementById('whList');
   const countEl = document.getElementById('whCount');
-  if (countEl) countEl.textContent = String((list || []).length);
+  webhookListCache = list || [];
+  if (countEl) countEl.textContent = String(webhookListCache.length);
   if (!box) return;
-  if (!list || !list.length) {
+  if (!webhookListCache.length) {
     box.innerHTML = '<div class="mail-empty" style="padding:24px 16px">暂无订阅</div>';
     return;
   }
-  box.innerHTML = list.map(w => {
+  box.innerHTML = webhookListCache.map(w => {
     const fmt = w.format || 'card';
     const targets = w.targets || [];
     const fmtOptions = Object.keys(WH_FORMAT_LABEL)
@@ -243,34 +249,35 @@ function renderWebhooks(list) {
           return `<span class="chip ${cls}" title="${esc(scopeText)}">${esc(t.mail_account_email || t.mail_account_id)}<span class="chip-scope">· ${esc(scopeText)}</span></span>`;
         }).join('')
       : '<span class="chip" style="opacity:.6">（未配置 target）</span>';
-    const hasOther = targets.some(t => !t.is_own);
     return `
       <div class="wh-card" data-webhook-id="${esc(w.id)}">
-        <div class="wh-card-top">
-          <span class="badge ${w.is_active ? 'badge-success' : 'badge-gray'}">${w.is_active ? '启用' : '停用'}</span>
-          <span class="badge badge-primary">${WH_FORMAT_LABEL[fmt] || fmt}</span>
-          ${hasOther ? '<span class="badge badge-warning" title="此订阅包含他人公开邮箱">含他人</span>' : ''}
-          <div class="webhook-targets">${targetChips}</div>
-          <div class="wh-card-actions">
-            <button class="btn btn-secondary btn-sm" onclick="testWebhook('${esc(w.id)}')">测试</button>
-            <button class="btn btn-secondary btn-sm" onclick="toggleWebhookActive('${esc(w.id)}', ${!w.is_active})">${w.is_active ? '停用' : '启用'}</button>
-            <select class="form-control btn-sm wh-fmt-select" onchange="setWebhookFormat('${esc(w.id)}', this.value)">${fmtOptions}</select>
-            <button class="btn btn-secondary btn-sm" onclick="toggleDeliveries(this, '${esc(w.id)}')">记录</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteWebhook('${esc(w.id)}')">删除</button>
-          </div>
+        <div class="wh-row-link">
+          <span class="wh-link" title="${esc(w.url)}&#10;双击全选复制" ondblclick="selectWhLink(this)">${esc(w.url)}</span>
+          <button class="btn btn-secondary btn-sm" onclick="testWebhook('${esc(w.id)}')">测试</button>
+          <button class="btn btn-secondary btn-sm" onclick="toggleDeliveries(this, '${esc(w.id)}')">记录</button>
         </div>
-        <div class="wh-card-meta">
-          <span class="wh-url" title="${esc(w.url)}">${esc(w.url)}</span>
-          <span class="wh-meta-item">ID <span class="mono">${esc(w.id)}</span></span>
-          <span class="wh-meta-item">${esc(w.events)}</span>
-          <span class="wh-meta-item">${fmtTime(w.created_at)}</span>
+        <div class="wh-row-mail">
+          <span class="wh-mail-label">监听邮箱</span>
+          <div class="webhook-targets">${targetChips}</div>
+        </div>
+        <div class="wh-actions">
+          <label class="switch" title="启用/停用该订阅">
+            <input type="checkbox" ${w.is_active ? 'checked' : ''} onchange="toggleWebhookActive('${esc(w.id)}', this.checked)">
+            <span class="track"></span>
+            <span class="wh-toggle-label">${w.is_active ? '启用' : '停用'}</span>
+          </label>
+          <select class="form-control btn-sm wh-fmt-select" title="推送格式" onchange="setWebhookFormat('${esc(w.id)}', this.value)">${fmtOptions}</select>
+          <span class="spacer"></span>
+          <button class="btn btn-outline btn-sm" onclick="editWebhook('${esc(w.id)}')">编辑</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteWebhook('${esc(w.id)}')">删除</button>
         </div>
         <div class="webhook-deliveries-wrap" data-loaded="0"></div>
       </div>`;
   }).join('');
 }
 
-async function createWebhook() {
+// 提交(创建或保存)。编辑模式(editingWebhookId 非空)走 PATCH 更新,否则 POST 新建。
+async function submitWebhook() {
   const tgt = getSelectedTargets();
   if (!tgt.length) { toast('请至少勾选一个监听邮箱', 'warning'); return; }
   // 每个邮箱的 scope 直接来自 data-scope, 不再 per-target 降级 (前端已禁止他人公开选 alias_all)
@@ -278,22 +285,100 @@ async function createWebhook() {
   if (document.getElementById('whEvNew').checked) events.push('new_mail');
   if (document.getElementById('whEvUnread').checked) events.push('unread');
   if (!events.length) { toast('请至少选择一个事件', 'warning'); return; }
+  const url = document.getElementById('whUrl').value.trim();
+  if (!url) { toast('请填写回调 URL', 'warning'); return; }
   const body = {
     targets: tgt.map(t => ({ mail_account_id: t.mail_account_id, scope: t.scope })),
-    url: document.getElementById('whUrl').value.trim(),
+    url,
     format: document.getElementById('whFormat').value,
     events: events.join(','),
-    secret: document.getElementById('whSecret').value.trim() || undefined,
   };
-  if (!body.url) { toast('请填写回调 URL', 'warning'); return; }
+  // secret: 编辑回填时用 '***' 占位(后端不返回真实 secret),值仍是 '***' 说明未修改 → 不提交该字段(保留原值)
+  const secretRaw = document.getElementById('whSecret').value.trim();
+  if (secretRaw !== '***') body.secret = secretRaw; // 空串 → 后端转为 null(清空)
   try {
-    await api('/api/webhooks', { method: 'POST', body });
-    toast('订阅创建成功', 'success');
-    ['whUrl', 'whSecret'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-    // 保留勾选,只清 URL/Secret
+    if (editingWebhookId) {
+      await api('/api/webhooks/' + editingWebhookId, { method: 'PATCH', body });
+      toast('订阅已保存', 'success');
+    } else {
+      await api('/api/webhooks', { method: 'POST', body });
+      toast('订阅创建成功', 'success');
+    }
+    resetWhForm();
     updateWhHint();
     loadWebhooks();
   } catch (err) { toast(err.message, 'error', 4200); }
+}
+
+// 编辑: 把该订阅信息回填到左侧表单,按钮变「保存订阅」
+function editWebhook(id) {
+  const w = webhookListCache.find(x => x.id === id);
+  if (!w) { toast('未找到该订阅', 'error'); return; }
+  editingWebhookId = id;
+  // 回填 URL / 格式 / 事件 / secret
+  document.getElementById('whUrl').value = w.url || '';
+  document.getElementById('whFormat').value = w.format || 'card';
+  document.getElementById('whEvNew').checked = String(w.events || '').includes('new_mail');
+  document.getElementById('whEvUnread').checked = String(w.events || '').includes('unread');
+  document.getElementById('whSecret').value = w.secret ? '***' : '';
+  // 回填监听邮箱: 勾选对应 checkbox + 设置每个邮箱的 scope
+  const box = document.getElementById('whAccountList');
+  if (box) {
+    box.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = false; });
+    for (const t of (w.targets || [])) {
+      const cb = box.querySelector(`input[type=checkbox][value="${cssEscape(t.mail_account_id)}"]`);
+      if (!cb) continue;
+      cb.checked = true;
+      const scope = t.scope === 'account' ? 'account' : 'alias_all';
+      cb.setAttribute('data-scope', scope);
+      const sel = cb.parentElement.querySelector('.item-scope');
+      if (sel && !sel.disabled) sel.value = scope;
+    }
+  }
+  updateWhHint();
+  // 切换按钮状态 + 高亮正在编辑的卡片
+  const submitBtn = document.getElementById('whSubmitBtn');
+  if (submitBtn) submitBtn.textContent = '保存订阅';
+  const cancelBtn = document.getElementById('whCancelEditBtn');
+  if (cancelBtn) cancelBtn.style.display = 'inline-block';
+  document.querySelectorAll('.wh-card').forEach(c => c.classList.remove('editing'));
+  const card = document.querySelector(`.wh-card[data-webhook-id="${cssEscape(id)}"]`);
+  if (card) card.classList.add('editing');
+  // 滚动到表单顶部
+  const formCard = submitBtn && submitBtn.closest('.card');
+  if (formCard && formCard.scrollIntoView) formCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  toast('已回填订阅信息,修改后点「保存订阅」', 'info');
+}
+
+// 取消编辑: 清空表单,按钮恢复「创建订阅」
+function cancelEditWebhook() {
+  resetWhForm();
+  const box = document.getElementById('whAccountList');
+  if (box) box.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = false; });
+  document.getElementById('whEvNew').checked = true;
+  document.getElementById('whEvUnread').checked = false;
+  document.getElementById('whFormat').value = 'card';
+  document.querySelectorAll('.wh-card').forEach(c => c.classList.remove('editing'));
+  updateWhHint();
+  toast('已取消编辑', 'info');
+}
+
+// 恢复表单到「创建订阅」默认态
+function resetWhForm() {
+  editingWebhookId = null;
+  ['whUrl', 'whSecret'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  const submitBtn = document.getElementById('whSubmitBtn');
+  if (submitBtn) submitBtn.textContent = '创建订阅';
+  const cancelBtn = document.getElementById('whCancelEditBtn');
+  if (cancelBtn) cancelBtn.style.display = 'none';
+}
+
+// 双击链接全选,方便完整复制超长 URL
+function selectWhLink(el) {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  const sel = window.getSelection();
+  if (sel) { sel.removeAllRanges(); sel.addRange(range); }
 }
 
 async function testWebhook(id) {
@@ -312,7 +397,7 @@ async function testWebhook(id) {
           renderDeliveries(wrap, d.deliveries || []);
           wrap.dataset.loaded = '1';
           const btn = card.querySelector('button[onclick^="toggleDeliveries"]');
-          if (btn) btn.textContent = '收起投递记录';
+          if (btn) btn.textContent = '收起';
         } catch { /* 忽略 */ }
       }
     }
@@ -342,7 +427,7 @@ async function toggleDeliveries(btnEl, id) {
   if (wrap.dataset.loaded === '1') {
     wrap.innerHTML = '';
     wrap.dataset.loaded = '0';
-    btnEl.textContent = '查看投递记录';
+    btnEl.textContent = '记录';
     return;
   }
   btnEl.textContent = '加载中…';
@@ -351,9 +436,9 @@ async function toggleDeliveries(btnEl, id) {
     const list = data.deliveries || [];
     renderDeliveries(wrap, list);
     wrap.dataset.loaded = '1';
-    btnEl.textContent = '收起投递记录';
+    btnEl.textContent = '收起';
   } catch (err) {
-    btnEl.textContent = '查看投递记录';
+    btnEl.textContent = '记录';
     toast(err.message, 'error');
   }
 }

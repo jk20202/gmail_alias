@@ -54,7 +54,10 @@
         <label class="form-label">签名密钥 Secret (可选)</label>
         <input type="text" id="whSecret" class="form-control" placeholder="填写后推送将携带 X-Webhook-Signature 签名（JSON 格式）">
       </div>
-      <button class="btn" onclick="createWebhook()">创建订阅</button>
+      <div class="wh-submit-row">
+        <button class="btn" id="whSubmitBtn" onclick="submitWebhook()">创建订阅</button>
+        <button class="btn btn-secondary" id="whCancelEditBtn" onclick="cancelEditWebhook()" style="display:none">取消编辑</button>
+      </div>
     </div>
   </div>
   <div class="card">
@@ -102,11 +105,11 @@
     .checkbox-list label.item .item-scope { width: 90px; font-size: 11px; }
   }
 
-  /* 已订阅列表的目标邮箱 */
+  /* 已订阅列表的目标邮箱 —— 每个邮箱一个独立小板块 */
   .webhook-targets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-  .webhook-targets .chip { padding: 3px 8px; border-radius: 10px; background: rgba(99,102,241,.10); color: var(--text-1, inherit); font-size: 12px; }
-  .webhook-targets .chip.own { background: rgba(16,185,129,.12); }
-  .webhook-targets .chip.other { background: rgba(245,158,11,.14); }
+  .webhook-targets .chip { padding: 4px 10px; border-radius: 6px; background: rgba(99,102,241,.08); border: 1px solid rgba(99,102,241,.20); color: var(--text-1, inherit); font-size: 12px; }
+  .webhook-targets .chip.own { background: rgba(16,185,129,.10); border-color: rgba(16,185,129,.25); }
+  .webhook-targets .chip.other { background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.28); }
   .webhook-targets .chip .chip-scope { opacity: .75; margin-left: 4px; font-size: 11px; }
   .webhook-deliveries { margin-top: 10px; padding: 8px 10px; border-radius: 6px; background: rgba(127,127,127,.06); }
   .webhook-deliveries summary { cursor: pointer; font-size: 13px; padding: 2px 0; user-select: none; }
@@ -114,21 +117,30 @@
   .webhook-deliveries .row { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; font-size: 12px; border-bottom: 1px dashed rgba(127,127,127,.2); }
   .webhook-deliveries .row:last-child { border-bottom: 0; }
 
-  /* ===== 紧凑订阅列表 (2026-09-05) ===== */
+  /* ===== 订阅卡片三行布局 (2026-09-05 v2) ===== */
   .wh-count { font-size: 11px; font-weight: 600; line-height: 1; background: var(--primary, #6366f1); color: #fff; border-radius: 10px; padding: 3px 8px; }
-  #whList { display: flex; flex-direction: column; gap: 8px; }
-  .wh-card { border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); background: var(--bg-1, #fff); padding: 10px 12px; transition: box-shadow .15s; }
+  .wh-submit-row { display: flex; align-items: center; gap: 10px; }
+  #whList { display: flex; flex-direction: column; gap: 10px; }
+  .wh-card { border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); background: var(--bg-1, #fff); padding: 12px 14px; transition: box-shadow .15s, border-color .15s; }
   .wh-card:hover { box-shadow: var(--shadow-sm); }
-  .wh-card-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .wh-card .webhook-targets { margin-top: 0; flex: 1; min-width: 160px; }
-  .wh-card-actions { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-left: auto; }
-  .wh-card-actions .btn-sm { padding: 3px 8px; font-size: 12px; }
-  .wh-fmt-select { width: auto; min-width: 78px; padding: 3px 4px; font-size: 12px; height: auto; }
-  .wh-card-meta { display: flex; align-items: center; gap: 12px; margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--border); font-size: 11px; color: var(--text-muted, #888); flex-wrap: wrap; }
-  .wh-card-meta .wh-url { flex: 1; min-width: 0; word-break: break-all; font-family: monospace; color: var(--text-light, #555); }
-  .wh-card-meta .wh-meta-item { white-space: nowrap; }
-  .wh-card .webhook-deliveries { margin-top: 8px; }
-  @media (max-width: 520px) {
-    .wh-card-actions { width: 100%; margin-left: 0; }
-  }
+  .wh-card.editing { border-color: var(--primary, #6366f1); box-shadow: 0 0 0 3px rgba(99,102,241,.10); }
+
+  /* 第一行: webhook 链接(超长省略,双击全选复制) + 测试/记录小按钮 */
+  .wh-row-link { display: flex; align-items: center; gap: 8px; }
+  .wh-link { flex: 1; min-width: 0; font-family: monospace; font-size: 12.5px; color: var(--text-1, inherit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: text; cursor: text; padding: 2px 0; }
+  .wh-link:hover { color: var(--primary, #6366f1); }
+  .wh-row-link .btn-sm { padding: 3px 8px; font-size: 12px; }
+
+  /* 第二行: 监听主邮箱,每个邮箱一个独立小板块 */
+  .wh-row-mail { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
+  .wh-row-mail .wh-mail-label { font-size: 12px; color: var(--text-muted, #888); margin-right: 2px; }
+  .wh-card .webhook-targets { margin-top: 0; }
+
+  /* 第三行: 启用开关 + 推送格式 + 编辑 + 删除 */
+  .wh-actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+  .wh-actions .switch { font-size: 12.5px; color: var(--text-light, #555); }
+  .wh-actions .wh-toggle-label { min-width: 34px; }
+  .wh-fmt-select { width: auto; min-width: 96px; padding: 4px 6px; font-size: 12.5px; }
+  .wh-actions .spacer { flex: 1; }
+  .wh-card .webhook-deliveries { margin-top: 10px; }
 </style>
