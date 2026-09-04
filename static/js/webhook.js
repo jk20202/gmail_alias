@@ -224,9 +224,11 @@ async function loadWebhooks(silent) {
 
 function renderWebhooks(list) {
   const box = document.getElementById('whList');
+  const countEl = document.getElementById('whCount');
+  if (countEl) countEl.textContent = String((list || []).length);
   if (!box) return;
   if (!list || !list.length) {
-    box.innerHTML = '<div class="mail-empty">暂无订阅</div>';
+    box.innerHTML = '<div class="mail-empty" style="padding:24px 16px">暂无订阅</div>';
     return;
   }
   box.innerHTML = list.map(w => {
@@ -240,41 +242,30 @@ function renderWebhooks(list) {
           const scopeText = WH_SCOPE_LABEL[t.scope] || t.scope;
           return `<span class="chip ${cls}" title="${esc(scopeText)}">${esc(t.mail_account_email || t.mail_account_id)}<span class="chip-scope">· ${esc(scopeText)}</span></span>`;
         }).join('')
-      : '<span class="chip" style="opacity:.6">（未配置 target,旧数据兼容中）</span>';
+      : '<span class="chip" style="opacity:.6">（未配置 target）</span>';
     const hasOther = targets.some(t => !t.is_own);
-    const wholeCount = targets.filter(t => t.scope === 'alias_all').length;
-    const aliasOnlyCount = targets.filter(t => t.scope === 'account').length;
     return `
-      <div class="mail-item" style="margin-bottom:10px" data-webhook-id="${esc(w.id)}">
-        <div class="mail-head" style="cursor:default; flex-wrap:wrap">
+      <div class="wh-card" data-webhook-id="${esc(w.id)}">
+        <div class="wh-card-top">
           <span class="badge ${w.is_active ? 'badge-success' : 'badge-gray'}">${w.is_active ? '启用' : '停用'}</span>
           <span class="badge badge-primary">${WH_FORMAT_LABEL[fmt] || fmt}</span>
-          <span class="mono" style="font-size:12px; flex:1; min-width:0; word-break:break-all">${esc(w.url)}</span>
           ${hasOther ? '<span class="badge badge-warning" title="此订阅包含他人公开邮箱">含他人</span>' : ''}
-          ${wholeCount > 0 ? `<span class="badge badge-info">${wholeCount} 个整个邮箱</span>` : ''}
-          ${aliasOnlyCount > 0 ? `<span class="badge" style="background:var(--bg-2, #f1f5f9);color:var(--text-light)">${aliasOnlyCount} 个别名邮箱</span>` : ''}
-        </div>
-        <div class="mail-body" style="display:block; border-top:1px solid var(--border)">
-          <div class="meta-row">
-            <span>事件: ${esc(w.events)}</span>
-            <span>创建: ${fmtTime(w.created_at)}</span>
-            <span>ID: <span class="mono">${esc(w.id)}</span></span>
-          </div>
-          <div style="margin-top:6px">
-            <div style="font-size:12px; color:var(--text-muted, #888); margin-bottom:4px">监听邮箱 (${targets.length}):</div>
-            <div class="webhook-targets">${targetChips}</div>
-          </div>
-          <div class="actions" style="margin-top:10px; flex-wrap:wrap; gap:6px">
-            <button class="btn btn-secondary btn-sm" onclick="testWebhook('${esc(w.id)}')">测试推送</button>
+          <div class="webhook-targets">${targetChips}</div>
+          <div class="wh-card-actions">
+            <button class="btn btn-secondary btn-sm" onclick="testWebhook('${esc(w.id)}')">测试</button>
             <button class="btn btn-secondary btn-sm" onclick="toggleWebhookActive('${esc(w.id)}', ${!w.is_active})">${w.is_active ? '停用' : '启用'}</button>
-            <select class="form-control btn-sm" style="display:inline-block; width:auto; min-width:90px; padding:4px 6px" onchange="setWebhookFormat('${esc(w.id)}', this.value)">
-              ${fmtOptions}
-            </select>
-            <button class="btn btn-secondary btn-sm" onclick="toggleDeliveries(this, '${esc(w.id)}')">查看投递记录</button>
+            <select class="form-control btn-sm wh-fmt-select" onchange="setWebhookFormat('${esc(w.id)}', this.value)">${fmtOptions}</select>
+            <button class="btn btn-secondary btn-sm" onclick="toggleDeliveries(this, '${esc(w.id)}')">记录</button>
             <button class="btn btn-danger btn-sm" onclick="deleteWebhook('${esc(w.id)}')">删除</button>
           </div>
-          <div class="webhook-deliveries-wrap" data-loaded="0"></div>
         </div>
+        <div class="wh-card-meta">
+          <span class="wh-url" title="${esc(w.url)}">${esc(w.url)}</span>
+          <span class="wh-meta-item">ID <span class="mono">${esc(w.id)}</span></span>
+          <span class="wh-meta-item">${esc(w.events)}</span>
+          <span class="wh-meta-item">${fmtTime(w.created_at)}</span>
+        </div>
+        <div class="webhook-deliveries-wrap" data-loaded="0"></div>
       </div>`;
   }).join('');
 }
@@ -313,7 +304,7 @@ async function testWebhook(id) {
       toast(`测试推送成功${data.status ? ' (HTTP ' + data.status + ')' : ''}:${data.hint || ''}`, 'success', 4200);
     } else {
       toast(`推送失败${data.status ? ' (HTTP ' + data.status + ')' : ''}:${detail || (data.hint || '')}`, 'error', 6500);
-      const card = document.querySelector(`.mail-item[data-webhook-id="${id}"]`);
+      const card = document.querySelector(`.wh-card[data-webhook-id="${id}"]`);
       const wrap = card && card.querySelector('.webhook-deliveries-wrap');
       if (wrap) {
         try {
@@ -344,7 +335,7 @@ async function setWebhookFormat(id, format) {
 }
 
 async function toggleDeliveries(btnEl, id) {
-  const card = btnEl.closest('.mail-item');
+  const card = btnEl.closest('.wh-card');
   if (!card) return;
   const wrap = card.querySelector('.webhook-deliveries-wrap');
   if (!wrap) return;
